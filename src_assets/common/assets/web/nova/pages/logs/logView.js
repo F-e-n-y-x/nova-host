@@ -150,3 +150,41 @@ export function logFileName(now = new Date()) {
     `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
   return `nova-host-log-${stamp}.log`
 }
+
+const GROUP_IDS = LEVEL_GROUPS.map((g) => g.id)
+
+/**
+ * Log filters from the page URL query (`?q=text&levels=error,warning`; `levels=none` hides all).
+ *
+ * @param {Record<string, string|string[]>} query Route query.
+ * @returns {{query: string, groups: Set<string>}} Filters; missing params mean "no filter".
+ */
+export function readFilters(query = {}) {
+  const first = (v) => (Array.isArray(v) ? v[0] : v)
+  const text = typeof first(query.q) === 'string' ? first(query.q) : ''
+  const levels = first(query.levels)
+  let groups = new Set(GROUP_IDS)
+  if (levels === 'none') groups = new Set()
+  else if (typeof levels === 'string' && levels) {
+    const picked = levels.split(',').filter((id) => GROUP_IDS.includes(id))
+    if (picked.length) groups = new Set(picked)
+  }
+  return { query: text, groups }
+}
+
+/**
+ * Route query with the log filters written in, leaving other params untouched.
+ *
+ * @param {Record<string, any>} current Current route query.
+ * @param {{query: string, groups: Set<string>}} filters Filters to write.
+ * @returns {Record<string, any>} New route query.
+ */
+export function writeFilters(current, { query, groups }) {
+  const next = { ...current }
+  delete next.q
+  delete next.levels
+  if (query.trim()) next.q = query
+  if (groups.size === 0) next.levels = 'none'
+  else if (groups.size < GROUP_IDS.length) next.levels = GROUP_IDS.filter((id) => groups.has(id)).join(',')
+  return next
+}

@@ -6,7 +6,7 @@
  * Props: rows (from useLogView), hiddenCount, totalCount, pageSize, filterKey, selected.
  * Emits: show-older, latest (reader jumped back to the newest entries).
  */
-import { nextTick, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDownToLine } from '@lucide/vue'
 import NvButton from '../../components/NvButton.vue'
@@ -22,6 +22,7 @@ const props = defineProps({
 const emit = defineEmits(['show-older', 'latest'])
 
 const { t } = useI18n()
+const olderCount = computed(() => Math.min(props.hiddenCount, props.pageSize))
 const scroller = useTemplateRef('scroller')
 const atBottom = shallowRef(true)
 let keepFromBottom = null
@@ -83,7 +84,7 @@ onMounted(scrollToBottom)
       <div v-if="hiddenCount > 0" class="nv-log__older">
         <span class="nv-secondary">{{ t('nova.logs.showing', { shown: rows.length, total: totalCount }) }}</span>
         <NvButton size="sm" variant="secondary" @click="showOlder">
-          {{ t('nova.logs.show_older', { count: Math.min(hiddenCount, pageSize) }) }}
+          {{ t('nova.logs.show_older', { count: olderCount }, olderCount) }}
         </NvButton>
       </div>
       <ol class="nv-log__list">
@@ -152,6 +153,7 @@ onMounted(scrollToBottom)
   .nv-log__time {
     color: var(--nv-text-muted);
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
 
   .nv-log__level {

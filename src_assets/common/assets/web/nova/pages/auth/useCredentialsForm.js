@@ -3,7 +3,7 @@
  * inline validation that appears after a field is left or the form is submitted, and
  * submission to /api/password.
  */
-import { computed, reactive, shallowRef } from 'vue'
+import { computed, nextTick, reactive, shallowRef } from 'vue'
 import { apiFetch } from '../../../fetch_utils'
 
 /** Minimum length for a new web UI password. */
@@ -54,9 +54,10 @@ async function responseError(response) {
  * @param {boolean} options.usernameRequired Require the (new) username.
  * @param {(values: object) => object} options.toBody Build the /api/password body.
  * @param {() => void} [options.onSaved] Called after a successful save (default: reload later).
+ * @param {() => HTMLElement|null} [options.root] The form element, to focus the first invalid field.
  * @returns {object} values, errors, touch(), submit(), saving, saved, serverError.
  */
-export function useCredentialsForm({ usernameRequired, toBody, onSaved }) {
+export function useCredentialsForm({ usernameRequired, toBody, onSaved, root = () => null }) {
   const values = reactive({ username: '', password: '', confirm: '', currentUsername: '', currentPassword: '' })
   const touched = reactive({ username: false, password: false, confirm: false })
   const submitted = shallowRef(false)
@@ -80,7 +81,11 @@ export function useCredentialsForm({ usernameRequired, toBody, onSaved }) {
   async function submit() {
     submitted.value = true
     serverError.value = ''
-    if (Object.keys(allErrors.value).length > 0) return false
+    if (Object.keys(allErrors.value).length > 0) {
+      await nextTick()
+      root()?.querySelector('[aria-invalid="true"]')?.focus()
+      return false
+    }
     saving.value = true
     try {
       const response = await apiFetch('./api/password', {

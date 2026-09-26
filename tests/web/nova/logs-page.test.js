@@ -5,7 +5,7 @@ import { nextTick, ref } from 'vue'
 import { mountNova } from './helpers.js'
 import {
   LEVEL_GROUPS, PAGE_SIZE, annotate, countByGroup, filterEntries, highlightParts, levelGroup, logFileName,
-  problemIndexes, stepProblem, toText, windowEntries,
+  problemIndexes, readFilters, stepProblem, toText, windowEntries, writeFilters,
 } from '../../../src_assets/common/assets/web/nova/pages/logs/logView.js'
 import { compareDriverVersions, parseDriverVersion } from '../../../src_assets/common/assets/web/nova/pages/logs/driverVersion.js'
 import { releaseState } from '../../../src_assets/common/assets/web/nova/pages/logs/useVirtualInput.js'
@@ -88,12 +88,23 @@ describe('logView helpers', () => {
   })
 })
 
+describe('URL filters', () => {
+  it('reads and writes q and levels, keeping other params', () => {
+    expect(readFilters({})).toEqual({ query: '', groups: new Set(['error', 'warning', 'info', 'debug']) })
+    expect(readFilters({ q: 'nvenc', levels: 'warning,bogus,error' })).toEqual({ query: 'nvenc', groups: new Set(['warning', 'error']) })
+    expect(readFilters({ levels: 'none' }).groups.size).toBe(0)
+    expect(writeFilters({ tab: 'x', q: 'old' }, { query: '', groups: new Set(['error', 'warning', 'info', 'debug']) })).toEqual({ tab: 'x' })
+    expect(writeFilters({}, { query: 'a', groups: new Set(['debug', 'error']) })).toEqual({ q: 'a', levels: 'error,debug' })
+    expect(writeFilters({}, { query: '', groups: new Set() })).toEqual({ levels: 'none' })
+  })
+})
+
 describe('useLogView', () => {
   it('derives rows, resets selection on filter change, and widens the window to reach old problems', async () => {
     const lines = [LOG.split('\n')[2]]
     for (let i = 0; i < PAGE_SIZE + 5; i++) lines.push(`[2026-09-27 03:10:00.000]: Info: line ${i}`)
     const text = ref(lines.join('\n'))
-    const view = useLogView(text)
+    const view = useLogView(text, { debounce: 0 })
     expect(view.windowed.value.hidden).toBe(6)
     expect(view.step('next')).toBe(0)
     expect(view.windowed.value.hidden).toBe(0)
@@ -105,6 +116,18 @@ describe('useLogView', () => {
     view.clearFilters()
     await nextTick()
     expect(view.filtersActive.value).toBe(false)
+  })
+})
+
+describe('useLogView debounce', () => {
+  it('applies the text filter after the debounce', async () => {
+    vi.useFakeTimers()
+    const view = useLogView(ref(LOG), { debounce: 150 })
+    view.setQuery('codec')
+    expect(view.filtered.value).toHaveLength(5)
+    vi.advanceTimersByTime(150)
+    expect(view.filtered.value).toHaveLength(1)
+    vi.useRealTimers()
   })
 })
 
@@ -123,7 +146,7 @@ describe('LogToolbar', () => {
 
 describe('LogViewer', () => {
   it('renders entries as text, filters by level and query, and highlights matches', async () => {
-    const w = track(mountNova(LogViewer, { props: { load: async () => LOG } }))
+    const w = track(mountNova(LogViewer, { props: { load: async () => LOG, debounce: 0 } }))
     await flushPromises()
     const rows = () => w.findAll('.nv-log__row')
     expect(rows()).toHaveLength(5)
@@ -133,14 +156,16 @@ describe('LogViewer', () => {
     await w.get('input[type="search"]').setValue('codec')
     expect(rows()).toHaveLength(1)
     expect(w.get('mark').text()).toBe('codec')
-    expect(w.text()).toContain('1 entries')
+    expect(w.text()).toContain('1 entry')
+    await flushPromises()
+    expect(w.vm.$route.query).toEqual({ levels: 'error,warning,debug', q: 'codec' })
   })
 
   it('shows a retry alert when the log cannot load', async () => {
     const load = vi.fn().mockRejectedValueOnce(new Error('503 Service Unavailable')).mockResolvedValue(LOG)
-    const w = track(mountNova(LogViewer, { props: { load } }))
+    const w = track(mountNova(LogViewer, { props: { load, debounce: 0 } }))
     await flushPromises()
-    expect(w.text()).toContain("Couldn't load the log.")
+    expect(w.text()).toContain('Couldn’t load the log.')
     await w.findAll('button').find((b) => b.text() === 'Try again').trigger('click')
     await flushPromises()
     expect(w.findAll('.nv-log__row')).toHaveLength(5)
@@ -149,7 +174,7 @@ describe('LogViewer', () => {
   it('copies the entries that are shown', async () => {
     const writeText = vi.fn().mockResolvedValue()
     vi.stubGlobal('navigator', { clipboard: { writeText } })
-    const w = track(mountNova(LogViewer, { props: { load: async () => LOG } }))
+    const w = track(mountNova(LogViewer, { props: { load: async () => LOG, debounce: 0 } }))
     await flushPromises()
     await w.get('input[type="search"]').setValue('nvenc')
     await w.findAll('button').find((b) => b.text() === 'Copy').trigger('click')
@@ -178,7 +203,9 @@ describe('DiagnosticsPanel', () => {
     await w.findAll('button').find((b) => b.text() === 'Force close').trigger('click')
     await flushPromises()
     const dialog = document.querySelector('[role="dialog"]')
-    expect(dialog.textContent).toContain('Force close the running app')
+    expect(dialog.querySelector('h2').textContent).toBe('Force close the running app?')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(document.activeElement.textContent.trim()).toBe('Cancel')
     expect(fetch).not.toHaveBeenCalled()
     const confirm = [...dialog.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Force close')
     confirm.click()

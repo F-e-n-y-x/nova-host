@@ -2,7 +2,7 @@
 /**
  * Change the web UI username and password.
  */
-import { computed } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import NvPage from './nova/components/NvPage.vue'
 import NvCard from './nova/components/NvCard.vue'
@@ -13,7 +13,9 @@ import NewPasswordFields from './nova/pages/auth/NewPasswordFields.vue'
 import { GENERIC_ERROR, useCredentialsForm } from './nova/pages/auth/useCredentialsForm'
 
 const { t } = useI18n()
+const formEl = useTemplateRef('formEl')
 const form = useCredentialsForm({
+  root: () => formEl.value,
   usernameRequired: false,
   toBody: (v) => ({
     currentUsername: v.currentUsername.trim(),
@@ -37,21 +39,23 @@ const serverMessage = computed(() => (serverError.value === GENERIC_ERROR ? t('n
     <NvAlert v-if="saved" variant="success" live :title="t('nova.auth.saved')">
       <template #actions><NvButton variant="primary" size="sm" href="./">{{ t('nova.auth.continue') }}</NvButton></template>
     </NvAlert>
-    <form v-else class="nv-password" novalidate @submit.prevent="form.submit()">
-      <div class="nv-password__grid">
-        <NvCard :title="t('nova.auth.current')">
+    <form v-else ref="formEl" class="nv-password" novalidate @submit.prevent="form.submit()">
+      <NvCard>
+        <fieldset class="nv-password__set">
+          <legend class="nv-password__legend">{{ t('nova.auth.current') }}</legend>
           <NvTextField v-model="values.currentUsername" :label="t('nova.auth.current_username')" autocomplete="username" required />
           <NvTextField v-model="values.currentPassword" type="password" :label="t('nova.auth.current_password')"
                        autocomplete="current-password" required />
-        </NvCard>
-        <NvCard :title="t('nova.auth.new')">
+        </fieldset>
+        <fieldset class="nv-password__set">
+          <legend class="nv-password__legend">{{ t('nova.auth.new') }}</legend>
           <NvTextField v-model="values.username" :label="t('nova.auth.new_username')" :hint="t('nova.auth.new_username_hint')"
                        autocomplete="off" />
           <NewPasswordFields v-model:password="values.password" v-model:confirm="values.confirm"
                              :password-label="t('nova.auth.new_password')" :confirm-label="t('nova.auth.confirm_new_password')"
                              :password-error="passwordError" :confirm-error="confirmError" @touch="form.touch" />
-        </NvCard>
-      </div>
+        </fieldset>
+      </NvCard>
       <NvAlert v-if="serverError" variant="danger" live>{{ t('nova.auth.error', { error: serverMessage }) }}</NvAlert>
       <div>
         <NvButton type="submit" variant="primary" :loading="saving">{{ t('nova.auth.save') }}</NvButton>
@@ -66,20 +70,29 @@ const serverMessage = computed(() => (serverError.value === GENERIC_ERROR ? t('n
     display: flex;
     flex-direction: column;
     gap: var(--nv-space-5);
+    max-width: 560px;
   }
 
-  .nv-password__grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--nv-space-5);
-    align-items: start;
+  .nv-password__set {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-4);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
   }
 
-  @media (max-width: 899px) {
-    .nv-password__grid {
-      grid-template-columns: minmax(0, 1fr);
-      gap: var(--nv-space-4);
-    }
+  .nv-password__set + .nv-password__set {
+    padding-top: var(--nv-space-5);
+    border-top: 1px solid var(--nv-border);
+  }
+
+  .nv-password__legend {
+    padding: 0;
+    margin-bottom: var(--nv-space-3);
+    font-size: var(--nv-text-md);
+    font-weight: 600;
   }
 }
 </style>

@@ -36,7 +36,7 @@ const chipItems = computed(() => props.chips.map((chip) => ({
 const positionLabel = computed(() => {
   if (props.problemCount === 0) return t('nova.logs.no_problems')
   if (props.problemPosition > 0) return t('nova.logs.problem_position', { current: props.problemPosition, total: props.problemCount })
-  return t('nova.logs.problems', { count: props.problemCount })
+  return t('nova.logs.problems', { count: props.problemCount }, props.problemCount)
 })
 </script>
 
@@ -55,7 +55,7 @@ const positionLabel = computed(() => {
                    :placeholder="t('nova.logs.search_placeholder')" autocomplete="off" />
     </div>
     <div class="nv-logbar__tools">
-      <span class="nv-logbar__position nv-secondary" aria-live="polite">{{ positionLabel }}</span>
+      <span class="nv-logbar__position nv-secondary" role="status" aria-atomic="true">{{ positionLabel }}</span>
       <NvIconButton :label="t('nova.logs.prev_problem')" variant="secondary" :disabled="problemCount === 0" @click="$emit('prev')">
         <ChevronUp :size="18" aria-hidden="true" />
       </NvIconButton>
@@ -146,6 +146,7 @@ const positionLabel = computed(() => {
   }
 
   .nv-chip__count {
+    font-variant-numeric: tabular-nums;
     font-family: var(--nv-font-mono);
     font-size: var(--nv-text-xs);
     color: var(--nv-text-secondary);
