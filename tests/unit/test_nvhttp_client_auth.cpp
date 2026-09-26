@@ -264,6 +264,36 @@ TEST_F(ClientAuthorizationTest, UnknownClientsCannotBeUpdatedAndGetNoPermissions
   EXPECT_EQ(nvhttp::get_client_permissions(""), client_permissions::full);
 }
 
+TEST_F(ClientAuthorizationTest, PermissionsFollowTheConnectionNotTheLatestHandshake) {
+  using boost::asio::ip::make_address;
+  using boost::asio::ip::tcp;
+
+  const auto restricted = crypto::gen_creds("Sunshine Restricted Client", 2048);
+  const auto trusted = crypto::gen_creds("Sunshine Trusted Client", 2048);
+  const auto restricted_uuid = nvhttp::test_support::add_client("restricted", restricted.x509, true);
+  const auto trusted_uuid = nvhttp::test_support::add_client("trusted", trusted.x509, true);
+  ASSERT_TRUE(nvhttp::set_client_permissions(restricted_uuid, client_permissions::view_only));
+
+  const tcp::endpoint restricted_conn {make_address("192.168.1.20"), 50001};
+  const tcp::endpoint trusted_conn {make_address("192.168.1.30"), 50002};
+
+  // The restricted client connects first and keeps its connection open; the trusted
+  // client's later handshake must not change what the restricted connection may do.
+  nvhttp::remember_verified_peer(restricted_conn, restricted.x509, "restricted");
+  nvhttp::remember_verified_peer(trusted_conn, trusted.x509, "trusted");
+
+  EXPECT_EQ(nvhttp::verified_cert_for(restricted_conn), restricted.x509);
+  EXPECT_EQ(nvhttp::permissions_for_peer(restricted_conn), client_permissions::view_only);
+  EXPECT_EQ(nvhttp::permissions_for_peer(trusted_conn), client_permissions::full);
+}
+
+TEST_F(ClientAuthorizationTest, UnknownConnectionsGetNoPermissions) {
+  const boost::asio::ip::tcp::endpoint never_verified {boost::asio::ip::make_address("10.0.0.9"), 40000};
+
+  EXPECT_TRUE(nvhttp::verified_cert_for(never_verified).empty());
+  EXPECT_EQ(nvhttp::permissions_for_peer(never_verified), client_permissions::view_only);
+}
+
 TEST_F(ClientAuthorizationTest, DeviceNamesAreValidated) {
   EXPECT_TRUE(nvhttp::is_valid_client_name("Pixel 9 Pro"));
   EXPECT_TRUE(nvhttp::is_valid_client_name("Ноутбук"));
