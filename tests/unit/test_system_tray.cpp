@@ -116,60 +116,57 @@ namespace {
   #endif
 
   /**
-   * @brief Verify the persistent menu exposed by Sunshine.
+   * @brief Verify the persistent menu exposed by Nova.
    */
   void verify_menu() {
     const auto &tray_data = system_tray::tray_data_for_testing();
     ASSERT_NE(tray_data.menu, nullptr);
 
-    EXPECT_STREQ(tray_data.menu[0].text, "Open Sunshine");
+    EXPECT_STREQ(tray_data.menu[0].text, "Open Nova");
     EXPECT_NE(tray_data.menu[0].cb, nullptr);
-    EXPECT_STREQ(tray_data.menu[1].text, "-");
-    EXPECT_EQ(tray_data.menu[1].cb, nullptr);
+    EXPECT_STREQ(tray_data.menu[1].text, "Nova on GitHub");
+    EXPECT_NE(tray_data.menu[1].cb, nullptr);
+    EXPECT_STREQ(tray_data.menu[2].text, "-");
+    EXPECT_EQ(tray_data.menu[2].cb, nullptr);
 
   #ifdef _WIN32
-    EXPECT_STREQ(tray_data.menu[2].text, "Virtual HID Driver");
-    ASSERT_NE(tray_data.menu[2].submenu, nullptr);
-    EXPECT_STREQ(tray_data.menu[2].submenu[0].text, "Status: Checking");
-    EXPECT_EQ(tray_data.menu[2].submenu[0].disabled, 1);
-    EXPECT_STREQ(tray_data.menu[2].submenu[1].text, "-");
-    EXPECT_STREQ(tray_data.menu[2].submenu[2].text, "Get/Manage License");
-    EXPECT_NE(tray_data.menu[2].submenu[2].cb, nullptr);
-    EXPECT_STREQ(tray_data.menu[2].submenu[3].text, "Virtual HID Driver Benefits");
-    EXPECT_EQ(tray_data.menu[2].submenu[3].cb, nullptr);
-    verify_virtualhid_benefits_menu(tray_data.menu[2].submenu[3].submenu);
-    EXPECT_STREQ(tray_data.menu[2].submenu[4].text, "Download Virtual HID Driver");
-    EXPECT_NE(tray_data.menu[2].submenu[4].cb, nullptr);
-    EXPECT_EQ(tray_data.menu[2].submenu[5].text, nullptr);
-    EXPECT_STREQ(tray_data.menu[3].text, "-");
-    EXPECT_STREQ(tray_data.menu[4].text, "Donate");
-    ASSERT_NE(tray_data.menu[4].submenu, nullptr);
-    EXPECT_STREQ(tray_data.menu[4].submenu[0].text, "GitHub Sponsors");
-    EXPECT_STREQ(tray_data.menu[4].submenu[1].text, "Patreon");
-    EXPECT_STREQ(tray_data.menu[4].submenu[2].text, "PayPal");
-    EXPECT_EQ(tray_data.menu[4].submenu[3].text, nullptr);
-    EXPECT_STREQ(tray_data.menu[5].text, "-");
-    EXPECT_STREQ(tray_data.menu[6].text, "Reset Display Device Config");
-    EXPECT_NE(tray_data.menu[6].cb, nullptr);
-    EXPECT_STREQ(tray_data.menu[7].text, "Restart");
-    EXPECT_NE(tray_data.menu[7].cb, nullptr);
-    EXPECT_STREQ(tray_data.menu[8].text, "Quit");
-    EXPECT_NE(tray_data.menu[8].cb, nullptr);
-    EXPECT_EQ(tray_data.menu[9].text, nullptr);
+    constexpr int support = 5;
+    EXPECT_STREQ(tray_data.menu[3].text, "Virtual HID Driver");
+    ASSERT_NE(tray_data.menu[3].submenu, nullptr);
+    EXPECT_STREQ(tray_data.menu[3].submenu[0].text, "Status: Checking");
+    EXPECT_EQ(tray_data.menu[3].submenu[0].disabled, 1);
+    EXPECT_STREQ(tray_data.menu[3].submenu[1].text, "-");
+    EXPECT_STREQ(tray_data.menu[3].submenu[2].text, "Get/Manage License");
+    EXPECT_NE(tray_data.menu[3].submenu[2].cb, nullptr);
+    EXPECT_STREQ(tray_data.menu[3].submenu[3].text, "Virtual HID Driver Benefits");
+    EXPECT_EQ(tray_data.menu[3].submenu[3].cb, nullptr);
+    verify_virtualhid_benefits_menu(tray_data.menu[3].submenu[3].submenu);
+    EXPECT_STREQ(tray_data.menu[3].submenu[4].text, "Download Virtual HID Driver");
+    EXPECT_NE(tray_data.menu[3].submenu[4].cb, nullptr);
+    EXPECT_EQ(tray_data.menu[3].submenu[5].text, nullptr);
+    EXPECT_STREQ(tray_data.menu[4].text, "-");
   #else
-    EXPECT_STREQ(tray_data.menu[2].text, "Donate");
-    ASSERT_NE(tray_data.menu[2].submenu, nullptr);
-    EXPECT_STREQ(tray_data.menu[2].submenu[0].text, "GitHub Sponsors");
-    EXPECT_STREQ(tray_data.menu[2].submenu[1].text, "Patreon");
-    EXPECT_STREQ(tray_data.menu[2].submenu[2].text, "PayPal");
-    EXPECT_EQ(tray_data.menu[2].submenu[3].text, nullptr);
-    EXPECT_STREQ(tray_data.menu[3].text, "-");
-    EXPECT_STREQ(tray_data.menu[4].text, "Restart");
-    EXPECT_NE(tray_data.menu[4].cb, nullptr);
-    EXPECT_STREQ(tray_data.menu[5].text, "Quit");
-    EXPECT_NE(tray_data.menu[5].cb, nullptr);
-    EXPECT_EQ(tray_data.menu[6].text, nullptr);
+    constexpr int support = 3;
   #endif
+    EXPECT_STREQ(tray_data.menu[support].text, "Support Upstream (LizardByte)");
+    ASSERT_NE(tray_data.menu[support].submenu, nullptr);
+    EXPECT_STREQ(tray_data.menu[support].submenu[0].text, "GitHub Sponsors");
+    EXPECT_STREQ(tray_data.menu[support].submenu[1].text, "Patreon");
+    EXPECT_STREQ(tray_data.menu[support].submenu[2].text, "PayPal");
+    EXPECT_EQ(tray_data.menu[support].submenu[3].text, nullptr);
+    EXPECT_STREQ(tray_data.menu[support + 1].text, "-");
+  #ifdef _WIN32
+    constexpr int restart = support + 3;
+    EXPECT_STREQ(tray_data.menu[support + 2].text, "Reset Display Device Config");
+    EXPECT_NE(tray_data.menu[support + 2].cb, nullptr);
+  #else
+    constexpr int restart = support + 2;
+  #endif
+    EXPECT_STREQ(tray_data.menu[restart].text, "Restart");
+    EXPECT_NE(tray_data.menu[restart].cb, nullptr);
+    EXPECT_STREQ(tray_data.menu[restart + 1].text, "Quit");
+    EXPECT_NE(tray_data.menu[restart + 1].cb, nullptr);
+    EXPECT_EQ(tray_data.menu[restart + 2].text, nullptr);
   }
 
   /**
