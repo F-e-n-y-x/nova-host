@@ -1,4 +1,14 @@
 <script setup>
+/**
+ * Picker for one Windows virtual-key code ("0x10 (Shift)"). Codes typed into the config
+ * file by hand that are not in the list stay selectable as a custom entry.
+ *
+ * v-model: code string ("0x10").
+ * Props: label (accessible name).
+ */
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import NvSelect from '../nova/components/NvSelect.vue'
 import {
   getVirtualKeyCodeDescription,
   hasVirtualKeyCodeOption,
@@ -6,29 +16,28 @@ import {
   virtualKeyCodes,
 } from './virtual_key_codes.js'
 
+const model = defineModel({ type: String, required: true })
 defineProps({
-  id: {
-    type: String,
-    required: true,
-  },
+  label: { type: String, required: true },
 })
+const { t } = useI18n()
 
-const model = defineModel({
-  type: String,
-  required: true,
+const options = computed(() => {
+  const list = [{ value: '', label: t('config.keybindings_select'), disabled: true }]
+  if (model.value && !hasVirtualKeyCodeOption(model.value)) {
+    list.push({
+      value: model.value,
+      label: `${model.value} (${getVirtualKeyCodeDescription(model.value) ?? t('config.keybindings_custom')})`,
+    })
+  }
+  for (const keyCode of virtualKeyCodes) {
+    list.push({ value: keyCode.code, label: `${keyCode.code} (${keyCode.description})` })
+  }
+  return list
 })
+const error = computed(() => (isValidVirtualKeyCode(model.value) ? '' : t('config.keybindings_invalid')))
 </script>
 
 <template>
-  <select :id="id" class="form-select" :class="{ 'is-invalid': !isValidVirtualKeyCode(model) }"
-          v-model="model" required>
-    <option value="" disabled>{{ $t('config.keybindings_select') }}</option>
-    <option v-if="model && !hasVirtualKeyCodeOption(model)" :value="model">
-      {{ model }} ({{ getVirtualKeyCodeDescription(model) ?? $t('config.keybindings_custom') }})
-    </option>
-    <option v-for="keyCode in virtualKeyCodes" :key="keyCode.code" :value="keyCode.code">
-      {{ keyCode.code }} ({{ keyCode.description }})
-    </option>
-  </select>
-  <div class="invalid-feedback">{{ $t('config.keybindings_invalid') }}</div>
+  <NvSelect v-model="model" :label="label" hide-label :options="options" :error="error" />
 </template>
