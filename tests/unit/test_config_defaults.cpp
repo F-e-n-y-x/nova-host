@@ -24,9 +24,13 @@ TEST(ConfigDefaults, InputBoolsMatchDocumentedDefaults) {
   EXPECT_FALSE(config::input.key_rightalt_to_key_win);
 }
 
+TEST(ConfigDefaults, GamepadDriverIsUnsetByDefault) {
+  EXPECT_TRUE(config::input.gamepad_driver.empty());
+}
+
 TEST(ConfigDefaults, GamepadBoolsMatchDocumentedDefaults) {
   EXPECT_TRUE(config::input.ds4_back_as_touchpad_click);
   EXPECT_TRUE(config::input.motion_as_ds4);
   EXPECT_TRUE(config::input.touchpad_as_ds4);
-  EXPECT_TRUE(config::input.ds5_inputtino_randomize_mac);
+  EXPECT_TRUE(config::input.virtualhid_randomize_mac);
 }

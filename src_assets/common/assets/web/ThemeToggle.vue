@@ -2,7 +2,6 @@
 import { loadAutoTheme, setupThemeToggleListener } from './theme'
 import { onMounted } from 'vue'
 import {
-  Orbit,
   CloudMoon,
   CloudRain,
   Coffee,
@@ -61,10 +60,6 @@ onMounted(() => {
       <!-- Dark Themes -->
       <li class="theme-menu-group">
         <h6 class="dropdown-header">{{ $t('navbar.theme_group_dark') }}</h6>
-        <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="zenith" aria-pressed="false">
-          <Orbit :size="18" class="theme-icon icon"></Orbit>
-          {{ $t('navbar.theme_zenith') }}
-        </button>
         <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="dark" aria-pressed="false">
           <Moon :size="18" class="theme-icon icon"></Moon>
           {{ $t('navbar.theme_dark') }}
@@ -157,6 +152,3 @@ onMounted(() => {
     </ul>
   </div>
 </template>
-
-<style scoped>
-</style>

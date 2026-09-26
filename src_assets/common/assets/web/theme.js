@@ -2,20 +2,21 @@ const getStoredTheme = () => localStorage.getItem('theme')
 const setStoredTheme = theme => localStorage.setItem('theme', theme)
 
 export const getPreferredTheme = () => {
-    const storedTheme = getStoredTheme()
+    let storedTheme = getStoredTheme()
+    // 'zenith' was the default theme of older Zenith builds and no longer exists.
+    if (storedTheme === 'zenith') {
+        localStorage.removeItem('theme')
+        storedTheme = null
+    }
     if (storedTheme) {
         return storedTheme
     }
 
-    // Zenith defaults to its signature theme for every fresh install,
-    // regardless of system preference; users can still switch via the
-    // navbar theme menu (their choice is stored in localStorage).
-    return 'zenith'
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
 // Define which themes are dark (for Bootstrap compatibility)
 const darkThemes = new Set([
-    'zenith',
     'dark',
     'dracula',
     'ember',
