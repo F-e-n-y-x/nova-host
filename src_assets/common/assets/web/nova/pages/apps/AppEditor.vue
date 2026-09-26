@@ -1,14 +1,16 @@
 <script setup>
 /**
- * Add or edit an application. Saves through POST /api/apps and asks before
- * discarding unsaved edits (Esc, backdrop, Cancel and the close button all go through it).
+ * Add or edit an application in a side panel (full-screen sheet on small screens).
+ * Fields validate when they lose focus; Save focuses the first invalid field. Closing
+ * with unsaved edits asks first; the page's route guard uses askDiscard() the same way,
+ * so Back never drops edits silently.
  *
- * v-model:open — boolean.
- * Props: app (the app to edit, or null to add one), index (its position; -1 to add),
+ * Props: open, app (the app to edit, or null to add one), index (-1 to add),
  *        platform (host platform from /api/config).
- * Emits: saved after the host accepts the change.
+ * Emits: saved(name) after the host accepts the change, close when it should close.
+ * Exposes: isDirty (boolean), askDiscard(onDiscard).
  */
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Search } from '@lucide/vue'
 import NvDialog from '../../components/NvDialog.vue'
@@ -18,6 +20,7 @@ import NvNumberField from '../../components/NvNumberField.vue'
 import NvSwitch from '../../components/NvSwitch.vue'
 import NvSettingRow from '../../components/NvSettingRow.vue'
 import NvAlert from '../../components/NvAlert.vue'
+import AppSheet from './AppSheet.vue'
 import PathField from './PathField.vue'
 import PrepCommandList from './PrepCommandList.vue'
 import DetachedCommandList from './DetachedCommandList.vue'
@@ -27,28 +30,35 @@ import CoverFinderDialog from './CoverFinderDialog.vue'
 import { postJson } from '../../api'
 import { buildPayload, formFromApp, formsDiffer, newAppForm, validateForm } from './appForm'
 
-const open = defineModel('open', { type: Boolean, default: false })
 const props = defineProps({
+  open: { type: Boolean, default: false },
   app: { type: Object, default: null },
   index: { type: Number, default: -1 },
   platform: { type: String, default: '' },
 })
-const emit = defineEmits(['saved'])
+const emit = defineEmits(['saved', 'close'])
 const { t } = useI18n()
+
+/** Field ids, in form order, for focusing the first error. */
+const FIELD_IDS = { name: 'nv-app-name', exitTimeout: 'nv-app-exit-timeout' }
 
 const form = ref(newAppForm())
 const initial = shallowRef('')
-const errors = ref({})
+const touched = reactive(new Set())
+const submitted = shallowRef(false)
 const saveError = shallowRef('')
 const saving = shallowRef(false)
-const confirmDiscard = shallowRef(false)
+const discard = reactive({ open: false, then: null })
 const coversOpen = shallowRef(false)
 const browser = ref({ open: false, type: 'any', title: '', start: '', apply: null })
 
 const isWindows = computed(() => props.platform === 'windows')
 const isNew = computed(() => props.index === -1)
-const title = computed(() => (isNew.value ? t('nova.apps.add_title') : t('nova.apps.edit_title', { name: props.app?.name || '' })))
-const dirty = computed(() => formsDiffer(form.value, JSON.parse(initial.value || '{}')))
+const title = computed(() => (isNew.value ? t('nova.apps.add_title') : t('nova.apps.edit_title', { name: props.app?.name || t('nova.apps.unnamed') })))
+const isDirty = computed(() => formsDiffer(form.value, JSON.parse(initial.value || '{}')))
+const allErrors = computed(() => validateForm(form.value))
+const errors = computed(() => Object.fromEntries(Object.entries(allErrors.value)
+  .filter(([key]) => submitted.value || touched.has(key))))
 const coverPreview = computed(() => {
   if (isNew.value || !form.value['image-path']) return ''
   return form.value['image-path'] === props.app?.['image-path'] ? `./api/covers/${props.index}` : ''
@@ -59,28 +69,45 @@ const runGlobalPrep = computed({
   set: (v) => { form.value['exclude-global-prep-cmd'] = !v },
 })
 
-// Closing always passes through here, so edits are never lost silently.
-const dialogOpen = computed({
-  get: () => open.value,
-  set: (v) => {
-    if (v) return
-    if (dirty.value && !saving.value) confirmDiscard.value = true
-    else open.value = false
-  },
-})
-
-watch(open, (isOpen) => {
+watch(() => [props.open, props.app, props.index], ([isOpen]) => {
   if (!isOpen) return
   form.value = props.app ? formFromApp(props.app, props.index, props.platform) : newAppForm()
   initial.value = JSON.stringify(form.value)
-  errors.value = {}
+  touched.clear()
+  submitted.value = false
   saveError.value = ''
-  confirmDiscard.value = false
+  discard.open = false
 }, { immediate: true })
 
-function discard() {
-  confirmDiscard.value = false
-  open.value = false
+function onFocusOut(event) {
+  const key = Object.keys(FIELD_IDS).find((k) => FIELD_IDS[k] === event.target?.id)
+  if (key) touched.add(key)
+}
+
+/**
+ * Ask before throwing away edits; runs `onDiscard` right away when there are none.
+ *
+ * @param {() => void} onDiscard What to do once the user agrees.
+ */
+function askDiscard(onDiscard) {
+  if (!isDirty.value || saving.value) {
+    onDiscard()
+    return
+  }
+  discard.then = onDiscard
+  discard.open = true
+}
+
+function requestClose() {
+  askDiscard(() => emit('close'))
+}
+
+function confirmDiscard() {
+  const then = discard.then
+  discard.open = false
+  discard.then = null
+  initial.value = JSON.stringify(form.value)
+  then?.()
 }
 
 /**
@@ -112,32 +139,39 @@ function browseDetached(index) {
 }
 
 async function save() {
-  errors.value = validateForm(form.value)
-  if (Object.keys(errors.value).length) return
+  submitted.value = true
+  const invalid = Object.keys(FIELD_IDS).find((key) => allErrors.value[key])
+  if (invalid) {
+    await nextTick()
+    document.getElementById(FIELD_IDS[invalid])?.focus()
+    return
+  }
   saving.value = true
   saveError.value = ''
   try {
-    await postJson('./api/apps', buildPayload(form.value))
+    const payload = buildPayload(form.value)
+    await postJson('./api/apps', payload)
     initial.value = JSON.stringify(form.value)
-    open.value = false
-    emit('saved')
+    emit('saved', payload.name)
   } catch {
     saveError.value = t('nova.apps.save_failed')
   } finally {
     saving.value = false
   }
 }
+
+defineExpose({ isDirty, askDiscard })
 </script>
 
 <template>
-  <NvDialog v-model:open="dialogOpen" :title="title" size="lg">
-    <form id="nv-app-editor" class="nv-editor" novalidate @submit.prevent="save">
-      <NvAlert v-if="saveError" variant="danger" live>{{ saveError }}</NvAlert>
+  <AppSheet :open="open" :title="title" @close-request="requestClose">
+    <form id="nv-app-editor" class="nv-editor" novalidate @submit.prevent="save" @focusout="onFocusOut">
+      <NvAlert v-if="saveError" variant="danger" live :title="t('nova.apps.save_failed_title')">{{ saveError }}</NvAlert>
 
       <section class="nv-editor__section" aria-labelledby="nv-editor-basics">
         <h3 id="nv-editor-basics" class="nv-editor__heading">{{ t('nova.apps.section_basics') }}</h3>
         <NvTextField v-model="form.name" :label="t('nova.apps.field_name')" :hint="t('nova.apps.field_name_hint')"
-                     :error="errors.name ? t(errors.name) : ''" required />
+                     :error="errors.name ? t(errors.name) : ''" :id="FIELD_IDS.name" required />
         <PathField v-model="form.cmd" :label="t('nova.apps.field_command')" :hint="t('nova.apps.field_command_hint')"
                    @browse="browseField('cmd', 'executable', 'nova.apps.browse_program')" />
         <PathField v-model="form['working-dir']" :label="t('nova.apps.field_working_dir')" :hint="t('nova.apps.field_working_dir_hint')"
@@ -201,7 +235,7 @@ async function save() {
         </div>
         <NvNumberField v-model="form['exit-timeout']" :label="t('nova.apps.field_exit_timeout')" :unit="t('nova.apps.seconds')"
                        :min="0" :hint="t('nova.apps.field_exit_timeout_hint')"
-                       :error="errors.exitTimeout ? t(errors.exitTimeout) : ''" />
+                       :error="errors.exitTimeout ? t(errors.exitTimeout) : ''" :id="FIELD_IDS.exitTimeout" />
         <PathField v-model="form.output" :label="t('nova.apps.field_output')" :hint="t('nova.apps.field_output_hint')"
                    @browse="browseField('output', 'any', 'nova.apps.browse_file')" />
       </section>
@@ -210,15 +244,15 @@ async function save() {
     </form>
 
     <template #footer>
-      <NvButton @click="dialogOpen = false">{{ t('nova.common.cancel') }}</NvButton>
+      <NvButton @click="requestClose">{{ t('nova.common.cancel') }}</NvButton>
       <NvButton type="submit" form="nv-app-editor" variant="primary" :loading="saving">{{ t('nova.apps.save') }}</NvButton>
     </template>
-  </NvDialog>
+  </AppSheet>
 
-  <NvDialog v-model:open="confirmDiscard" :title="t('nova.apps.discard_title')" :description="t('nova.apps.discard_desc')">
+  <NvDialog v-model:open="discard.open" :title="t('nova.apps.discard_title')" :description="t('nova.apps.discard_desc')">
     <template #footer>
-      <NvButton @click="confirmDiscard = false">{{ t('nova.apps.keep_editing') }}</NvButton>
-      <NvButton variant="danger-solid" @click="discard">{{ t('nova.apps.discard') }}</NvButton>
+      <NvButton autofocus @click="discard.open = false">{{ t('nova.apps.keep_editing') }}</NvButton>
+      <NvButton variant="danger-solid" @click="confirmDiscard">{{ t('nova.apps.discard') }}</NvButton>
     </template>
   </NvDialog>
 
@@ -229,16 +263,10 @@ async function save() {
 
 <style>
 @layer components {
-  /* The form scrolls on its own so the dialog title and Save stay in view. */
   .nv-editor {
     display: flex;
     flex-direction: column;
     gap: var(--nv-space-6);
-    max-height: calc(100dvh - 200px);
-    overflow-y: auto;
-    padding: 2px var(--nv-space-3) 2px 2px;
-    margin: -2px calc(-1 * var(--nv-space-3)) -2px -2px;
-    overscroll-behavior: contain;
   }
 
   .nv-editor__section {

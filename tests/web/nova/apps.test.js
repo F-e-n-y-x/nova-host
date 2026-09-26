@@ -7,10 +7,12 @@ import {
   appFlags, buildPayload, formFromApp, formsDiffer, newAppForm, newPrepCmd, validateForm, visibleApps,
 } from '../../../src_assets/common/assets/web/nova/pages/apps/appForm.js'
 import { coverFromGame, searchBucket, searchCovers } from '../../../src_assets/common/assets/web/nova/pages/apps/covers.js'
-import AppEditorDialog from '../../../src_assets/common/assets/web/nova/pages/apps/AppEditorDialog.vue'
+import AppEditor from '../../../src_assets/common/assets/web/nova/pages/apps/AppEditor.vue'
 import AppItem from '../../../src_assets/common/assets/web/nova/pages/apps/AppItem.vue'
 import PrepCommandList from '../../../src_assets/common/assets/web/nova/pages/apps/PrepCommandList.vue'
 import DetachedCommandList from '../../../src_assets/common/assets/web/nova/pages/apps/DetachedCommandList.vue'
+import ActionMenu from '../../../src_assets/common/assets/web/nova/pages/apps/ActionMenu.vue'
+import { parseEdit } from '../../../src_assets/common/assets/web/nova/pages/apps/useAppsRoute.js'
 
 const wrappers = []
 function track(w) {
@@ -166,15 +168,50 @@ describe('command lists', () => {
 })
 
 describe('AppItem', () => {
-  it('names the delete button after the app and falls back to an initial', () => {
-    const w = track(mountNova(AppItem, { props: { app: { name: 'Desktop' }, coverUrl: '' } }))
-    expect(w.find('[aria-label="Delete Desktop"]').exists()).toBe(true)
+  it('opens the editor from the cover and keeps delete in the menu', async () => {
+    const w = track(mountNova(AppItem, { props: { app: { name: 'Desktop' }, index: 4, coverUrl: '', layout: 'list' } }))
     expect(w.find('.nv-app__initial').text()).toBe('D')
-    expect(w.find('.nv-app__open').attributes('aria-label')).toBe('Edit Desktop')
+    const open = w.find('#nv-app-4')
+    expect(open.attributes('aria-label')).toBe('Edit Desktop')
+    await open.trigger('click')
+    expect(w.emitted('edit')).toHaveLength(1)
+    const more = w.find('[aria-haspopup="menu"]')
+    expect(more.attributes('aria-label')).toBe('More actions for Desktop')
+    await more.trigger('click')
+    const items = w.findAll('[role="menuitem"]')
+    expect(items.map((i) => i.text())).toEqual(['Edit', 'Delete…'])
+    await items[1].trigger('click')
+    expect(w.emitted('delete')).toHaveLength(1)
   })
 })
 
-describe('AppEditorDialog', () => {
+describe('ActionMenu keyboard', () => {
+  it('moves with arrows and closes on Escape back to the button', async () => {
+    const w = track(mountNova(ActionMenu, { props: { label: 'More', items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] } }))
+    const button = w.find('button')
+    await button.trigger('keydown', { key: 'ArrowDown' })
+    await flushPromises()
+    const items = w.findAll('[role="menuitem"]')
+    expect(document.activeElement).toBe(items[0].element)
+    await w.find('[role="menu"]').trigger('keydown', { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(items[1].element)
+    await w.find('[role="menu"]').trigger('keydown', { key: 'Escape' })
+    expect(w.find('[role="menu"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(button.element)
+    expect(button.attributes('aria-expanded')).toBe('false')
+  })
+})
+
+describe('parseEdit', () => {
+  it('reads the editor from the URL', () => {
+    expect(parseEdit('new')).toBe(-1)
+    expect(parseEdit('3')).toBe(3)
+    expect(parseEdit('x')).toBeNull()
+    expect(parseEdit(undefined)).toBeNull()
+  })
+})
+
+describe('AppEditor', () => {
   let fetchMock
   beforeEach(() => {
     fetchMock = vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => ({ status: true }), clone() { return this } }))
@@ -182,53 +219,69 @@ describe('AppEditorDialog', () => {
   })
   afterEach(() => vi.unstubAllGlobals())
 
-  function dialog() {
-    return document.body.querySelector('[role="dialog"]')
-  }
+  const panel = () => document.body.querySelector('.nv-sheet [role="dialog"]')
 
-  it('shows an error instead of saving without a name', async () => {
-    track(mountNova(AppEditorDialog, { props: { open: true, app: null, index: -1, platform: 'linux' } }))
+  it('validates the name on blur and focuses it on save', async () => {
+    track(mountNova(AppEditor, { props: { open: true, app: null, index: -1, platform: 'linux' } }))
     await nextTick()
-    document.body.querySelector('button[form="nv-app-editor"]').click()
+    const name = document.getElementById('nv-app-name')
+    expect(panel().textContent).not.toContain('Enter a name')
+    name.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+    await nextTick()
+    expect(panel().textContent).toContain('Enter a name')
+    document.body.querySelector('button[form="nv-app-editor"]').focus()
+    document.getElementById('nv-app-editor').dispatchEvent(new Event('submit', { cancelable: true }))
     await flushPromises()
-    expect(dialog().textContent).toContain('Enter a name')
+    expect(document.activeElement).toBe(name)
+    expect(name.getAttribute('aria-invalid')).toBe('true')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('posts the payload to /api/apps and emits saved', async () => {
-    const w = track(mountNova(AppEditorDialog, { props: { open: true, app: STORED, index: 2, platform: 'linux' } }))
+  it('posts the payload to /api/apps and emits saved with the name', async () => {
+    const w = track(mountNova(AppEditor, { props: { open: true, app: STORED, index: 2, platform: 'linux' } }))
     await nextTick()
     document.getElementById('nv-app-editor').dispatchEvent(new Event('submit', { cancelable: true }))
     await flushPromises()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, options] = fetchMock.mock.calls[0]
     expect(url).toBe('./api/apps')
     expect(options.method).toBe('POST')
     const body = JSON.parse(options.body)
     expect(body.index).toBe(2)
-    expect(body.name).toBe('Steam Big Picture')
-    expect(w.emitted('saved')).toHaveLength(1)
+    expect(body['custom-key-from-another-fork']).toEqual({ keep: true })
+    expect(w.emitted('saved')).toEqual([['Steam Big Picture']])
   })
 
-  it('asks before discarding edits on Escape', async () => {
-    const w = track(mountNova(AppEditorDialog, { props: { open: true, app: null, index: -1, platform: 'linux' } }))
+  it('keeps the form and shows an error when the host rejects the save', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 400, statusText: 'Bad Request', json: async () => ({}), clone() { return this } })
+    const w = track(mountNova(AppEditor, { props: { open: true, app: STORED, index: 2, platform: 'linux' } }))
     await nextTick()
-    const name = document.body.querySelector('[role="dialog"] input')
+    document.getElementById('nv-app-editor').dispatchEvent(new Event('submit', { cancelable: true }))
+    await flushPromises()
+    expect(panel().textContent).toContain('Couldn’t save the application')
+    expect(w.emitted('saved')).toBeUndefined()
+    expect(document.getElementById('nv-app-name').value).toBe('Steam Big Picture')
+  })
+
+  it('asks before discarding edits on Escape, and Keep editing has focus', async () => {
+    const w = track(mountNova(AppEditor, { props: { open: true, app: null, index: -1, platform: 'linux' } }))
+    await nextTick()
+    const name = document.getElementById('nv-app-name')
     name.value = 'New game'
     name.dispatchEvent(new Event('input'))
     await nextTick()
-    document.body.querySelector('.nv-dialog').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await nextTick()
-    const titles = [...document.body.querySelectorAll('[role="dialog"] h2')].map((h) => h.textContent)
-    expect(titles).toContain('Discard your changes?')
-    expect(w.emitted('update:open')).toBeUndefined()
+    document.body.querySelector('.nv-sheet').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(document.body.textContent).toContain('Discard your changes?')
+    expect(document.activeElement?.textContent).toContain('Keep editing')
+    expect(w.emitted('close')).toBeUndefined()
+    expect(w.vm.isDirty).toBe(true)
   })
 
-  it('closes straight away on Escape when nothing changed', async () => {
-    const w = track(mountNova(AppEditorDialog, { props: { open: true, app: STORED, index: 0, platform: 'linux' } }))
+  it('closes straight away when nothing changed', async () => {
+    const w = track(mountNova(AppEditor, { props: { open: true, app: STORED, index: 0, platform: 'linux' } }))
     await nextTick()
-    document.body.querySelector('.nv-dialog').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    document.body.querySelector('.nv-sheet').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await nextTick()
-    expect(w.emitted('update:open').at(-1)).toEqual([false])
+    expect(w.emitted('close')).toHaveLength(1)
   })
 })
