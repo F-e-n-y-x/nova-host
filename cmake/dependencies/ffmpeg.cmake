@@ -52,7 +52,10 @@ if(NOT DEFINED FFMPEG_PREPARED_BINARIES)
     endif()
 
     # Set GitHub release URL
-    set(FFMPEG_GITHUB_REPO "jacksonpate/build-deps")
+    # The release tag comes from the build-deps submodule, so the repo must publish a release
+    # for that exact commit. A fork built with NVENC SDK 12 headers (driver 520+ instead of
+    # 570+) can be selected with -DFFMPEG_GITHUB_REPO=<owner>/build-deps.
+    set(FFMPEG_GITHUB_REPO "LizardByte/build-deps" CACHE STRING "GitHub repo providing prebuilt FFmpeg releases")
     if(FFMPEG_RELEASE_TAG)
         set(FFMPEG_RELEASE_URL "https://github.com/${FFMPEG_GITHUB_REPO}/releases/download/${FFMPEG_RELEASE_TAG}")
         set(FFMPEG_VERSION_DIR "${FFMPEG_DOWNLOAD_DIR}/ffmpeg-${FFMPEG_RELEASE_TAG}")

@@ -45,7 +45,7 @@ def test_a_too_old_nvidia_driver_does_not_get_the_session():
         _c("DP-6", "card0", "nvidia", VENDOR_NVIDIA),
         _c("DP-1", "card1", "amdgpu", VENDOR_AMD),
     ]
-    assert encoder_card(connectors, nv_version="470.10") == "card1"
+    assert encoder_card(connectors, nv_version="450.10") == "card1"
 
 
 def test_intel_igpu_alone_encodes_via_vaapi():
