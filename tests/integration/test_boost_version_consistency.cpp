@@ -119,7 +119,7 @@ TEST(BoostVersionConsistencyTest, SupportedBuildsInstallStaticSystemPackages) {
   EXPECT_NE(arch_package.find("'boost'"), std::string::npos);
   EXPECT_NE(arch_package.find("'boost-libs'"), std::string::npos);
 #ifdef SUNSHINE_COPR_SPEC_FIXTURE_AVAILABLE
-  EXPECT_NE(copr_spec.find("%if 0%{fedora} > 43"), std::string::npos);
+  EXPECT_NE(copr_spec.find("%if 0%{?fedora} > 43"), std::string::npos);
   EXPECT_NE(
     copr_spec.find(std::format("BuildRequires: boost-devel >= {}", minimum_version)),
     std::string::npos

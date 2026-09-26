@@ -99,6 +99,9 @@ if(NOT DEFINED FFMPEG_PREPARED_BINARIES)
             list(GET FFMPEG_DOWNLOAD_STATUS 1 FFMPEG_DOWNLOAD_STATUS_MESSAGE)
 
             if(NOT FFMPEG_DOWNLOAD_STATUS_CODE EQUAL 0)
+                # file(DOWNLOAD) leaves the error body behind; remove it or the next configure
+                # "uses the cached archive" and fails on extraction instead.
+                file(REMOVE "${FFMPEG_ARCHIVE_PATH}")
                 message(FATAL_ERROR "Failed to download FFmpeg binaries: ${FFMPEG_DOWNLOAD_STATUS_MESSAGE}")
             endif()
         else()
