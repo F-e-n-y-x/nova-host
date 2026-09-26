@@ -7,8 +7,13 @@ target_cmake_version="4.3.0"
 doxygen_min="1.10.0"
 _doxygen_min="${doxygen_min//\./_}"  # Convert dots to underscores for URL
 doxygen_max="1.12.0"
-default_cuda_version="13.1.1"
-default_cuda_build="590.48.01"
+# CUDA 13 dropped compute capability < 7.5 (Maxwell, Pascal, Volta), which breaks NVENC
+# (cudaErrorNoKernelImageForDevice) on GTX 900/1000 cards. 12.9 covers sm_50 through sm_121,
+# so only distros whose toolchain requires CUDA 13 override this below.
+default_cuda_version="12.9.1"
+default_cuda_build="575.57.08"
+cuda13_version="13.1.1"
+cuda13_build="590.48.01"
 
 # Default value for arguments
 appimage_build=0
@@ -370,7 +375,6 @@ function add_debian_based_deps() {
     "libxtst-dev"  # X11
     "libvulkan-dev"  # Vulkan
     "ninja-build"
-    "npm"  # web-ui
     "python3-jinja2"  # glad OpenGL/EGL loader generator
     "qt6-base-dev"
     "systemd"
@@ -387,6 +391,12 @@ function add_debian_based_deps() {
     )
   else
     dependencies+=("qt6-svg-dev")
+  fi
+
+  # web-ui; skip when npm already exists (e.g. NodeSource nodejs, which bundles npm and
+  # conflicts with the distro npm package)
+  if ! command -v npm > /dev/null 2>&1; then
+    dependencies+=("npm")
   fi
 
   if [[ "$skip_libva" == 0 ]]; then
@@ -515,6 +525,14 @@ function add_fedora_deps() {
 
 function install_cuda() {
   setup_cuda_system_package_environment
+
+  # A restored CI cache (or an old local build dir) may hold a different toolkit than the
+  # one selected for this distro; reusing it would silently build for the wrong GPUs.
+  local local_nvcc="${build_dir}/cuda/bin/nvcc"
+  if [[ -f "$local_nvcc" ]] && ! "$local_nvcc" --version | grep -q "release ${cuda_version%.*},"; then
+    echo "Toolkit in ${build_dir}/cuda is not CUDA ${cuda_version}; reinstalling"
+    rm -rf "${build_dir}/cuda"
+  fi
 
   # Check if CUDA is already available
   if [[ "$force_cuda_runfile" == 1 ]] && [[ -f "${build_dir}/cuda/bin/nvcc" ]]; then
@@ -890,6 +908,9 @@ case "${distro}:${version}" in
     package_update_command="${sudo_cmd} pacman -Syu --noconfirm"
     package_install_command="${sudo_cmd} pacman -Sy --needed"
     nvm_node=0
+    # gcc 15 needs CUDA 13 (12.9 rejects it)
+    cuda_version="$cuda13_version"
+    cuda_build="$cuda13_build"
     gcc_version="15"
     ;;
   "${DISTRO_DEBIAN}":12)
@@ -914,7 +935,9 @@ case "${distro}:${version}" in
     package_update_command="${sudo_cmd} dnf update -y"
     package_install_command="${sudo_cmd} dnf install -y"
     # F44 default gcc is 16 (too new for nvcc) and ships no gcc14 compat package;
-    # gcc15/gcc15-c++ exist and nvcc 13.1 accepts gcc 15.
+    # gcc15/gcc15-c++ exist and nvcc 13.1 accepts gcc 15, but CUDA 12.9 does not.
+    cuda_version="$cuda13_version"
+    cuda_build="$cuda13_build"
     gcc_version="15"
     # glibc 2.42 declares rsqrt/rsqrtf with noexcept(true); CUDA 13's headers don't.
     cuda_patches=1
@@ -923,8 +946,8 @@ case "${distro}:${version}" in
   "${DISTRO_FEDORA}":45)
     package_update_command="${sudo_cmd} dnf update -y"
     package_install_command="${sudo_cmd} dnf install -y"
-    cuda_version="13.1.1"
-    cuda_build="590.48.01"
+    cuda_version="$cuda13_version"
+    cuda_build="$cuda13_build"
     gcc_version="15"
     # glibc 2.42 declares rsqrt/rsqrtf with noexcept(true); CUDA 13's headers don't.
     cuda_patches=1
@@ -945,6 +968,8 @@ case "${distro}:${version}" in
   "${DISTRO_UBUNTU}":26.04)
     package_update_command="${sudo_cmd} apt-get update"
     package_install_command="${sudo_cmd} apt-get install -y"
+    cuda_version="$cuda13_version"
+    cuda_build="$cuda13_build"
     cuda_patches=1
     if [[ "$force_cuda_runfile" == 0 ]]; then
       cuda_system_package=1
@@ -958,6 +983,8 @@ case "${distro}:${version}" in
   "${DISTRO_UBUNTU}":26.10)
     package_update_command="${sudo_cmd} apt-get update"
     package_install_command="${sudo_cmd} apt-get install -y"
+    cuda_version="$cuda13_version"
+    cuda_build="$cuda13_build"
     if [[ "$force_cuda_runfile" == 0 ]]; then
       cuda_system_package=1
       if [[ -z "$cuda_system_package_name" ]]; then
@@ -982,6 +1009,14 @@ echo "Detected Architecture: $architecture"
 if [[ "$architecture" != "x86_64" ]] && [[ "$architecture" != "${AARCH64}" ]]; then
   echo "Unsupported Architecture"
   exit 1
+fi
+
+# glibc >= 2.41 declares cospi/sinpi (and 2.42 rsqrt) noexcept; CUDA 12 headers don't, so nvcc
+# fails with "exception specification is incompatible" unless math_functions.h is patched.
+glibc_version=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
+if [[ "${cuda_version%%.*}" == 12 ]] && [[ -n "$glibc_version" ]] && \
+   [[ "$(printf '%s\n' "2.41" "$glibc_version" | sort -V | head -n1)" == "2.41" ]]; then
+  cuda_patches=1
 fi
 
 # export variables for github actions ci

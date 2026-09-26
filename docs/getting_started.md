@@ -70,7 +70,9 @@ CUDA is used for NVFBC capture and direct GPU-memory NVENC encoding.
 
 > [!NOTE]
 > See [CUDA GPUS](https://developer.nvidia.com/cuda-gpus) to cross-reference Compute Capability to your GPU.
-> The table below applies to packages provided by LizardByte.
+> The table below applies to Zenith packages. They bundle CUDA, so you do not need to install it.
+> CUDA 13 no longer supports compute capability below 7.5 (GTX 900/1000 series, Volta), so on those GPUs use a
+> package built with CUDA 12.9.
 
 <table>
     <caption>CUDA Compatibility</caption>
@@ -81,22 +83,22 @@ CUDA is used for NVFBC capture and direct GPU-memory NVENC encoding.
         <th>Package</th>
     </tr>
     <tr>
-        <td rowspan="5">13.1.1</td>
-        <td rowspan="5">590.48.01</td>
-        <td rowspan="5">50;52;60;61;62;70;72;75;80;86;87;89;90;100;101;103;120;121</td>
-        <td>Sunshine_{version}_{arch}.AppImage</td>
+        <td rowspan="3">12.9.1</td>
+        <td rowspan="3">575.57.08</td>
+        <td rowspan="3">50;52;53;60;61;62;70;72;75;80;86;87;89;90;100;101;103;120;121</td>
+        <td>zenith-ubuntu-24.04-amd64.deb</td>
     </tr>
     <tr>
-        <td>sunshine_{version}-1+{distro}{distro-version}_{arch}.deb</td>
+        <td>zenith-debian-13-amd64.deb</td>
     </tr>
     <tr>
-        <td>sunshine_{arch}.flatpak</td>
+        <td>zenith-fedora-42-x86_64.rpm</td>
     </tr>
     <tr>
-        <td>Sunshine-{version}-1.{distro+version}.{arch}.rpm</td>
-    </tr>
-    <tr>
-        <td>sunshine.pkg.tar.zst</td>
+        <td>13.1.1</td>
+        <td>590.48.01</td>
+        <td>75;80;86;87;89;90;100;103;110;120;121</td>
+        <td>zenith-fedora-44-x86_64.rpm</td>
     </tr>
 </table>
 
