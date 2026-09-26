@@ -1,108 +1,85 @@
+<script setup>
+/**
+ * Change the web UI username and password.
+ */
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import NvPage from './nova/components/NvPage.vue'
+import NvCard from './nova/components/NvCard.vue'
+import NvTextField from './nova/components/NvTextField.vue'
+import NvButton from './nova/components/NvButton.vue'
+import NvAlert from './nova/components/NvAlert.vue'
+import NewPasswordFields from './nova/pages/auth/NewPasswordFields.vue'
+import { GENERIC_ERROR, useCredentialsForm } from './nova/pages/auth/useCredentialsForm'
+
+const { t } = useI18n()
+const form = useCredentialsForm({
+  usernameRequired: false,
+  toBody: (v) => ({
+    currentUsername: v.currentUsername.trim(),
+    currentPassword: v.currentPassword,
+    newUsername: v.username.trim(),
+    newPassword: v.password,
+    confirmNewPassword: v.confirm,
+  }),
+})
+const { values, errors, saving, saved, serverError } = form
+
+const fieldError = (field) => computed(() => (errors.value[field] ? t(errors.value[field].key, errors.value[field].params || {}) : ''))
+const passwordError = fieldError('password')
+const confirmError = fieldError('confirm')
+const serverMessage = computed(() => (serverError.value === GENERIC_ERROR ? t('nova.auth.server_error') : serverError.value))
+</script>
+
 <template>
-  <div id="content" class="container">
-    <div class="my-4">
-      <h1>{{ $t('password.password_change') }}</h1>
-      <p>{{ $t('password.password_change_desc') }}</p>
-    </div>
-    <form @submit.prevent="save">
-      <div class="card">
-        <div class="card-body">
-          <div class="row">
-            <div class="col-md-6">
-              <h4>{{ $t('password.current_creds') }}</h4>
-              <div class="mb-3">
-                <label for="currentUsername" class="form-label">{{ $t('_common.username') }}</label>
-                <input required type="text" class="form-control" id="currentUsername"
-                  v-model="passwordData.currentUsername" />
-              </div>
-              <div class="mb-3">
-                <label for="currentPassword" class="form-label">{{ $t('_common.password') }}</label>
-                <input autocomplete="current-password" type="password" class="form-control" id="currentPassword"
-                  v-model="passwordData.currentPassword" />
-              </div>
-            </div>
-            <div class="col-md-6">
-              <h4>{{ $t('password.new_creds') }}</h4>
-              <div class="mb-3">
-                <label for="newUsername" class="form-label">{{ $t('_common.username') }}</label>
-                <input type="text" class="form-control" id="newUsername" v-model="passwordData.newUsername" />
-                <div class="form-text">{{ $t('password.new_username_desc') }}</div>
-              </div>
-              <div class="mb-3">
-                <label for="newPassword" class="form-label">{{ $t('_common.password') }}</label>
-                <input autocomplete="new-password" required type="password" class="form-control" id="newPassword"
-                  v-model="passwordData.newPassword" />
-              </div>
-              <div class="mb-3">
-                <label for="confirmNewPassword" class="form-label">{{ $t('password.confirm_password') }}</label>
-                <input autocomplete="new-password" required type="password" class="form-control" id="confirmNewPassword"
-                  v-model="passwordData.confirmNewPassword" />
-              </div>
-            </div>
-          </div>
-        </div>
+  <NvPage :title="t('nova.auth.change_title')">
+    <template #subtitle><span>{{ t('nova.auth.change_intro') }}</span></template>
+    <NvAlert v-if="saved" variant="success" live :title="t('nova.auth.saved')">
+      <template #actions><NvButton variant="primary" size="sm" href="./">{{ t('nova.auth.continue') }}</NvButton></template>
+    </NvAlert>
+    <form v-else class="nv-password" novalidate @submit.prevent="form.submit()">
+      <div class="nv-password__grid">
+        <NvCard :title="t('nova.auth.current')">
+          <NvTextField v-model="values.currentUsername" :label="t('nova.auth.current_username')" autocomplete="username" required />
+          <NvTextField v-model="values.currentPassword" type="password" :label="t('nova.auth.current_password')"
+                       autocomplete="current-password" required />
+        </NvCard>
+        <NvCard :title="t('nova.auth.new')">
+          <NvTextField v-model="values.username" :label="t('nova.auth.new_username')" :hint="t('nova.auth.new_username_hint')"
+                       autocomplete="off" />
+          <NewPasswordFields v-model:password="values.password" v-model:confirm="values.confirm"
+                             :password-label="t('nova.auth.new_password')" :confirm-label="t('nova.auth.confirm_new_password')"
+                             :password-error="passwordError" :confirm-error="confirmError" @touch="form.touch" />
+        </NvCard>
       </div>
-      <div class="alert alert-danger my-3" v-if="error"><b>Error: </b>{{error}}</div>
-      <div class="alert alert-success my-3" v-if="success">
-        <b>{{ $t('_common.success') }}</b> {{ $t('password.success_msg') }}
-      </div>
-      <div class="mb-3 mt-4">
-        <button type="submit" class="btn btn-primary">
-          <save :size="18" class="icon"></save>
-          {{ $t('_common.save') }}
-        </button>
+      <NvAlert v-if="serverError" variant="danger" live>{{ t('nova.auth.error', { error: serverMessage }) }}</NvAlert>
+      <div>
+        <NvButton type="submit" variant="primary" :loading="saving">{{ t('nova.auth.save') }}</NvButton>
       </div>
     </form>
-  </div>
+  </NvPage>
 </template>
 
-<script>
-  import { apiFetch } from './fetch_utils'
-  import { Save } from '@lucide/vue'
-
-  export default {
-    components: {
-      Save,
-    },
-    data() {
-      return {
-        error: null,
-        success: false,
-        passwordData: {
-          currentUsername: "",
-          currentPassword: "",
-          newUsername: "",
-          newPassword: "",
-          confirmNewPassword: "",
-        },
-      };
-    },
-    methods: {
-      save() {
-        this.error = null;
-        apiFetch("./api/password", {
-          method: "POST",
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(this.passwordData),
-        }).then((r) => {
-          if (r.status === 200) {
-            r.json().then((rj) => {
-              this.success = rj.status;
-              if (this.success === true) {
-                setTimeout(() => {
-                  document.location.reload();
-                }, 5000);
-              } else {
-                this.error = rj.error;
-              }
-            });
-          } else {
-            this.error = "Internal Server Error";
-          }
-        });
-      },
-    },
+<style>
+@layer components {
+  .nv-password {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-5);
   }
-</script>
+
+  .nv-password__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--nv-space-5);
+    align-items: start;
+  }
+
+  @media (max-width: 899px) {
+    .nv-password__grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--nv-space-4);
+    }
+  }
+}
+</style>

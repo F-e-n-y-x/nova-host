@@ -1,103 +1,60 @@
+<script setup>
+/**
+ * First-run setup: create the web UI username and password.
+ */
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import NvTextField from './nova/components/NvTextField.vue'
+import NvButton from './nova/components/NvButton.vue'
+import NvAlert from './nova/components/NvAlert.vue'
+import AuthLayout from './nova/pages/auth/AuthLayout.vue'
+import NewPasswordFields from './nova/pages/auth/NewPasswordFields.vue'
+import { GENERIC_ERROR, useCredentialsForm } from './nova/pages/auth/useCredentialsForm'
+
+const { t } = useI18n()
+const form = useCredentialsForm({
+  usernameRequired: true,
+  toBody: (v) => ({ newUsername: v.username.trim(), newPassword: v.password, confirmNewPassword: v.confirm }),
+})
+const { values, errors, saving, saved, serverError } = form
+
+const fieldError = (field) => computed(() => (errors.value[field] ? t(errors.value[field].key, errors.value[field].params || {}) : ''))
+const usernameError = fieldError('username')
+const passwordError = fieldError('password')
+const confirmError = fieldError('confirm')
+const serverMessage = computed(() => (serverError.value === GENERIC_ERROR ? t('nova.auth.server_error') : serverError.value))
+</script>
+
 <template>
-  <Navbar-Simple></Navbar-Simple>
-  <Notification></Notification>
-  <main id="content" class="container" role="main">
-    <h1 class="my-4">{{ $t('welcome.greeting') }}</h1>
-    <p>{{ $t('welcome.create_creds') }}</p>
-    <div class="d-flex flex-column flex-md-row gap-4 align-items-stretch align-items-md-start">
-      <div class="card flex-md-fill">
-        <div class="card-body">
-          <div class="alert alert-warning">
-            {{ $t('welcome.create_creds_alert') }}
-          </div>
-          <form @submit.prevent="save">
-            <div class="mb-3">
-              <label for="usernameInput" class="form-label">{{ $t('_common.username') }}</label>
-              <input type="text" class="form-control" id="usernameInput" autocomplete="username"
-                v-model="passwordData.newUsername" />
-            </div>
-            <div class="mb-3">
-              <label for="passwordInput" class="form-label">{{ $t('_common.password') }}</label>
-              <input type="password" class="form-control" id="passwordInput" autocomplete="new-password"
-                v-model="passwordData.newPassword" required />
-            </div>
-            <div class="mb-3">
-              <label for="confirmPasswordInput" class="form-label">{{ $t('welcome.confirm_password') }}</label>
-              <input type="password" class="form-control" id="confirmPasswordInput" autocomplete="new-password"
-                v-model="passwordData.confirmNewPassword" required />
-            </div>
-            <button type="submit" class="btn btn-primary" v-bind:disabled="loading">
-              <log-in :size="18" class="icon"></log-in>
-              {{ $t('welcome.login') }}
-            </button>
-            <div class="alert alert-danger mt-3 mb-0" v-if="error"><b>{{ $t('_common.error') }}</b> {{error}}</div>
-            <div class="alert alert-success mt-3 mb-0" v-if="success">
-              <b>{{ $t('_common.success') }}</b> {{ $t('welcome.welcome_success') }}
-            </div>
-          </form>
-        </div>
-      </div>
-      <div class="flex-md-fill">
-        <Resource-Card></Resource-Card>
-      </div>
-    </div>
-  </main>
+  <AuthLayout :title="t('nova.auth.welcome_title')" :intro="t('nova.auth.welcome_intro')">
+    <NvAlert v-if="saved" variant="success" live :title="t('nova.auth.saved')">
+      <template #actions><NvButton variant="primary" size="sm" href="./">{{ t('nova.auth.continue') }}</NvButton></template>
+    </NvAlert>
+    <form v-else class="nv-auth-form" novalidate @submit.prevent="form.submit()">
+      <p class="nv-secondary nv-auth-form__note">{{ t('nova.auth.welcome_scope') }}</p>
+      <NvTextField v-model="values.username" :label="t('nova.auth.username')" :placeholder="t('nova.auth.username_placeholder')"
+                   autocomplete="username" required :error="usernameError" @focusout="form.touch('username')" />
+      <NewPasswordFields v-model:password="values.password" v-model:confirm="values.confirm"
+                         :password-label="t('nova.auth.password')" :confirm-label="t('nova.auth.confirm_password')"
+                         :password-error="passwordError" :confirm-error="confirmError" @touch="form.touch" />
+      <NvAlert v-if="serverError" variant="danger" live>{{ t('nova.auth.error', { error: serverMessage }) }}</NvAlert>
+      <p class="nv-secondary nv-auth-form__note">{{ t('nova.auth.welcome_keep') }}</p>
+      <NvButton type="submit" variant="primary" block :loading="saving">{{ t('nova.auth.create') }}</NvButton>
+    </form>
+  </AuthLayout>
 </template>
 
-<script>
-  import ResourceCard from './ResourceCard.vue'
-  import { apiFetch } from './fetch_utils'
-  import Notification from './Notification.vue'
-  import NavbarSimple from './NavbarSimple.vue'
-  import { LogIn } from '@lucide/vue'
-
-  export default {
-    components: {
-      ResourceCard,
-      Notification,
-      NavbarSimple,
-      LogIn,
-    },
-    data() {
-      return {
-        error: null,
-        success: false,
-        loading: false,
-        passwordData: {
-          newUsername: "sunshine",
-          newPassword: "",
-          confirmNewPassword: "",
-        },
-      };
-    },
-    methods: {
-      save() {
-        this.error = null;
-        this.loading = true;
-        apiFetch("./api/password", {
-          method: "POST",
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(this.passwordData),
-        }).then((r) => {
-          this.loading = false;
-          if (r.status === 200) {
-            r.json().then((rj) => {
-              this.success = rj.status;
-              if (this.success === true) {
-                setTimeout(() => {
-                  document.location.reload();
-                }, 5000);
-              } else {
-                this.error = rj.error;
-              }
-            });
-          } else {
-            this.error = "Internal Server Error";
-          }
-        });
-      },
-    },
+<style>
+@layer components {
+  .nv-auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-4);
   }
-</script>
+
+  .nv-auth-form__note {
+    margin: 0;
+    font-size: var(--nv-text-sm);
+  }
+}
+</style>

@@ -1,31 +1,16 @@
-<template>
-  <Navbar-Simple></Navbar-Simple>
-  <div class="container py-5">
-    <div class="row justify-content-center">
-      <div class="col-md-8 col-lg-6">
-        <div class="card">
-          <div class="card-body text-center">
-            <h1 class="h3 mb-3">{{ $t('logout.logged_out') }}</h1>
-            <p class="text-muted mb-4">{{ $t('logout.logged_out_desc') }}</p>
-            <a class="btn btn-primary" href="./">
-              <log-in :size="18" class="icon"></log-in>
-              {{ $t('logout.login') }}
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
+<script setup>
+/**
+ * Shown after signing out.
+ */
+import { useI18n } from 'vue-i18n'
+import NvButton from './nova/components/NvButton.vue'
+import AuthLayout from './nova/pages/auth/AuthLayout.vue'
 
-<script>
-  import { LogIn } from '@lucide/vue'
-  import NavbarSimple from './NavbarSimple.vue'
-
-  export default {
-    components: {
-      LogIn,
-      NavbarSimple,
-    },
-  }
+const { t } = useI18n()
 </script>
+
+<template>
+  <AuthLayout :title="t('nova.auth.signed_out_title')" :intro="t('nova.auth.signed_out_desc')">
+    <NvButton variant="primary" block href="./">{{ t('nova.auth.sign_in') }}</NvButton>
+  </AuthLayout>
+</template>
