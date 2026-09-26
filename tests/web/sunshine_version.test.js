@@ -40,6 +40,16 @@ describe('SunshineVersion', () => {
     expect(version.isGreater('3.0.0')).toBe(false)
   })
 
+  it('ignores the commit suffix of local builds', () => {
+    const local = new SunshineVersion(null, '2026.730.002631-a44e015d-dirty')
+    const release = new SunshineVersion({ name: 'Zenith', tag_name: 'v2026.730.002631' })
+
+    expect(local.versionParts).toEqual([2026, 730, 2631])
+    expect(release.isGreater(local)).toBe(false)
+    expect(local.isGreater(release)).toBe(false)
+    expect(new SunshineVersion(null, 'v2026.801.000001').isGreater(local)).toBe(true)
+  })
+
   it('handles absent and invalid comparison values', () => {
     const version = new SunshineVersion(null, '2.0.0')
     const unparsedVersion = new SunshineVersion(null, 'placeholder')

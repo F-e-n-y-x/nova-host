@@ -42,6 +42,8 @@ class SunshineVersion {
     if (v.startsWith("v")) {
       v = v.substring(1);
     }
+    // Local builds carry a "-<commit>[-dirty]" suffix; compare only the release part.
+    v = v.split(/[-+]/)[0];
     return v.split('.').map(Number);
   }
 
