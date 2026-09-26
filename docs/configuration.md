@@ -1521,6 +1521,41 @@ supported on the current platform.
     </tr>
 </table>
 
+### max_fps_target
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            The highest framerate Zenith streams at, regardless of what the client requests (Zenith).
+            Use it to fix uneven frame pacing when the host framerate is not a whole multiple of the client's
+            display refresh, e.g. 75 FPS into a 60 Hz display. A clean multiple (120 FPS into 60 Hz) is usually
+            better than capping.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            0
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            max_fps_target = 60
+            @endcode</td>
+    </tr>
+    <tr>
+        <td rowspan="2">Choices</td>
+        <td>0</td>
+        <td>No cap; always honour the client's requested framerate.</td>
+    </tr>
+    <tr>
+        <td>1-1000</td>
+        <td>Clamp the client's requested framerate to this value.</td>
+    </tr>
+</table>
+
 ## Network
 
 ### upnp
