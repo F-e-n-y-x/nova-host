@@ -8,11 +8,14 @@
 // standard includes
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 // lib includes
 #include <boost/asio/ssl/context.hpp>
@@ -23,6 +26,7 @@
 #include <Simple-Web-Server/server_http.hpp>
 
 // local includes
+#include "client_permissions.h"
 #include "clipboard.h"
 #include "config.h"
 #include "display_device.h"
@@ -174,7 +178,19 @@ namespace nvhttp {
     std::string uuid;  ///< Persistent Moonlight client UUID associated with the certificate.
     std::string cert;  ///< Certificate PEM string or path.
     bool enabled = true;  ///< Whether this persisted client entry may connect.
+    client_permissions::mask_t permissions = client_permissions::full;  ///< What the client may do while streaming.
+    std::int64_t paired_at = 0;  ///< Unix time (seconds) the client paired; 0 when unknown (paired before tracking).
+    std::int64_t last_connected_at = 0;  ///< Unix time (seconds) of the client's last launch or resume; 0 when never.
   };
+
+  /**
+   * @brief Current wall-clock time as Unix seconds.
+   *
+   * @return Seconds since the Unix epoch.
+   */
+  std::int64_t unix_now() {
+    return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  }
 
   /**
    * @brief Persisted pairing data for one Moonlight client.
@@ -280,6 +296,17 @@ namespace nvhttp {
       named_cert_node.put("cert"s, named_cert.cert);
       named_cert_node.put("uuid"s, named_cert.uuid);
       named_cert_node.put("enabled"s, named_cert.enabled);
+      pt::ptree permissions_node;
+      for (const auto &[flag_name, flag] : client_permissions::flag_names) {
+        permissions_node.put(std::string {flag_name}, client_permissions::has(named_cert.permissions, flag));
+      }
+      named_cert_node.add_child("permissions"s, permissions_node);
+      if (named_cert.paired_at > 0) {
+        named_cert_node.put("paired_at"s, named_cert.paired_at);
+      }
+      if (named_cert.last_connected_at > 0) {
+        named_cert_node.put("last_connected_at"s, named_cert.last_connected_at);
+      }
       named_cert_nodes.push_back(std::make_pair(""s, named_cert_node));
     }
     root.add_child("root.named_devices"s, named_cert_nodes);
@@ -416,6 +443,18 @@ namespace nvhttp {
         named_cert.cert = el.get_child("cert").get_value<std::string>();
         named_cert.uuid = el.get_child("uuid").get_value<std::string>();
         named_cert.enabled = el.get<bool>("enabled", true);
+        // State files written before permissions existed have no node: keep full access.
+        if (const auto permissions_node = el.get_child_optional("permissions")) {
+          client_permissions::mask_t mask = 0;
+          for (const auto &[flag_name, flag] : client_permissions::flag_names) {
+            if (permissions_node->get<bool>(std::string {flag_name}, true)) {
+              mask |= flag;
+            }
+          }
+          named_cert.permissions = mask;
+        }
+        named_cert.paired_at = std::max<std::int64_t>(0, el.get<std::int64_t>("paired_at", 0));
+        named_cert.last_connected_at = std::max<std::int64_t>(0, el.get<std::int64_t>("last_connected_at", 0));
         client.named_devices.emplace_back(named_cert);
       }
     }
@@ -451,6 +490,7 @@ namespace nvhttp {
     named_cert.name = name;
     named_cert.cert = crypto::pem(certificate);
     named_cert.uuid = uuid_util::uuid_t::generate().string();
+    named_cert.paired_at = unix_now();
     const auto uuid = named_cert.uuid;
 
     std::lock_guard lock {client_auth_mutex()};
@@ -520,6 +560,7 @@ namespace nvhttp {
     launch_session->rtsp_url_scheme = launch_session->rtsp_cipher ? "rtspenc://"s : "rtsp://"s;
     launch_session->client_cert = last_verified_client_cert;
     launch_session->client_name = last_verified_client_name;
+    launch_session->permissions = get_client_permissions(last_verified_client_cert);
 
     // Generate the unique identifiers for this connection that we will send later during RTSP handshake
     unsigned char raw_payload[8];
@@ -1282,13 +1323,23 @@ namespace nvhttp {
   }
 
   nlohmann::json get_all_clients() {
+    std::vector<named_cert_t> clients;
+    {
+      std::lock_guard lock {client_auth_mutex()};
+      clients = client_root.named_devices;
+    }
+
+    // Session lookups take the RTSP session lock, so they run after the client lock is released.
     nlohmann::json named_cert_nodes = nlohmann::json::array();
-    std::lock_guard lock {client_auth_mutex()};
-    for (const auto &named_cert : client_root.named_devices) {
+    for (const auto &named_cert : clients) {
       nlohmann::json named_cert_node;
       named_cert_node["name"] = named_cert.name;
       named_cert_node["uuid"] = named_cert.uuid;
       named_cert_node["enabled"] = named_cert.enabled;
+      named_cert_node["permissions"] = client_permissions::to_json(named_cert.permissions);
+      named_cert_node["paired_at"] = named_cert.paired_at > 0 ? nlohmann::json(named_cert.paired_at) : nlohmann::json(nullptr);
+      named_cert_node["last_connected_at"] = named_cert.last_connected_at > 0 ? nlohmann::json(named_cert.last_connected_at) : nlohmann::json(nullptr);
+      named_cert_node["connected"] = rtsp_stream::has_session_for_cert(named_cert.cert);
       named_cert_nodes.push_back(named_cert_node);
     }
 
@@ -1318,7 +1369,14 @@ namespace nvhttp {
 
     apps.put("<xmlattr>.status_code", 200);
 
+    // Without launch permission a client only sees the running app, which it may resume.
+    const bool can_launch = client_permissions::has(get_client_permissions(last_verified_client_cert), client_permissions::launch_apps);
+    const auto running_appid = proc::proc.running();
+
     for (auto &proc : proc::proc.get_apps()) {
+      if (!can_launch && util::from_view(proc.id) != running_appid) {
+        continue;
+      }
       pt::ptree app;
 
       app.put("IsHdrSupported"s, video::active_hevc_mode >= 3 ? 1 : 0);
@@ -1367,6 +1425,15 @@ namespace nvhttp {
       tree.put("root.resume", 0);
       tree.put("root.<xmlattr>.status_code", 400);
       tree.put("root.<xmlattr>.status_message", "Missing a required launch parameter");
+
+      return;
+    }
+
+    if (!client_permissions::has(get_client_permissions(last_verified_client_cert), client_permissions::launch_apps)) {
+      BOOST_LOG(info) << "Refusing launch: this client isn't allowed to launch apps"sv;
+      tree.put("root.resume", 0);
+      tree.put("root.<xmlattr>.status_code", 403);
+      tree.put("root.<xmlattr>.status_message", "This device isn't allowed to launch apps on this host");
 
       return;
     }
@@ -1489,6 +1556,7 @@ namespace nvhttp {
     );
     tree.put("root.gamesession", 1);
 
+    record_client_connected(launch_session->client_cert);
     rtsp_stream::launch_session_raise(launch_session);
 
     // Stream was started successfully, we will revert the config when the app or session terminates
@@ -1590,6 +1658,7 @@ namespace nvhttp {
     );
     tree.put("root.resume", 1);
 
+    record_client_connected(launch_session->client_cert);
     rtsp_stream::launch_session_raise(launch_session);
   }
 
@@ -1648,8 +1717,28 @@ namespace nvhttp {
    * @param response HTTP response object.
    * @param request HTTP request data from the client.
    */
+  /**
+   * @brief Refuse a clipboard request from a client without the clipboard permission.
+   *
+   * @param response HTTP response object to populate when refusing.
+   * @return `true` when the request was refused and answered.
+   */
+  bool refuse_without_clipboard_permission(const resp_https_t &response) {
+    if (client_permissions::has(get_client_permissions(last_verified_client_cert), client_permissions::clipboard)) {
+      return false;
+    }
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Content-Type", "application/json");
+    response->write(SimpleWeb::StatusCode::client_error_forbidden, R"({"error":"clipboard access is not allowed for this device"})", headers);
+    response->close_connection_after_response = true;
+    return true;
+  }
+
   void clipboard_blob_get(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
+    if (refuse_without_clipboard_permission(response)) {
+      return;
+    }
 
     auto blob = clipboard::blob::take(request->path_match[1]);
     if (!blob) {
@@ -1670,6 +1759,9 @@ namespace nvhttp {
    */
   void clipboard_blob_post(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
+    if (refuse_without_clipboard_permission(response)) {
+      return;
+    }
 
     auto content = request->content.string();
     auto type = request->header.find("content-type");
@@ -1693,6 +1785,9 @@ namespace nvhttp {
    */
   void clipboard_file_get(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
+    if (refuse_without_clipboard_permission(response)) {
+      return;
+    }
 
     auto path = clipboard::blob::file_path(request->path_match[1]);
     if (!path) {
@@ -1923,6 +2018,101 @@ namespace nvhttp {
       }
     }
     return {};
+  }
+
+  bool is_valid_client_name(const std::string_view name) {
+    if (name.empty() || name.front() == ' ' || name.back() == ' ') {
+      return false;
+    }
+    std::size_t characters = 0;
+    for (const auto byte : name) {
+      const auto c = static_cast<unsigned char>(byte);
+      if (c < 0x20 || c == 0x7F) {
+        return false;
+      }
+      // Count UTF-8 code points: every byte except continuation bytes starts one.
+      if ((c & 0xC0) != 0x80) {
+        ++characters;
+      }
+    }
+    return characters <= 64;
+  }
+
+  bool set_client_name(const std::string_view uuid, const std::string_view name) {
+    if (!is_valid_client_name(name)) {
+      return false;
+    }
+    std::lock_guard lock {client_auth_mutex()};
+    for (auto &named_cert : client_root.named_devices) {
+      if (named_cert.uuid == uuid) {
+        named_cert.name = std::string {name};
+        save_state();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool set_client_permissions(const std::string_view uuid, const client_permissions::mask_t permissions) {
+    const auto mask = client_permissions::sanitize(permissions);
+    std::string cert;
+    {
+      std::lock_guard lock {client_auth_mutex()};
+      for (auto &named_cert : client_root.named_devices) {
+        if (named_cert.uuid == uuid) {
+          named_cert.permissions = mask;
+          cert = named_cert.cert;
+          save_state();
+          break;
+        }
+      }
+    }
+    if (cert.empty()) {
+      return false;
+    }
+    // Running streams pick the change up immediately, without reconnecting.
+    rtsp_stream::update_permissions_by_cert(cert, mask);
+    return true;
+  }
+
+  std::optional<client_permissions::mask_t> get_client_permissions_by_uuid(const std::string_view uuid) {
+    std::lock_guard lock {client_auth_mutex()};
+    for (const auto &named_cert : client_root.named_devices) {
+      if (named_cert.uuid == uuid) {
+        return named_cert.permissions;
+      }
+    }
+    return std::nullopt;
+  }
+
+  client_permissions::mask_t get_client_permissions(const std::string_view cert_pem) {
+    if (cert_pem.empty()) {
+      return client_permissions::full;
+    }
+    std::lock_guard lock {client_auth_mutex()};
+    for (const auto &named_cert : client_root.named_devices) {
+      if (named_cert.cert == cert_pem) {
+        return named_cert.permissions;
+      }
+    }
+    // Only paired certificates pass TLS verification, so an unknown one gets nothing.
+    return client_permissions::view_only;
+  }
+
+  void record_client_connected(const std::string_view cert_pem) {
+    if (cert_pem.empty()) {
+      return;
+    }
+    std::lock_guard lock {client_auth_mutex()};
+    for (auto &named_cert : client_root.named_devices) {
+      if (named_cert.cert == cert_pem) {
+        named_cert.last_connected_at = unix_now();
+        if (!config::sunshine.flags[config::flag::FRESH_STATE]) {
+          save_state();
+        }
+        return;
+      }
+    }
   }
 
   /**
