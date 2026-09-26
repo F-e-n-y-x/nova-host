@@ -50,26 +50,25 @@ protected:
     return locales;
   }
 
-  // Extract locale options from General.vue
+  // Extract locale options (code and display name) from the Settings page schema
   static std::map<std::string, std::string, std::less<>> extractGeneralVueLocales() {
     std::map<std::string, std::string, std::less<>> locales;
-    const std::string content = file_handler::read_file("src_assets/common/assets/web/configs/tabs/General.vue");
+    const std::string content = file_handler::read_file("src_assets/common/assets/web/configs/settings_schema.js");
 
-    // Find the locale select section specifically
-    const std::regex localeSelectPattern("id=\"locale\"[^>]*>([^<]*(?:<option[^>]*>[^<]*</option>[^<]*)*)</select>");
+    // The locale list is the LOCALES array: [['bg', 'Български (Bulgarian)'], ...]
+    const std::string startMarker = "const LOCALES = [";
+    const size_t start = content.find(startMarker);
+    if (start == std::string::npos) {
+      return locales;
+    }
+    const size_t end = content.find("].map(", start);
+    const std::string localeSection = content.substr(start + startMarker.size(), end == std::string::npos ? std::string::npos : end - start - startMarker.size());
 
-    if (std::smatch selectMatch; std::regex_search(content, selectMatch, localeSelectPattern)) {
-      const std::string localeSection = selectMatch[1].str();
+    const std::regex optionPattern(R"delimiter(\['([^']+)',\s*'([^']+)'\])delimiter");
+    std::sregex_iterator iter(localeSection.begin(), localeSection.end(), optionPattern);
 
-      // Extract option elements with locale codes and display names from the locale section
-      const std::regex optionPattern(R"delimiter(<option\s+value="([^"]+)">([^<]+)</option>)delimiter");
-      std::sregex_iterator iter(localeSection.begin(), localeSection.end(), optionPattern);
-
-      for (const std::sregex_iterator end; iter != end; ++iter) {
-        const std::string localeCode = (*iter)[1].str();
-        const std::string displayName = (*iter)[2].str();
-        locales[localeCode] = displayName;
-      }
+    for (const std::sregex_iterator iterEnd; iter != iterEnd; ++iter) {
+      locales[(*iter)[1].str()] = (*iter)[2].str();
     }
 
     return locales;

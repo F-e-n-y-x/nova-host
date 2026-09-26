@@ -207,8 +207,9 @@ set(INTEGRATION_TEST_FILES
     "src_assets/common/assets/web/configs/config_tabs.json"
     "src_assets/common/assets/web/configs/VirtualKeyCodeSelect.vue"
     "src_assets/common/assets/web/configs/virtual_key_codes.js"
-    "src_assets/common/assets/web/configs/tabs/General.vue"
-    "src_assets/common/assets/web/configs/tabs/Inputs.vue"
+    "src_assets/common/assets/web/configs/settings_schema.js"
+    "src_assets/common/assets/web/configs/components/KeybindingsEditor.vue"
+    "src_assets/common/assets/web/configs/components/SettingsNav.vue"
     "src_assets/linux/misc/60-sunshine.rules"
 )
 

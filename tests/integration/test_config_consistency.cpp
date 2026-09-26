@@ -411,30 +411,29 @@ TEST_F(ConfigConsistencyTest, AllConfigSidebarTabsUseEnglishLocaleKeys) {
 }
 
 TEST_F(ConfigConsistencyTest, ConfigSidebarTabsDoNotNavigateAway) {
-  const std::string content = readFixture("src_assets/common/assets/web/Config.vue");
-  const std::regex tabButtonPattern(R"(<button\s+type="button"\s+class="nav-link")");
-  const std::sregex_iterator tabButtonBegin(content.begin(), content.end(), tabButtonPattern);
-  const std::sregex_iterator tabButtonEnd;
+  // Section links only change the URL hash (so sections are linkable and Back works);
+  // none of them navigate to another page or to a bare "#".
+  const std::string content = readFixture("src_assets/common/assets/web/configs/components/SettingsNav.vue");
 
-  EXPECT_EQ(std::distance(tabButtonBegin, tabButtonEnd), 2);
+  EXPECT_NE(content.find(":to=\"{ hash: `#${section.id}` }\""), std::string::npos);
   EXPECT_EQ(content.find("href=\"#\""), std::string::npos);
+  EXPECT_EQ(content.find(":to=\"'/"), std::string::npos);
 }
 
 TEST_F(ConfigConsistencyTest, KeybindingsAreAvailableInWebUi) {
-  const std::string content = readFixture("src_assets/common/assets/web/configs/tabs/Inputs.vue");
+  const std::string schema = readFixture("src_assets/common/assets/web/configs/settings_schema.js");
+  const std::string content = readFixture("src_assets/common/assets/web/configs/components/KeybindingsEditor.vue");
   const std::string selectContent = readFixture("src_assets/common/assets/web/configs/VirtualKeyCodeSelect.vue");
   const std::string keyCodeContent = readFixture("src_assets/common/assets/web/configs/virtual_key_codes.js");
 
-  EXPECT_NE(
-    content.find("id=\"keybindings\" class=\"mb-3\" v-if=\"config.keyboard === 'enabled'\""),
-    std::string::npos
-  );
+  // Shown only while keyboard input is enabled.
+  EXPECT_NE(schema.find("keybindings: { type: 'KeybindingsEditor', when: keyboardOn }"), std::string::npos);
   EXPECT_NE(content.find("class=\"keybinding-grid\""), std::string::npos);
   EXPECT_NE(content.find("v-for=\"(binding, index) in keybindingPairs\""), std::string::npos);
   EXPECT_NE(content.find("v-model=\"binding.source\""), std::string::npos);
   EXPECT_NE(content.find("v-model=\"binding.destination\""), std::string::npos);
-  EXPECT_NE(selectContent.find("v-for=\"keyCode in virtualKeyCodes\""), std::string::npos);
-  EXPECT_NE(selectContent.find("{{ keyCode.code }} ({{ keyCode.description }})"), std::string::npos);
+  EXPECT_NE(selectContent.find("for (const keyCode of virtualKeyCodes)"), std::string::npos);
+  EXPECT_NE(selectContent.find("`${keyCode.code} (${keyCode.description})`"), std::string::npos);
   EXPECT_NE(content.find("@click=\"addKeybinding\""), std::string::npos);
   EXPECT_NE(content.find("@click=\"removeKeybinding(index)\""), std::string::npos);
   EXPECT_NE(content.find("windows/win32/inputdev/virtual-key-codes"), std::string::npos);
