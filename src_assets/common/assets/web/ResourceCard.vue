@@ -1,76 +1,46 @@
+<script setup>
+/**
+ * Project resources and legal links (Help page and first-run setup).
+ */
+import { useI18n } from 'vue-i18n'
+import { BookOpen, Bug, FileText, ScrollText } from '@lucide/vue'
+import NvCard from './nova/components/NvCard.vue'
+import NvButton from './nova/components/NvButton.vue'
+import { project } from './nova/project'
+
+const { t } = useI18n()
+</script>
+
 <template>
-    <div class="card">
-        <div class="card-body">
-            <h2>{{ $t('resource_card.resources') }}</h2>
-            <div class="d-flex flex-wrap gap-2 mt-4">
-                <a class="btn btn-success" href="https://app.lizardbyte.dev" target="_blank">
-                  <Globe :size="18" class="icon"></Globe>
-                  {{ $t('resource_card.lizardbyte_website') }}
-                </a>
-                <a class="btn btn-info" :href="documentationUrl" target="_blank">
-                  <BookOpen :size="18" class="icon"></BookOpen>
-                  {{ $t('resource_card.documentation') }}
-                </a>
-                <a class="btn btn-primary" href="https://app.lizardbyte.dev/discord" target="_blank">
-                  <SimpleIcon icon="Discord" :size="18" class="icon"></SimpleIcon>
-                  Discord
-                </a>
-                <a class="btn btn-secondary" href="https://github.com/orgs/LizardByte/discussions" target="_blank">
-                  <SimpleIcon icon="GitHub" :size="18" class="icon"></SimpleIcon>
-                  {{ $t('resource_card.github_discussions') }}
-                </a>
-            </div>
-        </div>
-    </div>
-    <!-- Legal -->
-    <div class="card mt-4">
-        <div class="card-body">
-            <h2>{{ $t('resource_card.legal') }}</h2>
-            <p>{{ $t('resource_card.legal_desc') }}</p>
-            <div class="d-flex flex-wrap gap-2 mt-4">
-                <a class="btn btn-danger" href="https://github.com/jacksonpate/zenith/blob/master/LICENSE"
-                    target="_blank">
-                  <FileText :size="18" class="icon"></FileText>
-                  {{ $t('resource_card.license') }}
-                </a>
-                <a class="btn btn-danger" href="https://github.com/jacksonpate/zenith/blob/master/NOTICE"
-                    target="_blank">
-                  <AlertCircle :size="18" class="icon"></AlertCircle>
-                  {{ $t('resource_card.third_party_notice') }}
-                </a>
-            </div>
-        </div>
-    </div>
+  <div class="nv-stack">
+    <NvCard :title="t('nova.help.resources')">
+      <div class="nv-row nv-resource-links">
+        <NvButton variant="secondary" :href="project.docsUrl" target="_blank" rel="noopener">
+          <BookOpen :size="18" aria-hidden="true" />{{ t('nova.help.docs') }}
+        </NvButton>
+        <NvButton variant="secondary" :href="project.issuesUrl" target="_blank" rel="noopener">
+          <Bug :size="18" aria-hidden="true" />{{ t('nova.help.issues') }}
+        </NvButton>
+      </div>
+    </NvCard>
+    <NvCard :title="t('nova.help.legal')">
+      <p class="nv-secondary">{{ t('nova.help.legal_desc') }}</p>
+      <div class="nv-row nv-resource-links">
+        <NvButton variant="secondary" :href="project.licenseUrl" target="_blank" rel="noopener">
+          <FileText :size="18" aria-hidden="true" />{{ t('nova.help.license') }}
+        </NvButton>
+        <NvButton variant="secondary" :href="project.noticeUrl" target="_blank" rel="noopener">
+          <ScrollText :size="18" aria-hidden="true" />{{ t('nova.help.notice') }}
+        </NvButton>
+      </div>
+    </NvCard>
+  </div>
 </template>
 
-<script>
-import {
-  AlertCircle,
-  BookOpen,
-  FileText,
-  Globe,
-} from '@lucide/vue'
-import SimpleIcon from './SimpleIcon.vue'
-
-export default {
-  props: {
-    installedVersionNotStable: {
-      type: Boolean,
-      default: false
-    }
-  },
-  components: {
-    SimpleIcon,
-    AlertCircle,
-    BookOpen,
-    FileText,
-    Globe,
-  },
-  computed: {
-    documentationUrl() {
-      const docsVersion = this.installedVersionNotStable ? 'master' : 'latest'
-      return `https://docs.lizardbyte.dev/projects/sunshine/${docsVersion}/`
-    }
+<style>
+@layer components {
+  .nv-resource-links {
+    flex-wrap: wrap;
   }
 }
-</script>
+</style>

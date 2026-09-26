@@ -24,6 +24,8 @@
   },
   "type": "module",
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0",
     "@lucide/vue": "1.48.0",
     "bootstrap": "5.3.8",
     "date-fns": "4.4.0",

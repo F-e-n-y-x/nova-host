@@ -1,135 +1,106 @@
-const getStoredTheme = () => localStorage.getItem('theme')
-const setStoredTheme = theme => localStorage.setItem('theme', theme)
+/**
+ * @file Nova theme preference: "system" (default, follows the OS), "light" or "dark".
+ *
+ * The CSS in nova/nova.css reads `data-nv-theme` on <html>; with no attribute the
+ * OS preference applies. `data-bs-theme` is kept in sync for pages that still use
+ * Bootstrap components.
+ */
 
-export const getPreferredTheme = () => {
-    let storedTheme = getStoredTheme()
-    // 'zenith' was the default theme of older Zenith builds and no longer exists.
-    if (storedTheme === 'zenith') {
-        localStorage.removeItem('theme')
-        storedTheme = null
-    }
-    if (storedTheme) {
-        return storedTheme
-    }
+export const THEME_KEY = 'nova-theme'
+export const THEME_CHOICES = ['system', 'light', 'dark']
 
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+/** Key used by the Sunshine/Zenith multi-theme picker this module replaces. */
+const LEGACY_THEME_KEY = 'theme'
+
+const storage = {
+  get(key) {
+    try {
+      return globalThis.localStorage?.getItem(key) ?? null
+    } catch {
+      return null
+    }
+  },
+  set(key, value) {
+    try {
+      globalThis.localStorage?.setItem(key, value)
+    } catch {
+      // Private mode or blocked storage: the choice lasts for this page only.
+    }
+  },
+  remove(key) {
+    try {
+      globalThis.localStorage?.removeItem(key)
+    } catch {
+      // Nothing to clean up when storage is unavailable.
+    }
+  },
 }
 
-// Define which themes are dark (for Bootstrap compatibility)
-const darkThemes = new Set([
-    'dark',
-    'dracula',
-    'ember',
-    'midnight',
-    'mocha',
-    'moonlight',
-    'nord',
-    'rose-pine',
-    'slate',
-])
+let sessionChoice = null
 
-const setTheme = theme => {
-    if (theme === 'auto') {
-        const preferredTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-        document.documentElement.dataset.bsTheme = preferredTheme
-        document.documentElement.dataset.theme = preferredTheme
-        console.log(`Theme set to auto (resolved to: ${preferredTheme})`)
-    } else {
-        // Set Bootstrap's data-bs-theme to 'light' or 'dark' for Bootstrap's own styles
-        const bsTheme = darkThemes.has(theme) ? 'dark' : 'light'
-        document.documentElement.dataset.bsTheme = bsTheme
+const darkQuery = () => globalThis.matchMedia?.('(prefers-color-scheme: dark)')
 
-        // Set our custom data-theme attribute for our color schemes
-        document.documentElement.dataset.theme = theme
-        console.log(`Theme set to: ${theme} (Bootstrap: ${bsTheme})`)
-    }
+/**
+ * Read the saved preference, migrating any legacy theme name to "system".
+ *
+ * @returns {'system'|'light'|'dark'} The theme preference.
+ */
+export function getThemePreference() {
+  if (storage.get(LEGACY_THEME_KEY) !== null) {
+    storage.remove(LEGACY_THEME_KEY)
+  }
+  const saved = storage.get(THEME_KEY) ?? sessionChoice
+  return THEME_CHOICES.includes(saved) ? saved : 'system'
 }
 
-export const showActiveTheme = (theme, focus = false) => {
-    const themeSwitcher = document.querySelector('#bd-theme')
-
-    if (!themeSwitcher) {
-        return
-    }
-
-    const themeSwitcherText = document.querySelector('#bd-theme-text')
-    const activeThemeIcon = document.querySelector('.theme-icon-active svg')
-    const btnToActive = document.querySelector(`[data-bs-theme-value="${theme}"]`)
-
-    if (!btnToActive) {
-        return
-    }
-
-    const btnIcon = btnToActive.querySelector('svg')
-
-    if (!activeThemeIcon || !btnIcon) {
-        return
-    }
-
-    document.querySelectorAll('[data-bs-theme-value]').forEach(element => {
-        element.classList.remove('active')
-        element.setAttribute('aria-pressed', 'false')
-    })
-
-    btnToActive.classList.add('active')
-    btnToActive.setAttribute('aria-pressed', 'true')
-
-    // Clone the SVG icon from the active button to the theme switcher
-    const clonedIcon = btnIcon.cloneNode(true)
-    activeThemeIcon.parentNode.replaceChild(clonedIcon, activeThemeIcon)
-
-    const themeSwitcherLabel = `${themeSwitcherText.textContent} (${btnToActive.textContent.trim()})`
-    themeSwitcher.setAttribute('aria-label', themeSwitcherLabel)
-
-    if (focus) {
-        themeSwitcher.focus()
-    }
+/**
+ * Resolve a preference to the palette actually shown.
+ *
+ * @param {string} [preference] Preference to resolve; defaults to the saved one.
+ * @returns {'light'|'dark'} The effective theme.
+ */
+export function resolveTheme(preference = getThemePreference()) {
+  if (preference === 'light' || preference === 'dark') {
+    return preference
+  }
+  return darkQuery()?.matches ? 'dark' : 'light'
 }
 
-const applyTheme = theme => {
-    setStoredTheme(theme)
-    setTheme(theme)
-    showActiveTheme(theme, true)
+/**
+ * Apply a preference to the document.
+ *
+ * @param {string} [preference] Preference to apply; defaults to the saved one.
+ */
+export function applyTheme(preference = getThemePreference()) {
+  const root = document.documentElement
+  if (preference === 'light' || preference === 'dark') {
+    root.dataset.nvTheme = preference
+  } else {
+    delete root.dataset.nvTheme
+  }
+  root.dataset.bsTheme = resolveTheme(preference)
 }
 
-const pickRandomTheme = () => {
-    const current = getStoredTheme()
-    const values = Array.from(document.querySelectorAll('[data-bs-theme-value]'))
-        .map(el => el.dataset.bsThemeValue)
-        .filter(value => value !== 'auto' && value !== current)
-    return values[Math.floor(Math.random() * values.length)]  // NOSONAR(javascript:S2245) random not used for cryptography here
+/**
+ * Save and apply a preference.
+ *
+ * @param {'system'|'light'|'dark'} preference The new preference.
+ */
+export function setThemePreference(preference) {
+  const value = THEME_CHOICES.includes(preference) ? preference : 'system'
+  sessionChoice = value
+  storage.set(THEME_KEY, value)
+  applyTheme(value)
 }
 
-export function setupThemeToggleListener() {
-    document.querySelectorAll('[data-bs-theme-value]')
-        .forEach(toggle => {
-            toggle.addEventListener('click', () => applyTheme(toggle.dataset.bsThemeValue))
-        })
-
-    const randomToggle = document.querySelector('#bd-theme-random')
-    if (randomToggle) {
-        randomToggle.addEventListener('click', () => applyTheme(pickRandomTheme()))
-    }
-
-    showActiveTheme(getPreferredTheme(), false)
-}
-
+/**
+ * Apply the saved theme and follow OS changes while "system" is selected.
+ */
 export function loadAutoTheme() {
-    (() => {
-        'use strict'
-
-        setTheme(getPreferredTheme())
-
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-            const storedTheme = getStoredTheme()
-            // Only auto-switch if theme is set to 'auto'
-            if (storedTheme === 'auto' || !storedTheme) {
-                setTheme(getPreferredTheme())
-            }
-        })
-
-        window.addEventListener('DOMContentLoaded', () => {
-            showActiveTheme(getPreferredTheme())
-        })
-    })()
+  applyTheme()
+  darkQuery()?.addEventListener?.('change', () => {
+    if (getThemePreference() === 'system') {
+      applyTheme('system')
+    }
+  })
 }

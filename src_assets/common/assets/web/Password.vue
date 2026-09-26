@@ -1,5 +1,4 @@
 <template>
-  <Navbar></Navbar>
   <div id="content" class="container">
     <div class="my-4">
       <h1>{{ $t('password.password_change') }}</h1>
@@ -58,13 +57,11 @@
 </template>
 
 <script>
-  import Navbar from './Navbar.vue'
   import { apiFetch } from './fetch_utils'
   import { Save } from '@lucide/vue'
 
   export default {
     components: {
-      Navbar,
       Save,
     },
     data() {

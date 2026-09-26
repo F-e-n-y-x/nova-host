@@ -1,0 +1,273 @@
+/*
+ * Nova design system: tokens, base element styles and shared utilities.
+ * Component styles live in each component's <style> block inside @layer components.
+ * Legacy Bootstrap/Sunshine styles are imported into the lowest layer (legacy) so
+ * everything declared here wins without importance overrides.
+ */
+@layer legacy, reset, tokens, base, components, utilities;
+
+@import "bootstrap/dist/css/bootstrap.min.css" layer(legacy);
+@import "../sunshine.css" layer(legacy);
+
+/* ---------------------------------------------------------------- reset */
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+  }
+
+  [v-cloak] {
+    display: none;
+  }
+}
+
+/* --------------------------------------------------------------- tokens */
+/*
+ * Theme palettes. The dark palette appears twice (explicit choice, and the OS
+ * preference when the user picked "System"); tests/web/nova_tokens.test.js checks
+ * both copies match and that every text/background pair meets WCAG AA.
+ */
+@layer tokens {
+  :root {
+    /* type scale */
+    --nv-font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --nv-font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --nv-text-xs: 12px;
+    --nv-text-sm: 13px;
+    --nv-text-md: 14px;
+    --nv-text-lg: 16px;
+    --nv-text-xl: 20px;
+    --nv-text-2xl: 24px;
+    --nv-leading: 1.5;
+
+    /* 4px spacing grid */
+    --nv-space-1: 4px;
+    --nv-space-2: 8px;
+    --nv-space-3: 12px;
+    --nv-space-4: 16px;
+    --nv-space-5: 20px;
+    --nv-space-6: 24px;
+    --nv-space-8: 32px;
+    --nv-space-10: 40px;
+
+    --nv-radius-sm: 6px;
+    --nv-radius-md: 8px;
+    --nv-radius-lg: 12px;
+
+    --nv-control-height: 40px;
+    --nv-control-height-sm: 36px;
+    --nv-sidebar-width: 232px;
+    --nv-content-max: 1200px;
+    --nv-focus-width: 2px;
+  }
+
+  /* light (default) */
+  :root,
+  :root[data-nv-theme="light"] {
+    color-scheme: light;
+    --nv-bg: #F5F5F7;
+    --nv-sidebar: #FFFFFF;
+    --nv-surface: #FFFFFF;
+    --nv-raised: #F3F3F6;
+    --nv-border: #E3E5E9;
+    --nv-border-strong: #80868F;
+    --nv-text: #16171A;
+    --nv-text-secondary: #4B5059;
+    --nv-text-muted: #646A74;
+    --nv-accent: #5A3DD8;
+    --nv-accent-hover: #4A2FC0;
+    --nv-accent-text: #5A3DD8;
+    --nv-accent-tint: #F0ECFF;
+    --nv-on-accent: #FFFFFF;
+    --nv-success: #1C7A4F;
+    --nv-success-tint: #E6F4EC;
+    --nv-warning: #935B00;
+    --nv-warning-tint: #FFF4E0;
+    --nv-danger: #B42D24;
+    --nv-danger-tint: #FCEBEA;
+    --nv-danger-fill: #B42D24;
+    --nv-focus: #5A3DD8;
+    --nv-shadow: 0 8px 24px rgba(22, 23, 26, 0.12);
+  }
+
+  /* dark, explicit */
+  :root[data-nv-theme="dark"] {
+    color-scheme: dark;
+    --nv-bg: #111214;
+    --nv-sidebar: #0D0E10;
+    --nv-surface: #17181B;
+    --nv-raised: #1D1F23;
+    --nv-border: #2A2D33;
+    --nv-border-strong: #686E79;
+    --nv-text: #ECEDEF;
+    --nv-text-secondary: #A4A9B3;
+    --nv-text-muted: #8A909B;
+    --nv-accent: #6B4EFF;
+    --nv-accent-hover: #5B3DF0;
+    --nv-accent-text: #B7A2FF;
+    --nv-accent-tint: #221D38;
+    --nv-on-accent: #FFFFFF;
+    --nv-success: #4CC38A;
+    --nv-success-tint: #15261E;
+    --nv-warning: #E8A93F;
+    --nv-warning-tint: #2A2217;
+    --nv-danger: #F2766E;
+    --nv-danger-tint: #2D1716;
+    --nv-danger-fill: #C9342B;
+    --nv-focus: #B7A2FF;
+    --nv-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  /* dark, from the OS when the user chose "System" */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-nv-theme="light"]) {
+      color-scheme: dark;
+      --nv-bg: #111214;
+      --nv-sidebar: #0D0E10;
+      --nv-surface: #17181B;
+      --nv-raised: #1D1F23;
+      --nv-border: #2A2D33;
+      --nv-border-strong: #686E79;
+      --nv-text: #ECEDEF;
+      --nv-text-secondary: #A4A9B3;
+      --nv-text-muted: #8A909B;
+      --nv-accent: #6B4EFF;
+      --nv-accent-hover: #5B3DF0;
+      --nv-accent-text: #B7A2FF;
+      --nv-accent-tint: #221D38;
+      --nv-on-accent: #FFFFFF;
+      --nv-success: #4CC38A;
+      --nv-success-tint: #15261E;
+      --nv-warning: #E8A93F;
+      --nv-warning-tint: #2A2217;
+      --nv-danger: #F2766E;
+      --nv-danger-tint: #2D1716;
+      --nv-danger-fill: #C9342B;
+      --nv-focus: #B7A2FF;
+      --nv-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+  }
+}
+
+/* ----------------------------------------------------------------- base */
+@layer base {
+  html {
+    background: var(--nv-bg);
+  }
+
+  body {
+    background: var(--nv-bg);
+    color: var(--nv-text);
+    font-family: var(--nv-font-sans);
+    font-size: var(--nv-text-md);
+    line-height: var(--nv-leading);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    margin: 0;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--nv-text);
+  }
+
+  h1 {
+    font-size: var(--nv-text-2xl);
+  }
+
+  h2 {
+    font-size: var(--nv-text-lg);
+  }
+
+  h3 {
+    font-size: var(--nv-text-md);
+  }
+
+  p {
+    margin: 0;
+  }
+
+  a {
+    color: var(--nv-accent-text);
+    text-decoration: none;
+  }
+
+  a:hover {
+    text-decoration: underline;
+  }
+
+  code,
+  kbd,
+  samp {
+    font-family: var(--nv-font-mono);
+    font-size: 0.93em;
+  }
+
+  :focus-visible {
+    outline: var(--nv-focus-width) solid var(--nv-focus);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms;
+      animation-iteration-count: 1;
+      transition-duration: 0.01ms;
+    }
+  }
+}
+
+/* ------------------------------------------------------------ utilities */
+@layer utilities {
+  .nv-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .nv-mono {
+    font-family: var(--nv-font-mono);
+  }
+
+  .nv-muted {
+    color: var(--nv-text-muted);
+  }
+
+  .nv-secondary {
+    color: var(--nv-text-secondary);
+  }
+
+  .nv-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-4);
+  }
+
+  .nv-row {
+    display: flex;
+    align-items: center;
+    gap: var(--nv-space-3);
+  }
+
+  .nv-grow {
+    flex-grow: 1;
+    min-width: 0;
+  }
+}
