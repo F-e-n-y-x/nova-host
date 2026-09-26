@@ -11,7 +11,7 @@ const keep = (path) => (to) => ({ path, hash: to.hash, query: to.query })
 const routes = [
   { path: '/', component: () => import('./nova/pages/Dashboard.vue') },
   { path: '/apps', component: () => import('./Apps.vue') },
-  { path: '/devices', component: () => import('./nova/pages/Devices.vue') },
+  { path: '/devices/:uuid?', component: () => import('./nova/pages/Devices.vue') },
   { path: '/settings', component: () => import('./Config.vue') },
   { path: '/logs', component: () => import('./nova/pages/Logs.vue') },
   { path: '/pair', component: () => import('./Pin.vue') },
@@ -38,7 +38,8 @@ const router = createRouter({
 
 router.afterEach((to, from) => {
   // Move focus to the page content after in-app navigation so screen readers start there.
-  if (from.matched.length && to.path !== from.path && !to.hash) {
+  // Only between pages: a detail panel on the same page (/devices/:uuid) manages its own focus.
+  if (from.matched.length && to.matched[0] !== from.matched[0] && !to.hash) {
     requestAnimationFrame(() => document.getElementById('nv-main')?.focus({ preventScroll: true }))
   }
 })

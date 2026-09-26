@@ -9,10 +9,14 @@
 // standard includes
 #include <atomic>
 #include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
 #include <vector>
 
 // local includes
+#include <nlohmann/json.hpp>
+#include <src/client_permissions.h>
 #include <src/config.h>
 #include <src/nvhttp.h>
 
@@ -195,4 +199,110 @@ TEST_F(ClientAuthorizationTest, ConcurrentStateChangesRemainConsistent) {
   EXPECT_TRUE(operations_succeeded);
   ASSERT_TRUE(nvhttp::set_client_enabled(uuid, false));
   EXPECT_FALSE(nvhttp::test_support::authorize_client_certificate(credentials.x509));
+}
+
+namespace {
+  /**
+   * @brief Find one client in the web API listing.
+   *
+   * @param uuid Persistent UUID of the client.
+   * @return Its JSON record, or null when it is not listed.
+   */
+  nlohmann::json listed_client(const std::string &uuid) {
+    for (const auto &client : nvhttp::get_all_clients()) {
+      if (client.at("uuid") == uuid) {
+        return client;
+      }
+    }
+    return nullptr;
+  }
+}  // namespace
+
+TEST_F(ClientAuthorizationTest, NewClientsGetFullAccessAndAPairingTime) {
+  const auto credentials = crypto::gen_creds("Sunshine Permissions Client", 2048);
+  const auto uuid = nvhttp::test_support::add_client("phone", credentials.x509, true);
+  ASSERT_FALSE(uuid.empty());
+
+  const auto client = listed_client(uuid);
+  ASSERT_FALSE(client.is_null());
+  EXPECT_EQ(client.at("permissions").at("preset"), "full");
+  EXPECT_TRUE(client.at("paired_at").is_number_integer());
+  EXPECT_GT(client.at("paired_at").get<std::int64_t>(), 0);
+  EXPECT_TRUE(client.at("last_connected_at").is_null());
+  EXPECT_FALSE(client.at("connected").get<bool>());
+  EXPECT_EQ(nvhttp::get_client_permissions(credentials.x509), client_permissions::full);
+}
+
+TEST_F(ClientAuthorizationTest, PermissionsNamesAndConnectionTimesPersist) {
+  const auto credentials = crypto::gen_creds("Sunshine Persisted Client", 2048);
+  const auto uuid = nvhttp::test_support::add_client("tablet", credentials.x509, true);
+  ASSERT_FALSE(uuid.empty());
+
+  ASSERT_TRUE(nvhttp::set_client_permissions(uuid, client_permissions::play));
+  ASSERT_TRUE(nvhttp::set_client_name(uuid, "Living room tablet"));
+  nvhttp::record_client_connected(credentials.x509);
+
+  nvhttp::test_support::reset_client_state();
+  nvhttp::test_support::reload_client_state();
+
+  const auto client = listed_client(uuid);
+  ASSERT_FALSE(client.is_null());
+  EXPECT_EQ(client.at("name"), "Living room tablet");
+  EXPECT_EQ(client.at("permissions").at("preset"), "play");
+  EXPECT_FALSE(client.at("permissions").at("clipboard").get<bool>());
+  EXPECT_GT(client.at("last_connected_at").get<std::int64_t>(), 0);
+  EXPECT_EQ(nvhttp::get_client_permissions_by_uuid(uuid), client_permissions::play);
+  EXPECT_EQ(nvhttp::get_client_permissions(credentials.x509), client_permissions::play);
+}
+
+TEST_F(ClientAuthorizationTest, UnknownClientsCannotBeUpdatedAndGetNoPermissions) {
+  const auto unknown = crypto::gen_creds("Sunshine Unknown Client", 2048);
+  EXPECT_FALSE(nvhttp::set_client_permissions("no-such-uuid", client_permissions::view_only));
+  EXPECT_FALSE(nvhttp::set_client_name("no-such-uuid", "Phone"));
+  EXPECT_FALSE(nvhttp::get_client_permissions_by_uuid("no-such-uuid").has_value());
+  EXPECT_EQ(nvhttp::get_client_permissions(unknown.x509), client_permissions::view_only);
+  EXPECT_EQ(nvhttp::get_client_permissions(""), client_permissions::full);
+}
+
+TEST_F(ClientAuthorizationTest, DeviceNamesAreValidated) {
+  EXPECT_TRUE(nvhttp::is_valid_client_name("Pixel 9 Pro"));
+  EXPECT_TRUE(nvhttp::is_valid_client_name("Ноутбук"));
+  EXPECT_TRUE(nvhttp::is_valid_client_name(std::string(64, 'a')));
+  EXPECT_FALSE(nvhttp::is_valid_client_name(std::string(65, 'a')));
+  EXPECT_FALSE(nvhttp::is_valid_client_name(""));
+  EXPECT_FALSE(nvhttp::is_valid_client_name(" padded"));
+  EXPECT_FALSE(nvhttp::is_valid_client_name("padded "));
+  EXPECT_FALSE(nvhttp::is_valid_client_name("tab\tname"));
+  EXPECT_FALSE(nvhttp::is_valid_client_name(std::string {"del\x7f"}));
+
+  const auto credentials = crypto::gen_creds("Sunshine Rename Client", 2048);
+  const auto uuid = nvhttp::test_support::add_client("before", credentials.x509, true);
+  EXPECT_FALSE(nvhttp::set_client_name(uuid, " bad"));
+  EXPECT_EQ(listed_client(uuid).at("name"), "before");
+}
+
+TEST_F(ClientAuthorizationTest, StateFilesWithoutNewFieldsKeepFullAccess) {
+  const auto credentials = crypto::gen_creds("Sunshine Legacy Client", 2048);
+  const nlohmann::json legacy {
+    {"root", {
+               {"uniqueid", "0123456789ABCDEF"},
+               {"named_devices", nlohmann::json::array({
+                                   {{"name", "old laptop"}, {"cert", credentials.x509}, {"uuid", "LEGACY-UUID"}, {"enabled", "true"}},
+                                 })},
+             }},
+  };
+  {
+    std::ofstream file {config::nvhttp.file_state};
+    file << legacy.dump(2);
+  }
+
+  nvhttp::test_support::reload_client_state();
+
+  const auto client = listed_client("LEGACY-UUID");
+  ASSERT_FALSE(client.is_null());
+  EXPECT_EQ(client.at("name"), "old laptop");
+  EXPECT_EQ(client.at("permissions").at("preset"), "full");
+  EXPECT_TRUE(client.at("paired_at").is_null());
+  EXPECT_TRUE(client.at("last_connected_at").is_null());
+  EXPECT_TRUE(nvhttp::test_support::authorize_client_certificate(credentials.x509));
 }

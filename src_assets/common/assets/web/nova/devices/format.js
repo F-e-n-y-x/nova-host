@@ -1,0 +1,113 @@
+/**
+ * @file Pure helpers for showing devices: IDs, times, permission summaries, validation.
+ */
+
+/** Permission flags in display order, matching the host's JSON keys. */
+export const PERMISSION_FLAGS = ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'clipboard', 'launch_apps']
+
+/** Presets the host understands, in display order. */
+export const PERMISSION_PRESETS = ['full', 'play', 'view_only']
+
+/**
+ * First and last characters of a device ID.
+ *
+ * @param {string} uuid Device ID.
+ * @returns {string} Shortened ID, or the whole ID when it is short.
+ */
+export function shortId(uuid) {
+  if (!uuid || uuid.length <= 13) return uuid || ''
+  return `${uuid.slice(0, 8)}…${uuid.slice(-4)}`
+}
+
+const UNITS = [
+  ['year', 365 * 24 * 3600],
+  ['month', 30 * 24 * 3600],
+  ['week', 7 * 24 * 3600],
+  ['day', 24 * 3600],
+  ['hour', 3600],
+  ['minute', 60],
+]
+
+/**
+ * Relative time such as "5 minutes ago".
+ *
+ * @param {number|null} unixSeconds Time in Unix seconds.
+ * @param {string} locale BCP 47 locale.
+ * @param {number} [nowMs] Current time in milliseconds (for tests).
+ * @returns {string} Formatted text, or '' when the time is unknown.
+ */
+export function relativeTime(unixSeconds, locale, nowMs = Date.now()) {
+  if (!unixSeconds) return ''
+  const diff = unixSeconds - Math.round(nowMs / 1000)
+  const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
+  for (const [unit, seconds] of UNITS) {
+    if (Math.abs(diff) >= seconds) return format.format(Math.round(diff / seconds), unit)
+  }
+  return format.format(0, 'minute')
+}
+
+/**
+ * Full date and time, for tooltips and detail views.
+ *
+ * @param {number|null} unixSeconds Time in Unix seconds.
+ * @param {string} locale BCP 47 locale.
+ * @returns {string} Formatted text, or '' when the time is unknown.
+ */
+export function absoluteTime(unixSeconds, locale) {
+  if (!unixSeconds) return ''
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(unixSeconds * 1000))
+}
+
+/**
+ * The preset a permission object matches.
+ *
+ * @param {object|undefined} permissions Permission object from the host.
+ * @returns {'full'|'play'|'view_only'|'custom'} Preset name; missing data counts as full access,
+ *   which is what the host applies to devices without stored permissions.
+ */
+export function permissionPreset(permissions) {
+  if (!permissions) return 'full'
+  if (PERMISSION_PRESETS.includes(permissions.preset)) return permissions.preset
+  return 'custom'
+}
+
+/**
+ * Check a device name the way the host does.
+ *
+ * @param {string} name Candidate name.
+ * @returns {boolean} Whether it has 1–64 characters, no surrounding spaces and no control characters.
+ */
+export function isValidDeviceName(name) {
+  if (!name || name !== name.trim()) return false
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(name)) return false
+  return [...name].length <= 64
+}
+
+/**
+ * Filter devices by a search string (name or ID, case-insensitive).
+ *
+ * @param {Array<object>} devices Devices.
+ * @param {string} query Search text.
+ * @returns {Array<object>} Matching devices.
+ */
+export function filterDevices(devices, query) {
+  const q = (query || '').trim().toLowerCase()
+  if (!q) return devices
+  return devices.filter((d) => (d.name || '').toLowerCase().includes(q) || (d.uuid || '').toLowerCase().includes(q))
+}
+
+/**
+ * Sort devices: streaming first, then by most recent connection, then by name.
+ *
+ * @param {Array<object>} devices Devices.
+ * @returns {Array<object>} A sorted copy.
+ */
+export function sortDevices(devices) {
+  return [...devices].sort((a, b) => {
+    if (!!a.connected !== !!b.connected) return a.connected ? -1 : 1
+    const last = (b.last_connected_at || 0) - (a.last_connected_at || 0)
+    if (last !== 0) return last
+    return (a.name || '').localeCompare(b.name || '')
+  })
+}

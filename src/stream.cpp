@@ -561,6 +561,7 @@ namespace stream {
     std::uint32_t launch_session_id;  ///< RTSP launch-session ID associated with this stream.
     std::string client_cert;  ///< PEM certificate for the paired client owning the stream.
     std::string input_session_id;  ///< Stable client identity used to retain input devices across resume.
+    std::atomic<client_permissions::mask_t> permissions {client_permissions::full};  ///< What the client may do; updated live from the web UI.
 
     safe::mail_raw_t::event_t<bool> shutdown_event;  ///< Event raised when the stream should shut down.
     safe::signal_t controlEnd;  ///< Signal raised when the control channel exits.
@@ -1252,6 +1253,10 @@ namespace stream {
 
     server->map(packetTypes[IDX_CLIPBOARD], [](session_t *session, const std::string_view &payload) {
       BOOST_LOG(info) << "clipboard: received "sv << payload.size() << " bytes from the client"sv;
+      if (!client_permissions::has(session->permissions.load(std::memory_order_relaxed), client_permissions::clipboard)) {
+        BOOST_LOG(debug) << "clipboard: dropping client payload — this device isn't allowed to use the clipboard"sv;
+        return;
+      }
       if (!clipboard::available()) {
         BOOST_LOG(warning) << "clipboard: dropping client payload — sync unavailable on this host"sv;
         return;
@@ -1325,7 +1330,9 @@ namespace stream {
         std::copy(payload.end() - 16, payload.end(), std::begin(iv));
       }
 
-      input::passthrough(session->input, std::move(plaintext));
+      if (input::is_packet_permitted(plaintext, session->permissions.load(std::memory_order_relaxed))) {
+        input::passthrough(session->input, std::move(plaintext));
+      }
     });
 
     server->map(packetTypes[IDX_ENCRYPTED], [server](session_t *session, const std::string_view &payload) {
@@ -1388,7 +1395,9 @@ namespace stream {
       // IDX_INPUT_DATA callback will attempt to decrypt unencrypted data, therefore we need pass it directly
       if (type == packetTypes[IDX_INPUT_DATA]) {
         plaintext.erase(std::begin(plaintext), std::begin(plaintext) + 4);
-        input::passthrough(session->input, std::move(plaintext));
+        if (input::is_packet_permitted(plaintext, session->permissions.load(std::memory_order_relaxed))) {
+          input::passthrough(session->input, std::move(plaintext));
+        }
       } else {
         server->call(type, session, next_payload, true);
       }
@@ -1470,6 +1479,9 @@ namespace stream {
             }
 
             for (const auto &frame : clipboard_frames) {
+              if (!client_permissions::has(session->permissions.load(std::memory_order_relaxed), client_permissions::clipboard)) {
+                break;
+              }
               send_clipboard(session, frame);
             }
           }
@@ -2412,6 +2424,19 @@ namespace stream {
       return session.client_cert;
     }
 
+    client_permissions::mask_t permissions(session_t &session) {
+      return session.permissions.load(std::memory_order_relaxed);
+    }
+
+    void set_permissions(session_t &session, const client_permissions::mask_t permissions) {
+      const auto previous = session.permissions.exchange(client_permissions::sanitize(permissions), std::memory_order_relaxed);
+      // Losing an input kind mid-stream must not leave keys, buttons or sticks held down.
+      const auto revoked_input = previous & ~permissions & client_permissions::input_all;
+      if (revoked_input != 0 && session.input) {
+        input::reset(session.input);
+      }
+    }
+
     /**
      * @brief Stop the active streaming session and prevent new packets from being queued.
      */
@@ -2533,6 +2558,7 @@ namespace stream {
       session->shutdown_event = mail->event<bool>(mail::shutdown);
       session->launch_session_id = launch_session.id;
       session->client_cert = launch_session.client_cert;
+      session->permissions.store(client_permissions::sanitize(launch_session.permissions), std::memory_order_relaxed);
       session->input_session_id = launch_session.client_cert.empty() ? launch_session.unique_id : launch_session.client_cert;
 
       session->config = config;
