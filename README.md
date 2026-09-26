@@ -90,6 +90,8 @@ in an [issue](https://github.com/F-e-n-y-x/nova-host/issues).
 
 ## Credits & license
 
+Nova is developed by [Fenyx](https://github.com/F-e-n-y-x) (ayushsoni2911@gmail.com).
+
 Nova is a fork of [Zenith](https://github.com/jacksonpate/zenith) by Jackson Pate, which is itself
 a fork of [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine). It stands on their work —
 go star them, and read Sunshine's
