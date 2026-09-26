@@ -16,7 +16,7 @@ import NvEmptyState from '../components/NvEmptyState.vue'
 import NvSkeleton from '../components/NvSkeleton.vue'
 import NvAlert from '../components/NvAlert.vue'
 import NvDialog from '../components/NvDialog.vue'
-import { checkForUpdates, fetchJson, getConfig, postJson, useAsync } from '../api'
+import { checkForUpdates, fetchJson, getConfig, useAsync } from '../api'
 import { apiFetch } from '../../fetch_utils'
 import { detectEncoders, healthChecks, parseLogs } from '../logs'
 import { toast } from '../toast'
@@ -35,6 +35,17 @@ const clients = useAsync(async () => (await fetchJson('./api/clients/list')).nam
 const apps = useAsync(async () => (await fetchJson('./api/apps')).apps || [])
 
 const release = ref({ loading: true, result: null })
+
+// Without /api/config the host is unreachable; show one message instead of per-card errors
+// and never fall back to placeholder values that look real.
+const unreachable = computed(() => Boolean(config.error.value))
+
+function retryAll() {
+  config.reload()
+  logs.reload()
+  clients.reload()
+  apps.reload()
+}
 
 watch(() => config.data.value, async (cfg) => {
   if (!cfg) return
@@ -123,18 +134,6 @@ async function restart() {
   }
 }
 
-const closing = ref(false)
-async function closeApp() {
-  closing.value = true
-  try {
-    await postJson('./api/apps/close')
-    toast.success(t('nova.dashboard.close_app_done'))
-  } catch {
-    toast.danger(t('nova.dashboard.close_app_failed'))
-  } finally {
-    closing.value = false
-  }
-}
 </script>
 
 <template>
@@ -152,11 +151,12 @@ async function closeApp() {
       <NvButton variant="primary" to="/pair">{{ t('nova.dashboard.pair') }}</NvButton>
     </template>
 
-    <NvAlert v-if="config.error.value" variant="danger" :title="t('nova.common.load_failed')" live>
-      <template #actions><NvButton size="sm" variant="secondary" @click="config.reload()">{{ t('nova.common.retry') }}</NvButton></template>
+    <NvAlert v-if="unreachable" variant="danger" :title="t('nova.dashboard.unreachable_title')" live>
+      {{ t('nova.dashboard.unreachable_desc') }}
+      <template #actions><NvButton size="sm" variant="secondary" @click="retryAll">{{ t('nova.common.retry') }}</NvButton></template>
     </NvAlert>
 
-    <div class="nv-dash">
+    <div v-else class="nv-dash">
       <NvCard :title="t('nova.dashboard.now_streaming')" :span="2">
         <!-- TODO(phase 2): replace with live session stats once the host exposes a sessions API
              (resolution, fps, codec, bitrate, per-stage latency, stop stream). -->
@@ -226,9 +226,7 @@ async function closeApp() {
             <span class="nv-list__name">{{ app.name }}</span>
           </li>
         </ul>
-        <template #footer>
-          <NvButton size="sm" variant="secondary" :loading="closing" @click="closeApp">{{ t('nova.dashboard.close_app') }}</NvButton>
-        </template>
+        <template #footer><RouterLink to="/apps">{{ t('nova.dashboard.manage_apps') }}</RouterLink></template>
       </NvCard>
     </div>
 

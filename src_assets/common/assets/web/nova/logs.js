@@ -82,7 +82,8 @@ export function healthChecks(entries, config = {}) {
     checks.push({ id: 'encoder', status: 'danger', title: 'nova.health.no_encoder_title', desc: 'nova.health.no_encoder_desc', to: '/logs' })
   }
 
-  if (entries.some((e) => /Unable to initialize audio capture|Couldn't find an active default sink/.test(e.message))) {
+  // "Couldn't find an active default sink" is not a failure: Nova streams from its own virtual sinks.
+  if (entries.some((e) => /^Unable to initialize audio capture/.test(e.message))) {
     checks.push({ id: 'audio', status: 'warning', title: 'nova.health.audio_title', desc: 'nova.health.audio_desc', to: '/settings#audio' })
   }
 

@@ -1,12 +1,26 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="auto">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F5F5F7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111214" />
     <base href="/" />
-    <title>Zenith</title>
-    <link rel="icon" type="image/x-icon" href="/images/sunshine.ico" />
+    <title>Nova</title>
+    <link rel="icon" type="image/svg+xml" href="/images/nova.svg" />
+    <style>
+      html { background: #F5F5F7; }
+      @media (prefers-color-scheme: dark) { html:not([data-nv-theme="light"]) { background: #111214; } }
+      html[data-nv-theme="dark"] { background: #111214; }
+    </style>
+    <script>
+      // Apply a saved Light/Dark choice before first paint so the page never flashes the wrong theme.
+      try {
+        var t = localStorage.getItem('nova-theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.nvTheme = t;
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app" v-cloak></div>

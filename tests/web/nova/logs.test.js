@@ -53,6 +53,14 @@ describe('healthChecks', () => {
     ])
   })
 
+  it('does not treat a missing default sink as an audio failure', () => {
+    const virtualOnly = parseLogs([
+      '[2026-09-27 00:02:41.871]: Info: Found H.264 encoder: h264_nvenc [nvenc]',
+      "[2026-09-27 00:02:42.100]: Warning: Couldn't find an active default sink. Continuing with virtual audio only.",
+    ].join('\n'))
+    expect(healthChecks(virtualOnly).map((c) => c.id)).toEqual(['encoder'])
+  })
+
   it('flags a missing encoder only when the log has content', () => {
     expect(healthChecks([])).toEqual([])
     expect(healthChecks(parseLogs('[2026-09-27 00:00:00.000]: Info: started')).map((c) => c.status)).toEqual(['danger'])

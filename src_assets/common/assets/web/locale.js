@@ -88,3 +88,69 @@ export default async function createSunshineI18n() {
     })
     return i18n;
 }
+
+/**
+ * @brief Fetch JSON, giving up after a timeout so a slow host never blocks the UI.
+ *
+ * @param {string} path URL to fetch.
+ * @param {number} timeoutMs Milliseconds before the request is aborted.
+ * @return {Promise<object>} Parsed JSON.
+ */
+async function fetchJsonWithTimeout(path, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(path, { signal: controller.signal });
+        return await response.json();
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/**
+ * @brief Create an English i18n instance synchronously, so the app can mount at once.
+ *
+ * @return {import('vue-i18n').I18n} Internationalization instance with English loaded.
+ */
+export function createInstantI18n() {
+    document.documentElement.setAttribute('lang', 'en');
+    return createI18n({ locale: 'en', fallbackLocale: 'en', messages: { en } });
+}
+
+/**
+ * @brief Switch a mounted i18n instance to the host's configured locale, if any.
+ *
+ * Requests are bounded by `timeoutMs`; on any failure the UI stays in English.
+ *
+ * @param {import('vue-i18n').I18n} i18n Instance created by createInstantI18n().
+ * @param {number} [timeoutMs] Per-request timeout in milliseconds.
+ * @return {Promise<string>} The locale in use afterwards.
+ */
+export async function applyConfiguredLocale(i18n, timeoutMs = 2000) {
+    try {
+        const localeConfig = await fetchJsonWithTimeout("./api/configLocale", timeoutMs);
+        const configuredLocale = resolveLocale(localeConfig.locale);
+        if (configuredLocale === 'en') {
+            return 'en';
+        }
+        const { locale, messages } = await loadLocaleMessages(
+            configuredLocale,
+            path => fetchJsonWithTimeout(path, timeoutMs),
+        );
+        if (locale === 'en') {
+            return 'en';
+        }
+        const global = i18n.global;
+        global.setLocaleMessage(locale, messages[locale]);
+        if (global.locale && typeof global.locale === 'object') {
+            global.locale.value = locale;
+        } else {
+            global.locale = locale;
+        }
+        document.documentElement.setAttribute('lang', locale);
+        return locale;
+    } catch (e) {
+        console.error("Failed to load the configured locale", e);
+        return 'en';
+    }
+}
