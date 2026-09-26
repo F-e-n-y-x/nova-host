@@ -385,6 +385,32 @@ namespace nvhttp {
   client_permissions::mask_t get_client_permissions(std::string_view cert_pem);
 
   /**
+   * @brief Remember which verified client owns the TLS connection from @p peer.
+   *
+   * Permission checks look clients up by connection, not by the most recent handshake,
+   * so a kept-alive connection is never attributed to another client.
+   *
+   * @param peer Remote endpoint of the connection.
+   * @param cert PEM certificate accepted for it.
+   * @param name Friendly name of the client.
+   */
+  void remember_verified_peer(const boost::asio::ip::tcp::endpoint &peer, std::string cert, std::string name);
+
+  /**
+   * @brief Certificate accepted for the TLS connection from @p peer.
+   * @param peer Remote endpoint of the connection.
+   * @return The PEM certificate, or empty when the connection is unknown.
+   */
+  std::string verified_cert_for(const boost::asio::ip::tcp::endpoint &peer);
+
+  /**
+   * @brief Permissions of the client on the TLS connection from @p peer.
+   * @param peer Remote endpoint of the connection.
+   * @return Its permission mask; client_permissions::view_only when the connection is unknown.
+   */
+  client_permissions::mask_t permissions_for_peer(const boost::asio::ip::tcp::endpoint &peer);
+
+  /**
    * @brief Record that a paired client just launched or resumed a stream.
    * @param cert_pem PEM certificate of the client.
    */

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -64,6 +65,8 @@ namespace nvhttp {
     static std::mutex mutex;
     return mutex;
   }
+
+  void remember_verified_peer(const boost::asio::ip::tcp::endpoint &peer);
 
   /**
    * @brief HTTPS server backend that adds Sunshine's client-certificate verification.
@@ -140,6 +143,13 @@ namespace nvhttp {
               if (verify && !verify(session->connection->socket->native_handle())) {
                 this->write(session, on_verify_failed);
               } else {
+                if (verify) {
+                  SimpleWeb::error_code endpoint_ec;
+                  const auto peer = session->connection->socket->lowest_layer().remote_endpoint(endpoint_ec);
+                  if (!endpoint_ec) {
+                    remember_verified_peer(peer);
+                  }
+                }
                 this->read(session);
               }
             } else if (this->on_error) {
@@ -220,6 +230,83 @@ namespace nvhttp {
   std::string last_verified_client_name;  ///< Friendly name of last client certificate accepted by the TLS verify callback. // NOSONAR(cpp:S5421): intentionally mutable global
 
   /**
+   * @brief A verified TLS client: its certificate and friendly name.
+   */
+  struct verified_peer_t {
+    std::string cert;  ///< PEM of the certificate accepted for the connection.
+    std::string name;  ///< Friendly name of that client.
+  };
+
+  /**
+   * @brief Verified clients keyed by the peer endpoint of their TLS connection.
+   *
+   * The last_verified_* globals change on every handshake, so a request on a kept-alive
+   * connection could otherwise be attributed to whichever client connected most recently.
+   * Guarded by client_auth_mutex().
+   *
+   * @return The map.
+   */
+  std::map<boost::asio::ip::tcp::endpoint, verified_peer_t> &verified_peers() {
+    static std::map<boost::asio::ip::tcp::endpoint, verified_peer_t> peers;
+    return peers;
+  }
+
+  void remember_verified_peer(const boost::asio::ip::tcp::endpoint &peer, std::string cert, std::string name) {
+    constexpr std::size_t max_tracked_connections = 1024;
+    std::lock_guard lock {client_auth_mutex()};
+    auto &peers = verified_peers();
+    if (peers.size() >= max_tracked_connections && !peers.contains(peer)) {
+      // Endpoints of closed connections are overwritten on reuse; drop the rest wholesale.
+      peers.clear();
+    }
+    peers[peer] = {std::move(cert), std::move(name)};
+  }
+
+  /**
+   * @brief Record the client just verified for the connection from @p peer.
+   *
+   * Called right after the verify callback succeeds, on the same connection, so the
+   * last_verified_* globals still describe this client.
+   *
+   * @param peer Remote endpoint of the verified connection.
+   */
+  void remember_verified_peer(const boost::asio::ip::tcp::endpoint &peer) {
+    std::string cert;
+    std::string name;
+    {
+      std::lock_guard lock {client_auth_mutex()};
+      cert = last_verified_client_cert;
+      name = last_verified_client_name;
+    }
+    remember_verified_peer(peer, std::move(cert), std::move(name));
+  }
+
+  /**
+   * @brief Look up the verified client for a connection's peer endpoint.
+   *
+   * @param peer Remote endpoint of the connection.
+   * @return Its certificate and name, or empty values when the connection is unknown.
+   */
+  verified_peer_t verified_peer_at(const boost::asio::ip::tcp::endpoint &peer) {
+    std::lock_guard lock {client_auth_mutex()};
+    const auto &peers = verified_peers();
+    if (const auto it = peers.find(peer); it != peers.end()) {
+      return it->second;
+    }
+    return {};
+  }
+
+  std::string verified_cert_for(const boost::asio::ip::tcp::endpoint &peer) {
+    return verified_peer_at(peer).cert;
+  }
+
+  client_permissions::mask_t permissions_for_peer(const boost::asio::ip::tcp::endpoint &peer) {
+    const auto cert = verified_cert_for(peer);
+    return cert.empty() ? client_permissions::view_only : get_client_permissions(cert);
+  }
+
+
+  /**
    * @brief Case-insensitive map used for HTTP headers and query parameters.
    */
   using args_t = SimpleWeb::CaseInsensitiveMultimap;
@@ -239,6 +326,26 @@ namespace nvhttp {
    * @brief Shared HTTP request object received by redirect and discovery handlers.
    */
   using req_http_t = std::shared_ptr<typename SimpleWeb::ServerBase<SimpleWeb::HTTP>::Request>;
+
+  /**
+   * @brief The verified client on the connection that sent @p request.
+   *
+   * @param request HTTPS request.
+   * @return Certificate and name, or empty values when the connection is unknown.
+   */
+  verified_peer_t verified_peer_for(const req_https_t &request) {
+    return verified_peer_at(request->remote_endpoint());
+  }
+
+  /**
+   * @brief Permissions of the client that sent @p request; nothing when it can't be identified.
+   *
+   * @param request HTTPS request.
+   * @return The client's permission mask, or client_permissions::view_only if unknown.
+   */
+  client_permissions::mask_t permissions_for_request(const req_https_t &request) {
+    return permissions_for_peer(request->remote_endpoint());
+  }
 
   /**
    * @brief Certificate operations supported by the pairing API.
@@ -512,9 +619,10 @@ namespace nvhttp {
    *
    * @param host_audio Host audio.
    * @param args Arguments forwarded to the callable or parser.
+   * @param peer Verified client on the connection that asked for the session.
    * @return Constructed launch session object.
    */
-  std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, const args_t &args) {
+  std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, const args_t &args, const verified_peer_t &peer) {
     auto launch_session = std::make_shared<rtsp_stream::launch_session_t>();
 
     launch_session->id = ++session_id_counter;
@@ -558,9 +666,9 @@ namespace nvhttp {
       launch_session->rtsp_iv_counter = 0;
     }
     launch_session->rtsp_url_scheme = launch_session->rtsp_cipher ? "rtspenc://"s : "rtsp://"s;
-    launch_session->client_cert = last_verified_client_cert;
-    launch_session->client_name = last_verified_client_name;
-    launch_session->permissions = get_client_permissions(last_verified_client_cert);
+    launch_session->client_cert = peer.cert;
+    launch_session->client_name = peer.name;
+    launch_session->permissions = peer.cert.empty() ? client_permissions::view_only : get_client_permissions(peer.cert);
 
     // Generate the unique identifiers for this connection that we will send later during RTSP handshake
     unsigned char raw_payload[8];
@@ -1370,7 +1478,7 @@ namespace nvhttp {
     apps.put("<xmlattr>.status_code", 200);
 
     // Without launch permission a client only sees the running app, which it may resume.
-    const bool can_launch = client_permissions::has(get_client_permissions(last_verified_client_cert), client_permissions::launch_apps);
+    const bool can_launch = client_permissions::has(permissions_for_request(request), client_permissions::launch_apps);
     const auto running_appid = proc::proc.running();
 
     for (auto &proc : proc::proc.get_apps()) {
@@ -1429,7 +1537,7 @@ namespace nvhttp {
       return;
     }
 
-    if (!client_permissions::has(get_client_permissions(last_verified_client_cert), client_permissions::launch_apps)) {
+    if (!client_permissions::has(permissions_for_request(request), client_permissions::launch_apps)) {
       BOOST_LOG(info) << "Refusing launch: this client isn't allowed to launch apps"sv;
       tree.put("root.resume", 0);
       tree.put("root.<xmlattr>.status_code", 403);
@@ -1450,7 +1558,7 @@ namespace nvhttp {
     }
 
     host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
-    auto launch_session = make_launch_session(host_audio, args);
+    auto launch_session = make_launch_session(host_audio, args, verified_peer_for(request));
 
     bool probe_found_nothing {false};  ///< The pre-prep probe chose no encoder at all, so the re-probe is the last word.
 
@@ -1614,7 +1722,7 @@ namespace nvhttp {
     if (no_active_sessions && args.find("localAudioPlayMode"s) != std::end(args)) {
       host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
     }
-    const auto launch_session = make_launch_session(host_audio, args);
+    const auto launch_session = make_launch_session(host_audio, args, verified_peer_for(request));
 
     if (no_active_sessions) {
       // We want to prepare display only if there are no active sessions at
@@ -1721,10 +1829,11 @@ namespace nvhttp {
    * @brief Refuse a clipboard request from a client without the clipboard permission.
    *
    * @param response HTTP response object to populate when refusing.
+   * @param request The request, used to identify the client's connection.
    * @return `true` when the request was refused and answered.
    */
-  bool refuse_without_clipboard_permission(const resp_https_t &response) {
-    if (client_permissions::has(get_client_permissions(last_verified_client_cert), client_permissions::clipboard)) {
+  bool refuse_without_clipboard_permission(const resp_https_t &response, const req_https_t &request) {
+    if (client_permissions::has(permissions_for_request(request), client_permissions::clipboard)) {
       return false;
     }
     SimpleWeb::CaseInsensitiveMultimap headers;
@@ -1736,7 +1845,7 @@ namespace nvhttp {
 
   void clipboard_blob_get(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
-    if (refuse_without_clipboard_permission(response)) {
+    if (refuse_without_clipboard_permission(response, request)) {
       return;
     }
 
@@ -1759,7 +1868,7 @@ namespace nvhttp {
    */
   void clipboard_blob_post(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
-    if (refuse_without_clipboard_permission(response)) {
+    if (refuse_without_clipboard_permission(response, request)) {
       return;
     }
 
@@ -1785,7 +1894,7 @@ namespace nvhttp {
    */
   void clipboard_file_get(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
-    if (refuse_without_clipboard_permission(response)) {
+    if (refuse_without_clipboard_permission(response, request)) {
       return;
     }
 
