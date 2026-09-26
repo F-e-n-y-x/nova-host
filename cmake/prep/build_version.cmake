@@ -53,6 +53,20 @@ else()
                 RESULT_VARIABLE GIT_IS_DIRTY
                 OUTPUT_STRIP_TRAILING_WHITESPACE
         )
+        # Base local builds on the nearest release tag; project() stays at 0.3.0, which would
+        # make every local build look older than any published release.
+        execute_process(
+                COMMAND ${GIT_EXECUTABLE} describe --tags --abbrev=0 --match "v[0-9]*"
+                OUTPUT_VARIABLE GIT_NEAREST_TAG
+                RESULT_VARIABLE GIT_NEAREST_TAG_ERROR_CODE
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+        )
+        if(NOT GIT_NEAREST_TAG_ERROR_CODE AND GIT_NEAREST_TAG MATCHES "^v([0-9]+\\.[0-9]+\\.[0-9]+)$")
+            set(PROJECT_VERSION ${CMAKE_MATCH_1})
+            set(CMAKE_PROJECT_VERSION ${PROJECT_VERSION})
+            MESSAGE("Nearest release tag: ${GIT_NEAREST_TAG}")
+        endif()
         if(NOT GIT_DESCRIBE_ERROR_CODE)
             MESSAGE("Sunshine Branch: ${GIT_DESCRIBE_BRANCH}")
             if(NOT GIT_DESCRIBE_BRANCH STREQUAL "master")
