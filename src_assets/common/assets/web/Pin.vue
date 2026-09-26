@@ -1,5 +1,4 @@
 <template>
-  <Navbar></Navbar>
   <div id="content" class="container">
     <h1 class="my-4 text-center">{{ $t('pin.pin_pairing') }}</h1>
     <form class="form d-flex flex-column align-items-center" id="form" @submit.prevent="registerDevice">
@@ -55,7 +54,6 @@
 </template>
 
 <script>
-  import Navbar from './Navbar.vue'
   import { apiFetch } from './fetch_utils'
   import {
     Forward,
@@ -67,7 +65,6 @@
 
   export default {
     components: {
-      Navbar,
       Forward,
       Hash,
       Monitor,
