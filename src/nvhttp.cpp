@@ -1443,7 +1443,7 @@ namespace nvhttp {
         return;
       }
 
-      // The probe above ran before this app's prep commands, and on Zenith those
+      // The probe above ran before this app's prep commands, and on Nova those
       // are what create the virtual display. A host whose only display is that
       // VDD therefore had nothing to capture a moment ago and settled for
       // software encoding — not because the GPU cannot encode, but because it was

@@ -979,7 +979,7 @@ namespace rtsp_stream {
       ss << "a=fmtp:97 surround-params="sv << session.surround_params << std::endl;
     }
 
-    // Zenith: advertise the remote microphone stream so Foundation-compatible
+    // Nova: advertise the remote microphone stream so Foundation-compatible
     // clients (enhanced moonlight-qt/android) offer mic redirection.
     if (config::audio.mic_enabled) {
       ss << "m=audio "sv << net::map_port(stream::MIC_STREAM_PORT) << " RTP/AVP 96"sv << std::endl;
@@ -1209,7 +1209,7 @@ namespace rtsp_stream {
       config.monitor.width = (int) util::from_view(args.at("x-nv-video[0].clientViewportWd"sv));
       config.monitor.framerate = (int) util::from_view(args.at("x-nv-video[0].maxFPS"sv));
 
-      // Zenith: clamp the client's requested framerate at ingress, so the encoder, the per-frame
+      // Nova: clamp the client's requested framerate at ingress, so the encoder, the per-frame
       // bitrate budget and capture pacing all derive from one agreed value rather than the host
       // producing frames the client will only throw away. Clamping here -- before the
       // framerateX100 validation below -- lets that existing ratio test discard a

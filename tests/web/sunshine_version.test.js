@@ -42,7 +42,7 @@ describe('SunshineVersion', () => {
 
   it('ignores the commit suffix of local builds', () => {
     const local = new SunshineVersion(null, '2026.730.002631-a44e015d-dirty')
-    const release = new SunshineVersion({ name: 'Zenith', tag_name: 'v2026.730.002631' })
+    const release = new SunshineVersion({ name: 'Nova', tag_name: 'v2026.730.002631' })
 
     expect(local.versionParts).toEqual([2026, 730, 2631])
     expect(release.isGreater(local)).toBe(false)

@@ -134,7 +134,7 @@ namespace config {
     } vk;  ///< Vulkan encoder options.
 
     std::string capture;  ///< Capture backend name selected by configuration.
-    std::string capture_pacing;  ///< Zenith: "timer" (default) or "vblank" (present-paced KMS capture).
+    std::string capture_pacing;  ///< Nova: "timer" (default) or "vblank" (present-paced KMS capture).
     std::string encoder;  ///< Encoder backend name selected by configuration.
     std::string adapter_name;  ///< Display adapter name selected in configuration.
     std::string output_name;  ///< Display output name selected in configuration.
@@ -220,7 +220,7 @@ namespace config {
 
     int max_bitrate;  ///< Maximum bitrate ceiling in kbps for bitrate requested from the client.
     double minimum_fps_target;  ///< Lowest framerate that will be used when streaming. Range 0-1000, 0 = half of client's requested framerate.
-    double max_fps_target;  ///< Zenith: highest framerate that will be streamed. Range 0-1000, 0 = no cap, honour the client's request.
+    double max_fps_target;  ///< Nova: highest framerate that will be streamed. Range 0-1000, 0 = no cap, honour the client's request.
   };
 
   /**
@@ -231,7 +231,7 @@ namespace config {
     std::string virtual_sink;  ///< Virtual audio sink for audio routing
     bool stream;  ///< Enable audio streaming to clients
     bool install_steam_drivers;  ///< Install Steam audio drivers for enhanced compatibility
-    bool mic_enabled;  ///< Accept remote microphone audio from clients (Zenith, Linux/PipeWire only)
+    bool mic_enabled;  ///< Accept remote microphone audio from clients (Nova, Linux/PipeWire only)
   };
 
   /**
@@ -309,7 +309,7 @@ namespace config {
 
     bool high_resolution_scrolling;  ///< Enable high-resolution mouse-wheel events.
     bool native_pen_touch;  ///< Enable native pen and touch injection.
-    bool clipboard_sync;  ///< Sync clipboard with clients (Zenith; Linux in-session only).
+    bool clipboard_sync;  ///< Sync clipboard with clients (Nova; Linux in-session only).
   };
 
   namespace flag {

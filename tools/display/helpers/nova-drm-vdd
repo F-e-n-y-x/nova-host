@@ -1,0 +1,58 @@
+#!/bin/bash
+# Nova VDD helper — the only thing on the spare-connector path that needs root.
+#
+# Borrows a disconnected DRM connector for the length of a session: forces an
+# EDID carrying exactly the client's mode onto it, and forces it "connected".
+# `off` puts it back to `detect`, and the display is gone — not disabled, gone.
+#
+# It runs under a NOPASSWD sudoers rule, so it must not be a general
+# "write anything anywhere" tool. The connector name is validated against a
+# strict pattern, and the only paths it will ever touch are that connector's own
+# three kernel files. Anything shaped like `sudo sh -c 'cat > /sys/...'` would
+# hand every user on the box a root file-write primitive.
+#
+#   nova-drm-vdd on  <connector> <edid-file>
+#   nova-drm-vdd off <connector>
+set -euo pipefail
+
+action=${1:-}
+conn=${2:-}
+
+# A connector name and nothing else: no slashes, no dots, no traversal.
+[[ "$conn" =~ ^[A-Za-z0-9-]+$ ]] || { echo "bad connector name" >&2; exit 2; }
+
+sysfs=$(echo /sys/class/drm/card*-"$conn")
+[ -d "$sysfs" ] || { echo "no such connector: $conn" >&2; exit 2; }
+
+dbg=""
+for d in /sys/kernel/debug/dri/*/"$conn"; do [ -d "$d" ] && dbg="$d" && break; done
+
+# Writing `status` changes what the kernel thinks, but amdgpu does not re-probe
+# off the back of it, so the connector never reaches the compositor: `on` leaves
+# a display KWin cannot see (the stream mirrors the desktop instead) and `off`
+# leaves one it will not let go of. Poking trigger_hotplug is what actually
+# publishes the change. Only amdgpu exposes it — elsewhere the status write is
+# enough — so a missing file is normal, never an error.
+notify() {
+  [ -n "$dbg" ] && [ -w "$dbg/trigger_hotplug" ] && printf 1 > "$dbg/trigger_hotplug"
+  return 0
+}
+
+case "$action" in
+  on)
+    edid=${3:-}
+    [ -f "$edid" ] || { echo "no edid file: ${edid:-<none>}" >&2; exit 2; }
+    [ -n "$dbg" ] && cat "$edid" > "$dbg/edid_override"
+    printf 'on' > "$sysfs/status"
+    notify
+    ;;
+  off)
+    [ -n "$dbg" ] && printf 'reset' > "$dbg/edid_override"
+    printf 'detect' > "$sysfs/status"
+    notify
+    ;;
+  *)
+    echo "usage: nova-drm-vdd on <connector> <edid> | off <connector>" >&2
+    exit 2
+    ;;
+esac

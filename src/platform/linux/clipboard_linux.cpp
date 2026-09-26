@@ -33,7 +33,7 @@ namespace platf::clipboard {
 
     /// The Wayland socket for the clipboard tools.
     ///
-    /// Zenith frequently runs as a systemd user service whose environment has
+    /// Nova frequently runs as a systemd user service whose environment has
     /// no WAYLAND_DISPLAY even though the user's compositor is up, so fall
     /// back to discovering the socket in XDG_RUNTIME_DIR. The value is only
     /// ever handed to the wl-clipboard child processes: exporting it into

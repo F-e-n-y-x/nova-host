@@ -123,7 +123,7 @@ namespace audio {
   /**
    * @brief Forward one remote-microphone Opus payload to the platform backend.
    *
-   * Zenith remote microphone (M1): called from the mic UDP receive path with a
+   * Nova remote microphone (M1): called from the mic UDP receive path with a
    * decrypted Opus frame. No-op (-1) on platforms without mic redirection.
    *
    * @param data Opus frame payload.

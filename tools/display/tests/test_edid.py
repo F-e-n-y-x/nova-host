@@ -2,8 +2,8 @@
 
 import pytest
 
-from zenith_display import VDD_MONITOR_NAME, edid
-from zenith_display.modes import Mode
+from nova_display import VDD_MONITOR_NAME, edid
+from nova_display.modes import Mode
 
 CASES = [
     Mode(1920, 1080, 60),

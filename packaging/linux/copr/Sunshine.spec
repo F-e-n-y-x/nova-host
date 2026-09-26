@@ -15,13 +15,17 @@
 %endif
 %endif
 
-Name: Zenith
+Name: nova-host
 Version: %{build_version}
 Release: 1%{?dist}
 Summary: Self-hosted game stream host for Moonlight.
 License: GPLv3-only
-URL: https://github.com/jacksonpate/zenith
+URL: https://github.com/F-e-n-y-x/nova-host
 Source0: tarball.tar.gz
+# Same host as Nova/Sunshine under another name; they bind the same ports.
+Conflicts: sunshine
+Conflicts: zenith
+Obsoletes: zenith
 
 # Common BuildRequires
 BuildRequires: cmake >= 3.25.0
@@ -218,16 +222,16 @@ cmake_args=(
   "-DBUILD_WERROR=ON"
   "-DCMAKE_BUILD_TYPE=Release"
   "-DCMAKE_INSTALL_PREFIX=%{_prefix}"
-  "-DSUNSHINE_ASSETS_DIR=%{_datadir}/zenith"
-  "-DSUNSHINE_EXECUTABLE_PATH=%{_bindir}/zenith"
+  "-DSUNSHINE_ASSETS_DIR=%{_datadir}/nova-host"
+  "-DSUNSHINE_EXECUTABLE_PATH=%{_bindir}/nova-host"
   "-DSUNSHINE_ENABLE_DRM=ON"
   "-DSUNSHINE_ENABLE_KWIN=ON"
   "-DSUNSHINE_ENABLE_PORTAL=ON"
   "-DSUNSHINE_ENABLE_WAYLAND=ON"
   "-DSUNSHINE_ENABLE_X11=ON"
-  "-DSUNSHINE_PUBLISHER_NAME=jacksonpate"
-  "-DSUNSHINE_PUBLISHER_WEBSITE=https://github.com/jacksonpate/zenith"
-  "-DSUNSHINE_PUBLISHER_ISSUE_URL=https://github.com/jacksonpate/zenith/issues"
+  "-DSUNSHINE_PUBLISHER_NAME=F-e-n-y-x"
+  "-DSUNSHINE_PUBLISHER_WEBSITE=https://github.com/F-e-n-y-x/nova-host"
+  "-DSUNSHINE_PUBLISHER_ISSUE_URL=https://github.com/F-e-n-y-x/nova-host/issues"
 )
 
 %if 0%{?fedora}
@@ -437,7 +441,7 @@ fi
 
 %files
 # Executables
-%caps(cap_sys_admin,cap_sys_nice+p) %{_bindir}/zenith
+%caps(cap_sys_admin,cap_sys_nice+p) %{_bindir}/nova-host
 
 # Systemd unit files for user services
 %{_userunitdir}/*.service
@@ -458,6 +462,6 @@ fi
 %{_datadir}/metainfo/*.metainfo.xml
 
 # Assets
-%{_datadir}/zenith/**
+%{_datadir}/nova-host/**
 
 %changelog

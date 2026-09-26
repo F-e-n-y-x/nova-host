@@ -1527,7 +1527,7 @@ supported on the current platform.
     <tr>
         <td>Description</td>
         <td colspan="2">
-            The highest framerate Zenith streams at, regardless of what the client requests (Zenith).
+            The highest framerate Nova streams at, regardless of what the client requests (Nova).
             Use it to fix uneven frame pacing when the host framerate is not a whole multiple of the client's
             display refresh, e.g. 75 FPS into a 60 Hz display. A clean multiple (120 FPS into 60 Hz) is usually
             better than capping.
@@ -2304,7 +2304,7 @@ supported on the current platform.
     <tr>
         <td>Description</td>
         <td colspan="2">
-            How the KMS capture loop schedules frame grabs (Zenith).
+            How the KMS capture loop schedules frame grabs (Nova).
             @note{Applies to Linux only.}
         </td>
     </tr>
@@ -2332,7 +2332,7 @@ supported on the current platform.
     </tr>
     <tr>
         <td>timer</td>
-        <td>Steady-clock pacing, the pre-Zenith behavior.</td>
+        <td>Steady-clock pacing, the pre-Nova behavior.</td>
     </tr>
 </table>
 
@@ -2343,7 +2343,7 @@ supported on the current platform.
         <td>Description</td>
         <td colspan="2">
             Accept microphone audio from connecting clients (Voidlink and Moonlight forks with
-            mic redirection). Creates a virtual "Zenith Mic" source in PipeWire that any
+            mic redirection). Creates a virtual "Nova Mic" source in PipeWire that any
             application can use.
             @note{Applies to Linux only.}
         </td>

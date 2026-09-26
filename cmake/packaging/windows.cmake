@@ -42,7 +42,7 @@ install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/firewall/"
         DESTINATION "scripts"
         COMPONENT firewall)
 
-# Zenith display autopilot: bundled virtual display driver + control tool.
+# Nova display autopilot: bundled virtual display driver + control tool.
 # Driver binaries are signed release artifacts fetched at configure time;
 # scripts and settings ship from the source tree. Missing payloads degrade
 # to a package without one-click VDD, never to a build failure.
@@ -51,7 +51,7 @@ install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/vdd/install-vdd.bat"
               "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/vdd/uninstall-vdd.bat"
         DESTINATION "scripts"
         COMPONENT vdd)
-install(FILES "${CMAKE_SOURCE_DIR}/tools/display/windows/ZenithDisplay.ps1"
+install(FILES "${CMAKE_SOURCE_DIR}/tools/display/windows/NovaDisplay.ps1"
         DESTINATION "scripts"
         COMPONENT vdd)
 if(VDD_DRIVER_AVAILABLE)

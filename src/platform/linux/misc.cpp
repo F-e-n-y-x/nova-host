@@ -60,6 +60,7 @@
 #include "misc.h"
 #include "src/boost_process_compat.h"
 #include "src/config.h"
+#include "src/config_migration.h"
 #include "src/entry_handler.h"
 #include "src/globals.h"
 #include "src/logging.h"
@@ -296,24 +297,24 @@ namespace platf {
       // May be set if running under a systemd service with the ConfigurationDirectory= option set.
       if (std::string dir; lizardbyte::common::get_env("CONFIGURATION_DIRECTORY", dir) && !dir.empty()) {
         found = true;
-        config_path = fs::path(dir) / "sunshine"sv;
+        config_path = fs::path(dir) / "nova-host"sv;
       }
       // Otherwise, follow the XDG base directory specification:
       // https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
       if (std::string dir; !found && lizardbyte::common::get_env("XDG_CONFIG_HOME", dir) && !dir.empty()) {
         found = true;
-        config_path = fs::path(dir) / "sunshine"sv;
+        config_path = fs::path(dir) / "nova-host"sv;
       }
       // As a last resort, use the home directory
       if (!found) {
         migrate_config = false;
-        config_path = homedir / ".config" / "sunshine";
+        config_path = homedir / ".config" / "nova-host";
       }
 
       // migrate from the old config location if necessary
       if (std::string migrate_envvar; migrate_config && found && lizardbyte::common::get_env("SUNSHINE_MIGRATE_CONFIG", migrate_envvar) && migrate_envvar == "1") {
         std::error_code ec;
-        fs::path old_config_path = homedir / ".config" / "sunshine";
+        fs::path old_config_path = homedir / ".config" / "nova-host";
         if (old_config_path != config_path && fs::exists(old_config_path, ec)) {
           if (!fs::exists(config_path, ec)) {
             std::cout << "Migrating config from "sv << old_config_path << " to "sv << config_path << std::endl;
@@ -346,6 +347,19 @@ namespace platf {
             std::cerr << "It is recommended to remove "sv << old_config_path << std::endl;
           }
         }
+      }
+
+      // Adopt the settings of a pre-rename install (Nova, or upstream Sunshine) once.
+      const auto legacy = config_migration::migrate_directory(
+        config_path,
+        {config_path.parent_path() / "sunshine", homedir / ".config" / "sunshine"},
+        "nova-host.conf"
+      );
+      if (legacy.migrated) {
+        // Boost logging is not initialized yet.
+        std::cout << "Copied settings from "sv << legacy.source << " to "sv << config_path << " (the old folder was left in place)"sv << std::endl;
+      } else if (!legacy.error.empty()) {
+        std::cerr << "Could not copy settings from "sv << legacy.source << ": "sv << legacy.error << std::endl;
       }
     });
 

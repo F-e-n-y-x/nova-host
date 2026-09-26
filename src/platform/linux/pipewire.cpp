@@ -1523,7 +1523,7 @@ namespace pipewire {
                            << (vendor_sv.empty() ? "another GPU"sv : vendor_sv)
                            << " but NVENC will encode; a dma-buf cannot cross to CUDA, "
                               "so every frame is copied through system memory."sv;
-        BOOST_LOG(warning) << "[pipewire] run `zenith-display doctor` — putting the virtual "
+        BOOST_LOG(warning) << "[pipewire] run `nova-display doctor` — putting the virtual "
                               "display on the NVIDIA GPU restores zero-copy capture."sv;
       } else if (display_is_nvidia) {
         BOOST_LOG(info) << "[pipewire] compositor and encoder share the NVIDIA GPU — DMA-BUF enabled for CUDA"sv;

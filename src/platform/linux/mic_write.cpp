@@ -2,7 +2,7 @@
  * @file src/platform/linux/mic_write.cpp
  * @brief PipeWire virtual source fed by the remote microphone stream.
  *
- * Creates a `media.class = Audio/Source` stream node named "Zenith Mic" so any
+ * Creates a `media.class = Audio/Source` stream node named "Nova Mic" so any
  * desktop application (Discord, games, recorders) can select the remote client's
  * microphone like real hardware. Opus decode happens here, mirroring the
  * platform contract used on Windows by Sunshine-Foundation (WASAPI + virtual
@@ -36,7 +36,7 @@ namespace platf::pw_mic {
   }  // namespace
 
   /**
-   * @brief PipeWire-backed virtual microphone ("Zenith Mic") fed by remote Opus frames.
+   * @brief PipeWire-backed virtual microphone ("Nova Mic") fed by remote Opus frames.
    */
   class pipewire_mic_t: public mic_out_t {
   public:
@@ -65,15 +65,15 @@ namespace platf::pw_mic {
       int opus_err = 0;
       decoder = opus_decoder_create(kSampleRate, kChannels, &opus_err);
       if (opus_err != OPUS_OK) {
-        BOOST_LOG(error) << "zenith-mic: opus_decoder_create failed: "sv << opus_strerror(opus_err);
+        BOOST_LOG(error) << "nova-mic: opus_decoder_create failed: "sv << opus_strerror(opus_err);
         return false;
       }
 
       ring.resize(kRingCapacity);
 
-      loop = pw_thread_loop_new("zenith-mic", nullptr);
+      loop = pw_thread_loop_new("nova-mic", nullptr);
       if (!loop) {
-        BOOST_LOG(error) << "zenith-mic: pw_thread_loop_new failed"sv;
+        BOOST_LOG(error) << "nova-mic: pw_thread_loop_new failed"sv;
         return false;
       }
 
@@ -82,8 +82,8 @@ namespace platf::pw_mic {
         PW_KEY_MEDIA_CATEGORY, "Playback",
         PW_KEY_MEDIA_ROLE, "Communication",
         PW_KEY_MEDIA_CLASS, "Audio/Source",
-        PW_KEY_NODE_NAME, "zenith-mic",
-        PW_KEY_NODE_DESCRIPTION, "Zenith Mic (remote client)",
+        PW_KEY_NODE_NAME, "nova-mic",
+        PW_KEY_NODE_DESCRIPTION, "Nova Mic (remote client)",
         PW_KEY_NODE_VIRTUAL, "true",
         nullptr);
 
@@ -101,12 +101,12 @@ namespace platf::pw_mic {
 
       stream = pw_stream_new_simple(
         pw_thread_loop_get_loop(loop),
-        "zenith-mic",
+        "nova-mic",
         props,
         &stream_events,
         this);
       if (!stream) {
-        BOOST_LOG(error) << "zenith-mic: pw_stream_new_simple failed"sv;
+        BOOST_LOG(error) << "nova-mic: pw_stream_new_simple failed"sv;
         return false;
       }
 
@@ -128,16 +128,16 @@ namespace platf::pw_mic {
         params,
         1);
       if (err < 0) {
-        BOOST_LOG(error) << "zenith-mic: pw_stream_connect failed: "sv << spa_strerror(err);
+        BOOST_LOG(error) << "nova-mic: pw_stream_connect failed: "sv << spa_strerror(err);
         return false;
       }
 
       if (pw_thread_loop_start(loop) != 0) {
-        BOOST_LOG(error) << "zenith-mic: pw_thread_loop_start failed"sv;
+        BOOST_LOG(error) << "nova-mic: pw_thread_loop_start failed"sv;
         return false;
       }
 
-      BOOST_LOG(info) << "zenith-mic: virtual source node created (48 kHz mono)"sv;
+      BOOST_LOG(info) << "nova-mic: virtual source node created (48 kHz mono)"sv;
       return true;
     }
 
@@ -153,7 +153,7 @@ namespace platf::pw_mic {
         kMaxOpusFrameSamples,
         0);
       if (samples < 0) {
-        BOOST_LOG(warning) << "zenith-mic: opus_decode failed: "sv << opus_strerror(samples);
+        BOOST_LOG(warning) << "nova-mic: opus_decode failed: "sv << opus_strerror(samples);
         return -1;
       }
 

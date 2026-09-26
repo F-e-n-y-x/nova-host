@@ -34,7 +34,7 @@ jobs:
         run: python -m pip install pytest ruff
 
       - name: Ruff
-        run: ruff check tools/display/zenith_display tools/display/tests
+        run: ruff check tools/display/nova_display tools/display/tests
 
       - name: Pytest
         run: python -m pytest tools/display/tests -v
@@ -67,19 +67,19 @@ jobs:
           export WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep -m1 '^wayland-')
 
           echo "== probe =="
-          tools/display/zenith-display probe
+          tools/display/nova-display probe
 
           echo "== plan =="
-          tools/display/zenith-display plan || true
+          tools/display/nova-display plan || true
 
           echo "== dry-run must not write state or mutate =="
           export SUNSHINE_CLIENT_WIDTH=2420 SUNSHINE_CLIENT_HEIGHT=1668 SUNSHINE_CLIENT_FPS=60
-          tools/display/zenith-display --dry-run --strict headless
-          test ! -e "${XDG_STATE_HOME:-$HOME/.local/state}/zenith/display/snapshot.json" \
+          tools/display/nova-display --dry-run --strict headless
+          test ! -e "${XDG_STATE_HOME:-$HOME/.local/state}/nova-host/display/snapshot.json" \
             || { echo "dry-run wrote a snapshot"; exit 1; }
 
           echo "== headless apply at a client mode =="
-          tools/display/zenith-display -v --strict headless
+          tools/display/nova-display -v --strict headless
 
           echo "== VDD is live with the client mode =="
           swaymsg -t get_outputs --raw | python3 -c '
@@ -93,7 +93,7 @@ jobs:
           '
 
           echo "== restore =="
-          tools/display/zenith-display -v --strict restore
+          tools/display/nova-display -v --strict restore
           swaymsg -t get_outputs --raw | python3 -c '
           import json, sys
           outs = json.load(sys.stdin)
@@ -129,7 +129,7 @@ jobs:
           # entered from headless — where every monitor is off — it produced one
           # lit display and was indistinguishable from headless.
           #
-          # Asserted against the compositor itself, never against zenith's own
+          # Asserted against the compositor itself, never against nova's own
           # output, and against apply_dual() directly: driving the CLI hides the
           # bug on sway, whose synchronous IPC relights the monitors during the
           # stale-snapshot restore before apply_dual ever runs.

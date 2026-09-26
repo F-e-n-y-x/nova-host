@@ -1,6 +1,6 @@
-# Virtual displays (VDD) on Zenith
+# Virtual displays (VDD) on Nova
 
-Zenith gives you Apollo/Sunshine-Foundation-style virtual displays on Linux: a
+Nova gives you Apollo/Sunshine-Foundation-style virtual displays on Linux: a
 phantom monitor that lights up **at your Moonlight device's exact resolution**
 when you start a stream, and disappears when you quit it.
 
@@ -8,8 +8,8 @@ Two pieces:
 
 | piece | what it does | when it runs |
 |---|---|---|
-| `scripts/zenith-vdd-setup` | one-time host setup: forces an unused GPU output "connected" with a generated EDID | once, as root, then reboot |
-| `scripts/zenith-display` | per-session logic: activates the VDD at the client's resolution, restores your real layout after | automatically, as a Zenith app prep-command |
+| `scripts/nova-vdd-setup` | one-time host setup: forces an unused GPU output "connected" with a generated EDID | once, as root, then reboot |
+| `scripts/nova-display` | per-session logic: activates the VDD at the client's resolution, restores your real layout after | automatically, as a Nova app prep-command |
 
 Requirements: a GPU with a free connector (almost every desktop GPU exposes
 unused DP outputs), and a **GNOME/Wayland** session (Mutter backend — KDE and
@@ -18,10 +18,10 @@ wlroots backends are on the roadmap).
 ## 1. One-time setup
 
 ```sh
-sudo zenith-vdd-setup detect      # shows connectors, suggests a free one
-sudo zenith-vdd-setup install     # generates EDID, installs it, sets kernel args
+sudo nova-vdd-setup detect      # shows connectors, suggests a free one
+sudo nova-vdd-setup install     # generates EDID, installs it, sets kernel args
 # reboot
-zenith-vdd-setup verify           # confirms the phantom monitor is alive
+nova-vdd-setup verify           # confirms the phantom monitor is alive
 ```
 
 `install` picks a free DisplayPort connector automatically (or take
@@ -35,7 +35,7 @@ encodes, which means 4K60 yes, 4K120 no).
 It handles the boot plumbing per distro:
 
 - **GRUB distros** (Ubuntu/Debian/Mint/Fedora Workstation): appends
-  `drm.edid_firmware=<CONN>:edid/zenith-vdd.bin video=<CONN>:e` (plus
+  `drm.edid_firmware=<CONN>:edid/nova-vdd.bin video=<CONN>:e` (plus
   `nvidia-drm.modeset=1` on NVIDIA) to `/etc/default/grub` and runs the grub
   updater.
 - **rpm-ostree** (Silverblue/Kinoite/Asahi Fedora Remix): firmware goes to
@@ -43,13 +43,13 @@ It handles the boot plumbing per distro:
   kargs via `rpm-ostree kargs`.
 - **anything else**: prints the exact args for you to add manually.
 
-After reboot, GNOME's display settings show a new monitor ("ZenithVDD"). You
-can leave it disabled — `zenith-display` turns it on only during sessions.
+After reboot, GNOME's display settings show a new monitor ("Nova-VDD"; setups made by Zenith show "ZenithVDD" and keep working). You
+can leave it disabled — `nova-display` turns it on only during sessions.
 
 ## 2. Per-session apps
 
-Nothing to install: every Zenith package ships **Headless** and **Dual
-Display** apps backed by the built-in `zenith-display` autopilot (installed
+Nothing to install: every Nova package ships **Headless** and **Dual
+Display** apps backed by the built-in `nova-display` autopilot (installed
 to `/usr/bin`). It detects your session (KDE, GNOME, X11, wlroots), spins a
 virtual display at the connecting client's exact resolution and refresh
 (`SUNSHINE_CLIENT_WIDTH/HEIGHT/FPS`), and restores your exact layout when
@@ -61,30 +61,30 @@ the stream ends.
 - **Quit the app in Moonlight**: your pre-session layout comes back and the
   VDD goes dark. Crash-safe: a stale snapshot is restored on the next run.
 - If no VDD mechanism is available the app still launches (you stream the
-  normal desktop); run `sudo zenith-display setup` once to bootstrap the
-  universal EVDI fallback, and `zenith-display doctor` to see what the
+  normal desktop); run `sudo nova-display setup` once to bootstrap the
+  universal EVDI fallback, and `nova-display doctor` to see what the
   machine supports.
 
 > **Migrating from the old scripts:** remove any hand-installed copies —
-> `sudo rm -f /usr/local/bin/zenith-display /usr/local/bin/zenith-display-kde
-> /usr/local/bin/zenith-display-auto` — they shadow the packaged autopilot on
+> `sudo rm -f /usr/local/bin/nova-display /usr/local/bin/nova-display-kde
+> /usr/local/bin/nova-display-auto` — they shadow the packaged autopilot on
 > PATH and use an incompatible state file.
 
-If the virtual connector isn't named `DP-1`, set `ZENITH_VDD_CONNECTOR` in the
-app's environment (or Zenith's global env) to match.
+If the virtual connector isn't named `DP-1`, set `NOVA_VDD_OUTPUT` (the pre-rename `ZENITH_VDD_OUTPUT` still works) in the
+app's environment (or Nova's global env) to match.
 
 ## Troubleshooting
 
 - `verify` says disconnected → check `cat /proc/cmdline` contains the args;
   some distros need the firmware blob inside the initramfs if the GPU driver
   does early modesetting (`sudo update-initramfs -u` after adding a hook, or
-  `install_items+=" /usr/lib/firmware/edid/zenith-vdd.bin "` in a dracut conf).
+  `install_items+=" /usr/lib/firmware/edid/nova-vdd.bin "` in a dracut conf).
 - A client resolution isn't matched exactly → it's not in the EDID mode list;
   re-run `install` with `--modes` including it (reboot applies).
 - Wrong monitor captured during sessions → pin `output_name` in
   `sunshine.conf` to the VDD, or reorder via GNOME display settings.
 - The stream will not reach the frame rate you asked for, and a lower-resolution
-  client on the same host does → run `zenith-display doctor` and read the
+  client on the same host does → run `nova-display doctor` and read the
   `encoder` and `binary` lines. Three causes, all invisible from the client:
   - **The binary has no capabilities.** KMS capture cannot open a DRM
     framebuffer, so capture drops to the desktop portal and present-paced
@@ -94,7 +94,7 @@ app's environment (or Zenith's global env) to match.
     refuses NVENC outright and reverts to GPU → RAM → GPU, so zero-copy is
     unreachable no matter where the virtual display sits. The x86_64 releases
     ship CUDA from v0.2.0 onward; a local build must opt in (see
-    [building locally](building_zenith_local.md)). Note this one only becomes
+    [building locally](building_nova_local.md)). Note this one only becomes
     visible *after* the capability problem is fixed — until then the host never
     reaches the KMS path to complain about it.
     AMD needs none of this: VAAPI imports a dma-buf directly, so a Radeon host
@@ -103,7 +103,7 @@ app's environment (or Zenith's global env) to match.
   - **The virtual display is on a GPU that is not encoding.** On a hybrid
     laptop the iGPU owns the low-numbered connectors and the dGPU encodes, so a
     dma-buf cannot be imported into CUDA and every frame is copied through
-    system memory. Zenith now prefers a free port on the encoding GPU
+    system memory. Nova now prefers a free port on the encoding GPU
     automatically; when every one of them is occupied `doctor` says so, and
     freeing one (unplug a monitor from that card) removes the copy. The cost
     scales with pixels, which is why 1080p survives it and a tablet's native
@@ -115,19 +115,19 @@ The Windows installer bundles the SudoVDA indirect display driver (SudoMaker,
 MIT/CC0) and installs it during setup — its certificate goes into the Root and
 TrustedPublisher stores, which is sufficient for a UMDF driver on stock
 Windows: no test mode, Secure Boot stays on. **Headless** and **Extend**
-work out of the box: the default apps run `scripts\ZenithDisplay.ps1`, which
+work out of the box: the default apps run `scripts\NovaDisplay.ps1`, which
 creates the virtual monitor **at the exact client resolution/refresh**
 (SudoVDA's ADD ioctl takes the mode directly) and destroys it on session end.
 The driver's watchdog removes displays when pings stop, so a hidden holder
 process pings for the session — crash-safe by construction.
 
 - The driver never installed (setup skipped, older package)? Run
-  `powershell -File "C:\Program Files\Zenith\scripts\ZenithDisplay.ps1" ensure`
+  `powershell -File "C:\Program Files\Nova\scripts\NovaDisplay.ps1" ensure`
   once as admin.
 - Pair it with `dd_configuration_option = ensure_only_display` for true
   headless behavior (other displays deactivate for the session and restore
   after).
-- `ZenithDisplay.ps1 probe` prints a JSON diagnosis (driver present, control
+- `NovaDisplay.ps1 probe` prints a JSON diagnosis (driver present, control
   interface reachable, ping, monitor count).
 - Topology switching currently uses DisplaySwitch (external/extend/internal);
   exact multi-monitor CCD control lands with the native integration.

@@ -1,103 +1,100 @@
 <div align="center">
-  <img src="sunshine.svg" alt="Zenith icon" width="200"/>
-  <h1 align="center">Zenith</h1>
-  <h4 align="center">Linux-first fork of Sunshine — a self-hosted game stream host for Moonlight.</h4>
+  <img src="sunshine.svg" alt="Nova icon" width="200"/>
+  <h1 align="center">Nova</h1>
+  <h4 align="center">Linux-first, self-hosted game stream host for Moonlight — a fork of Zenith and Sunshine.</h4>
 </div>
 
 <div align="center">
-  <a href="https://github.com/jacksonpate/zenith/actions/workflows/zenith-ci.yml"><img src="https://github.com/jacksonpate/zenith/actions/workflows/zenith-ci.yml/badge.svg" alt="Zenith CI"></a>
-  <a href="https://discord.gg/X7vTVmMBDK"><img src="https://img.shields.io/badge/discord-join-8b30d9?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://github.com/F-e-n-y-x/nova-host/actions/workflows/nova-ci.yml"><img src="https://github.com/F-e-n-y-x/nova-host/actions/workflows/nova-ci.yml/badge.svg" alt="Nova CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-8b30d9?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-linux%20first-a855f7?style=flat-square" alt="Linux first">
-  <a href="https://github.com/LizardByte/Sunshine"><img src="https://img.shields.io/badge/forked%20from-LizardByte%2FSunshine-6d1fb8?style=flat-square" alt="Upstream"></a>
+  <a href="https://github.com/jacksonpate/zenith"><img src="https://img.shields.io/badge/forked%20from-jacksonpate%2Fzenith-6d1fb8?style=flat-square" alt="Forked from Zenith"></a>
+  <a href="https://github.com/LizardByte/Sunshine"><img src="https://img.shields.io/badge/based%20on-LizardByte%2FSunshine-6d1fb8?style=flat-square" alt="Based on Sunshine"></a>
 </div>
 
 <br/>
 
 <div align="center">
-  <img src="docs/images/zenith-fetch.svg" alt="Zenith at a glance" width="760"/>
+  <img src="docs/images/nova-fetch.svg" alt="Nova at a glance" width="760"/>
 </div>
 
-## Why Zenith
+## Why Nova
 
 The best Sunshine forks (Apollo, Sunshine-Foundation) are Windows-only because their headline
-features are built on Windows virtual display drivers. Zenith ports the *ideas* everywhere — the
-native way on Linux (PipeWire, KMS/DRM, Wayland) and with a bundled signed driver on Windows —
-with NVIDIA **and** AMD as first-class citizens. Install it, pick **Headless** in Moonlight, and
-a virtual display spins up at your client's exact resolution and refresh. No extra steps.
+features are built on Windows virtual display drivers. Nova, like Zenith before it, ports the
+*ideas* everywhere — the native way on Linux (PipeWire, KMS/DRM, Wayland) and with a bundled
+signed driver on Windows — with NVIDIA **and** AMD as first-class citizens. Install it, pick
+**Headless** in Moonlight, and a virtual display spins up at your client's exact resolution and
+refresh. Its companion Android client is [Nebula](https://github.com/F-e-n-y-x/nebula).
 
 - 🖥️ **Plug-and-play virtual displays** — "Headless" and "Dual" work out of the box on
   Linux (KDE, GNOME, Sway/wlroots, Cinnamon) and on Windows (bundled signed SudoVDA driver).
   The display is *born when the app launches and destroyed when it quits*, at exactly the
-  client's resolution and refresh — connect from a tablet, quit, pick up on a phone, and the
-  phone gets its own screen rather than the tablet's. *Shipped.*
-- 📍 **It stays where you put it** — drag the streaming display below your monitor, set a zoom
-  you can read from the sofa, and it comes back there next session, even if you rezoomed your
-  monitor or connected from a different device in between. *Shipped.*
-- 🔌 **No kernel module on most machines** — if the host has a spare port, Zenith borrows it:
-  a generated EDID on a real connector, on the same GPU that will encode it. No DKMS, no
-  Secure Boot enrolment, no reboot. Machines with every port occupied fall back to EVDI, which
-  `zenith-display setup` installs — or builds from source where no distro packages it (Arch).
-  *Shipped.*
+  client's resolution and refresh.
+- 📍 **It stays where you put it** — the streaming display's position and zoom come back next
+  session, even if you rezoomed your monitor or connected from a different device in between.
+- 🔌 **No kernel module on most machines** — if the host has a spare port, Nova borrows it:
+  a generated EDID on a real connector, on the same GPU that will encode it. Machines with every
+  port occupied fall back to EVDI, which `nova-display setup` installs.
 - 🎤 **Remote microphone** — your phone's mic shows up on the host as a real input device
-  ("Zenith Mic") that Discord and games can use. On by default. *Shipped.*
-- 📋 **Clipboard sync, both ways** — copy text or an image on either end, paste on the other.
-  Large payloads move over the paired TLS connection. Wire-compatible with VoidLink and the
-  Foundation-family clients. *Shipped.*
-- 📁 **File transfer to the client** — push a file from the host to your connected device.
-  *Beta.*
+  ("Nova Mic") that Discord and games can use. On by default.
+- 📋 **Clipboard sync, both ways** — text or images, over the paired TLS connection.
+  Wire-compatible with VoidLink and the Foundation-family clients.
+- 📁 **File transfer to the client** — push a file from the host to your connected device. *Beta.*
 - ⚡ **Present-paced capture** — KMS capture wakes on real display vblanks instead of a
-  timer: measured ~16ms → ~6-9ms host latency at high res on AMD. On by default
-  (`capture_pacing = auto`); NVIDIA falls back to timer pacing automatically. *Shipped.*
+  timer (`capture_pacing = auto`); NVIDIA falls back to timer pacing automatically.
+- 🎮 **NVENC on older GeForce cards** — x86_64 packages are built with CUDA 12.9, so GTX 900/1000
+  (Maxwell/Pascal) and Volta GPUs keep hardware encoding, from NVIDIA driver 455 up.
 
 See [ROADMAP.md](ROADMAP.md) for what's next.
 
 ## Install
 
-Download the [latest release](https://github.com/jacksonpate/zenith/releases/latest) for your
+Download the [latest release](https://github.com/F-e-n-y-x/nova-host/releases/latest) for your
 platform:
 
 | Platform | Package | Notes |
 |----------|---------|-------|
-| **Windows 10/11** | `Zenith-Windows-AMD64-installer.msi` | Bundles the virtual display driver; Secure Boot stays on. |
-| **Ubuntu / Debian / Mint** | `zenith-*-amd64.deb` | `sudo apt install ./zenith-*.deb` |
-| **Fedora / Nobara / Bazzite** | `zenith-fedora-*-x86_64.rpm` | `sudo dnf install ./zenith-*.rpm` |
-| **Asahi Linux (Apple Silicon)** | `zenith-fedora-*-aarch64.rpm` | Fedora Asahi Remix. |
+| **Windows 10/11** | `nova-host-Windows-AMD64-installer.msi` | Bundles the virtual display driver. Untested since the rename. |
+| **Ubuntu / Debian / Mint** | `nova-host-*-amd64.deb` | `sudo apt install ./nova-host-*.deb` |
+| **Fedora / Nobara / Bazzite** | `nova-host-fedora-*-x86_64.rpm` | `sudo dnf install ./nova-host-*.rpm` |
+| **Asahi Linux (Apple Silicon)** | `nova-host-fedora-*-aarch64.rpm` | Fedora Asahi Remix. |
 
-Then open `https://<host-ip>:47990`, set a username and password, and pair Moonlight/VoidLink.
-Zenith runs under its own identity — the `zenith` binary and the `io.github.jacksonpate.Zenith`
-service — but keeps Sunshine's config directory, `~/.config/sunshine/`, where it reads
-`zenith.conf` and writes `zenith.log`. The Linux packages *Conflict with* and *Replace* a distro
-`sunshine` package, so installing Zenith supersedes an existing Sunshine rather than running a
+Then open `https://<host-ip>:47990`, set a username and password, and pair Moonlight or Nebula.
+Nova installs the `nova-host` binary and the `app-io.github.f_e_n_y_x.NovaHost` user service
+(aliased `nova-host.service`), and keeps its settings in `~/.config/nova-host/`
+(`nova-host.conf`, `nova-host.log`). The Linux packages *Conflict with* and *Replace* the
+`zenith` and `sunshine` packages, so installing Nova supersedes either rather than running a
 second host on the same ports.
 
-Coming from Sunshine, that split decides what survives the switch: your **pairings and web UI
-login carry over** — they live in `sunshine_state.json`, which Zenith reads under its original
-name — while **settings do not**, because Zenith reads `zenith.conf` and leaves `sunshine.conf`
-alone. So you keep your paired devices and set your preferences again.
+**Coming from Zenith or Sunshine:** the first time Nova starts, it copies your old settings folder
+(`~/.config/sunshine/`) to `~/.config/nova-host/`, renaming `zenith.conf` (or `sunshine.conf`) to
+`nova-host.conf`. Pairings, web UI login, apps and covers come along; the old folder is left
+untouched, so you can go back.
 
-> **Windows SmartScreen**: the installer isn't code-signed yet, so Windows may show
-> "Windows protected your PC." Click **More info → Run anyway**.
+Prefer to build from source? See the [local build notes](docs/building_nova_local.md).
 
-Prefer to build from source? See the [local build notes](docs/building_zenith_local.md).
+## Versioning
 
-## Community
+Nova uses numeric [semantic versioning](https://semver.org). Releases are tagged `nova-vX.Y.Z`
+(the history also carries Sunshine's old `v0.x` and the date-based Zenith/Sunshine tags, so plain
+`v*` tags are not used). Everything before **1.0.0** is a pre-release (`0.x`); 1.0.0 is the first
+release considered stable. Local builds report the nearest `nova-v*` tag (or the version in
+`CMakeLists.txt` when there is none) plus the commit, for example `0.1.0-0710b321`.
 
-Questions, bug reports, or you got it working on something unusual — come say so.
+## Troubleshooting
 
-- 💬 **[Discord](https://discord.gg/X7vTVmMBDK)** — support, and where new features get argued about first.
-- 🐛 **[Issues](https://github.com/jacksonpate/zenith/issues)** — bugs and feature requests.
-
-If a virtual display misbehaves, `zenith-display doctor` prints what Zenith can see of your
-machine — session, compositor, connectors, and which provider it would use and why. Paste that
-into an issue and you have skipped three rounds of back-and-forth.
+If a virtual display misbehaves, `nova-display doctor` prints what Nova can see of your
+machine — session, compositor, connectors, and which provider it would use and why. Include that
+in an [issue](https://github.com/F-e-n-y-x/nova-host/issues).
 
 ## Credits & license
 
-Zenith is a fork of [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine) and stands on
-their work — go star them, sponsor them, and read their excellent
-[documentation](https://docs.lizardbyte.dev/projects/sunshine/latest/), which applies to Zenith
-for everything not listed above. Feature inspiration from
+Nova is a fork of [Zenith](https://github.com/jacksonpate/zenith) by Jackson Pate, which is itself
+a fork of [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine). It stands on their work —
+go star them, and read Sunshine's
+[documentation](https://docs.lizardbyte.dev/projects/sunshine/latest/), which applies to Nova for
+everything not listed above. Feature inspiration from
 [Sunshine-Foundation](https://github.com/AlkaidLab/foundation-sunshine) and
 [Apollo](https://github.com/ClassicOldSong/Apollo), reimplemented for Linux.
 

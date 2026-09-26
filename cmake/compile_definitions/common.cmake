@@ -147,6 +147,7 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/clipboard.h"
         "${CMAKE_SOURCE_DIR}/src/clipboard.cpp"
         "${CMAKE_SOURCE_DIR}/src/config.cpp"
+        "${CMAKE_SOURCE_DIR}/src/config_migration.cpp"
         "${CMAKE_SOURCE_DIR}/src/display_device.h"
         "${CMAKE_SOURCE_DIR}/src/display_device.cpp"
         "${CMAKE_SOURCE_DIR}/src/entry_handler.cpp"

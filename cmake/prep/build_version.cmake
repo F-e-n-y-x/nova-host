@@ -23,7 +23,8 @@ if((DEFINED ENV{BRANCH}) AND (DEFINED ENV{BUILD_VERSION}))  # cmake-lint: disabl
         # If BRANCH is master we are building a push/release build
         MESSAGE("Got from CI '$ENV{BRANCH}' branch and version '$ENV{BUILD_VERSION}'")
         set(PROJECT_VERSION $ENV{BUILD_VERSION})
-        string(REGEX REPLACE "^v" "" PROJECT_VERSION ${PROJECT_VERSION})  # remove the v prefix if it exists
+        # remove the release tag prefix ("nova-v0.1.0" or "v0.1.0" -> "0.1.0")
+        string(REGEX REPLACE "^(nova-)?v" "" PROJECT_VERSION ${PROJECT_VERSION})
         set(CMAKE_PROJECT_VERSION ${PROJECT_VERSION})  # cpack will use this to set the binary versions
     endif()
 else()
@@ -53,16 +54,18 @@ else()
                 RESULT_VARIABLE GIT_IS_DIRTY
                 OUTPUT_STRIP_TRAILING_WHITESPACE
         )
-        # Base local builds on the nearest release tag; project() stays at 0.3.0, which would
-        # make every local build look older than any published release.
+        # Base local builds on the nearest Nova release tag. Nova tags are "nova-v<semver>"
+        # (0.x until 1.0.0): the history also carries Sunshine's old v0.1.0-v0.23.1 tags and the
+        # date-based Nova/Sunshine tags (v2025.*, v2026.*), which a plain "v*" match would pick
+        # up. With no Nova tag yet, the project() version is used.
         execute_process(
-                COMMAND ${GIT_EXECUTABLE} describe --tags --abbrev=0 --match "v[0-9]*"
+                COMMAND ${GIT_EXECUTABLE} describe --tags --abbrev=0 --match "nova-v[0-9]*"
                 OUTPUT_VARIABLE GIT_NEAREST_TAG
                 RESULT_VARIABLE GIT_NEAREST_TAG_ERROR_CODE
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET
         )
-        if(NOT GIT_NEAREST_TAG_ERROR_CODE AND GIT_NEAREST_TAG MATCHES "^v([0-9]+\\.[0-9]+\\.[0-9]+)$")
+        if(NOT GIT_NEAREST_TAG_ERROR_CODE AND GIT_NEAREST_TAG MATCHES "^nova-v([0-9]+\\.[0-9]+\\.[0-9]+)$")
             set(PROJECT_VERSION ${CMAKE_MATCH_1})
             set(CMAKE_PROJECT_VERSION ${PROJECT_VERSION})
             MESSAGE("Nearest release tag: ${GIT_NEAREST_TAG}")
@@ -85,10 +88,11 @@ else()
     endif()
 endif()
 
-# set date variables
-set(PROJECT_YEAR "1990")
-set(PROJECT_MONTH "01")
-set(PROJECT_DAY "01")
+# set date variables; semver builds use the build date (honours SOURCE_DATE_EPOCH),
+# date-based versions below override it with the date encoded in the version
+string(TIMESTAMP PROJECT_YEAR "%Y" UTC)
+string(TIMESTAMP PROJECT_MONTH "%m" UTC)
+string(TIMESTAMP PROJECT_DAY "%d" UTC)
 
 # Extract year, month, and day (do this AFTER version parsing)
 # Note: Cmake doesn't support "{}" regex syntax

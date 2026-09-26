@@ -7,7 +7,7 @@ modprobe uhid
 # Homebrew installs host integration files inside its Cellar. Copy them to
 # host directories that systemd-udevd and systemd-modules-load monitor.
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-for rule in 60-sunshine.rules 60-zenith-vdd.rules ; do
+for rule in 60-sunshine.rules 60-nova-host-vdd.rules ; do
   packaged_udev_rule="$script_dir/../lib/udev/rules.d/$rule"
   if [ -f "$packaged_udev_rule" ]; then
     echo "Installing udev rule $rule."
@@ -20,40 +20,40 @@ if [ -f "$packaged_modules_file" ]; then
   install -Dm644 "$packaged_modules_file" /etc/modules-load.d/60-sunshine.conf
 fi
 
-# Ensure Zenith can grab images from KMS.
+# Ensure Nova can grab images from KMS.
 #
 # Resolve the binary by name rather than assuming one: the host binary is
-# `zenith`, and looking only for `sunshine` (as this did until the rename) finds
+# `nova-host`, and looking only for an older name (as this did before a rename) finds
 # nothing, passes an empty path to setcap, and leaves the package with no
 # capabilities at all. That does not fail the install and does not fail a stream
 # — it silently drops capture to the desktop portal and turns off present-paced
 # capture with it, for the life of the installation.
 path_to_setcap=$(which setcap 2>/dev/null)
-path_to_zenith=""
-for candidate in zenith sunshine ; do
+path_to_host=""
+for candidate in nova-host zenith sunshine ; do
   if [ -x "$script_dir/$candidate" ] ; then
-    path_to_zenith=$(readlink -f "$script_dir/$candidate")
+    path_to_host=$(readlink -f "$script_dir/$candidate")
     break
   fi
   found=$(which "$candidate" 2>/dev/null)
   if [ -n "$found" ] ; then
-    path_to_zenith=$(readlink -f "$found")
+    path_to_host=$(readlink -f "$found")
     break
   fi
 done
 
-if [ -z "$path_to_zenith" ] ; then
-  echo "error: neither 'zenith' nor 'sunshine' is on PATH; cannot set capabilities."
+if [ -z "$path_to_host" ] ; then
+  echo "error: 'nova-host' is not on PATH; cannot set capabilities."
 elif [ ! -x "$path_to_setcap" ] ; then
   echo "error: setcap not found (install libcap2-bin / libcap), then run:"
-  echo "  sudo setcap cap_sys_admin,cap_sys_nice+p $path_to_zenith"
+  echo "  sudo setcap cap_sys_admin,cap_sys_nice+p $path_to_host"
 else
-  echo "Setting CAP_SYS_ADMIN, CAP_SYS_NICE capabilities on $path_to_zenith."
-  if $path_to_setcap cap_sys_admin,cap_sys_nice+p "$path_to_zenith" ; then
+  echo "Setting CAP_SYS_ADMIN, CAP_SYS_NICE capabilities on $path_to_host."
+  if $path_to_setcap cap_sys_admin,cap_sys_nice+p "$path_to_host" ; then
     echo "CAP_SYS_ADMIN, CAP_SYS_NICE capabilities set."
   else
     echo "error: setcap failed. KMS capture will be unavailable; run by hand:"
-    echo "  sudo setcap cap_sys_admin,cap_sys_nice+p $path_to_zenith"
+    echo "  sudo setcap cap_sys_admin,cap_sys_nice+p $path_to_host"
   fi
 fi
 
@@ -72,7 +72,7 @@ else
   echo "error: udevadm not found or not executable."
 fi
 
-# Zenith display autopilot: make the EVDI virtual-display fallback available
+# Nova display autopilot: make the EVDI virtual-display fallback available
 # immediately (it also loads at boot via modules-load.d/60-sunshine.conf).
 echo "Preparing EVDI virtual display support."
 modprobe evdi 2>/dev/null || echo "evdi module not present (install an evdi package to enable the VDD fallback)."
@@ -80,32 +80,47 @@ if [ -e /sys/devices/evdi/add ]; then
   chmod 0666 /sys/devices/evdi/add || true
 fi
 
-# Start Zenith automatically in every user's graphical session so a fresh
+# Start Nova automatically in every user's graphical session so a fresh
 # install streams without anyone hunting for a service to enable.
 #
 # Find the unit rather than name it. The unit is called after the project FQDN,
-# which the rename changed from app-dev.lizardbyte.app.Sunshine.service to
-# app-io.github.jacksonpate.Zenith.service — and a hardcoded name that no longer
+# which each rename changed (app-dev.lizardbyte.app.Sunshine.service, then
+# app-io.github.jacksonpate.Zenith.service, now app-io.github.f_e_n_y_x.NovaHost.service) — and a hardcoded name that no longer
 # exists fails silently here, so the service this block exists to enable was
 # never enabled at all. The install still succeeds and the user finds a host
 # that does not come up until they go looking for it.
 if command -v systemctl >/dev/null 2>&1; then
-  zenith_unit=""
+  host_unit=""
   for dir in /usr/lib/systemd/user /lib/systemd/user ; do
     [ -d "$dir" ] || continue
-    for candidate in "$dir"/app-*Zenith.service "$dir"/app-*Sunshine.service ; do
+    for candidate in "$dir"/app-*NovaHost.service ; do
       if [ -e "$candidate" ] ; then
-        zenith_unit=$(basename "$candidate")
+        host_unit=$(basename "$candidate")
         break 2
       fi
     done
   done
 
-  if [ -z "$zenith_unit" ] ; then
-    echo "warning: no Zenith user unit found; not enabling anything."
+  if [ -z "$host_unit" ] ; then
+    echo "warning: no Nova user unit found; not enabling anything."
   else
-    echo "Enabling Zenith user service for all users ($zenith_unit)."
-    systemctl --global enable "$zenith_unit" 2>/dev/null \
-      || echo "warning: could not enable $zenith_unit globally."
+    echo "Enabling Nova user service for all users ($host_unit)."
+    systemctl --global enable "$host_unit" 2>/dev/null \
+      || echo "warning: could not enable $host_unit globally."
   fi
+fi
+
+# Nova replaces Zenith (Conflicts/Replaces), which removes Zenith's unit file but not the links
+# `systemctl --global enable` made for it, nor admin drop-ins. Clear the dangling ones so systemd
+# stops reporting a missing unit; a drop-in directory is left alone because it may hold the
+# admin's own settings (copy them to the Nova unit's .d directory to keep them).
+old_unit="app-io.github.jacksonpate.Zenith.service"
+for link in /etc/systemd/user/*.wants/"$old_unit" ; do
+  if [ -L "$link" ] && [ ! -e "$link" ] ; then
+    echo "Removing stale link $link from the replaced Zenith package."
+    rm -f "$link"
+  fi
+done
+if [ -d "/etc/systemd/user/$old_unit.d" ] ; then
+  echo "note: /etc/systemd/user/$old_unit.d holds settings for the old Zenith unit; they no longer apply."
 fi

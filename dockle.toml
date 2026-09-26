@@ -23,7 +23,7 @@ home = true
 inputs = [
   "README.md",
   "ROADMAP.md",
-  "docs/building_zenith_local.md",
+  "docs/building_nova_local.md",
   "docs/getting_started.md",
   "docs/changelog.md",
   "DOCKER_README.md",

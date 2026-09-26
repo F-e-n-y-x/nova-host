@@ -4,9 +4,9 @@ import json
 
 from conftest import FakeRunner
 
-from zenith_display.layouts.wlr import WlrBackend
-from zenith_display.modes import Mode
-from zenith_display.runner import Result
+from nova_display.layouts.wlr import WlrBackend
+from nova_display.modes import Mode
+from nova_display.runner import Result
 
 _WLR_RANDR_FIXTURE = json.dumps([
     {

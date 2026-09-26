@@ -70,7 +70,7 @@ CUDA is used for NVFBC capture and direct GPU-memory NVENC encoding.
 
 > [!NOTE]
 > See [CUDA GPUS](https://developer.nvidia.com/cuda-gpus) to cross-reference Compute Capability to your GPU.
-> The table below applies to Zenith packages. They bundle CUDA, so you do not need to install it.
+> The table below applies to Nova packages. They bundle CUDA, so you do not need to install it.
 > CUDA 13 no longer supports compute capability below 7.5 (GTX 900/1000 series, Volta), so on those GPUs use a
 > package built with CUDA 12.9.
 
@@ -86,19 +86,19 @@ CUDA is used for NVFBC capture and direct GPU-memory NVENC encoding.
         <td rowspan="3">12.9.1</td>
         <td rowspan="3">575.57.08</td>
         <td rowspan="3">50;52;53;60;61;62;70;72;75;80;86;87;89;90;100;101;103;120;121</td>
-        <td>zenith-ubuntu-24.04-amd64.deb</td>
+        <td>nova-host-ubuntu-24.04-amd64.deb</td>
     </tr>
     <tr>
-        <td>zenith-debian-13-amd64.deb</td>
+        <td>nova-host-debian-13-amd64.deb</td>
     </tr>
     <tr>
-        <td>zenith-fedora-42-x86_64.rpm</td>
+        <td>nova-host-fedora-42-x86_64.rpm</td>
     </tr>
     <tr>
         <td>13.1.1</td>
         <td>590.48.01</td>
         <td>75;80;86;87;89;90;100;103;110;120;121</td>
-        <td>zenith-fedora-44-x86_64.rpm</td>
+        <td>nova-host-fedora-44-x86_64.rpm</td>
     </tr>
 </table>
 
@@ -550,7 +550,7 @@ systemctl --user --now enable app-dev.lizardbyte.app.Sunshine
 
 > [!NOTE]
 > The service has been renamed to "app-dev.lizardbyte.app.Sunshine" in order to increase compatibility with
-> XDG Desktop Portal, but it is also aliased to "sunshine.service" for convenience.
+> XDG Desktop Portal, but it is also aliased to "nova-host.service" for convenience.
 
 ### macOS
 The first time you start Sunshine, you will be asked to grant access to screen recording and your microphone.

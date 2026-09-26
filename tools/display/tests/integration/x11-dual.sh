@@ -67,9 +67,9 @@ xrandr --output DUMMY0 --mode 1920x1080 --pos 0x0 --primary \
 
 python3 - <<'PY'
 import json, re, subprocess, sys
-from zenith_display.layouts.xrandr import XrandrBackend
-from zenith_display.modes import client_mode
-from zenith_display.runner import Runner
+from nova_display.layouts.xrandr import XrandrBackend
+from nova_display.modes import client_mode
+from nova_display.runner import Runner
 
 VDD = "DUMMY2"
 PHYS = ["DUMMY0", "DUMMY1"]

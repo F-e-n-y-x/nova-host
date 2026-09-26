@@ -2,9 +2,9 @@
 
 # User Service
 mkdir -p ~/.config/systemd/user
-cp "/app/share/sunshine/systemd/user/app-io.github.jacksonpate.Zenith.service" "$HOME/.config/systemd/user/app-io.github.jacksonpate.Zenith.service"
+cp "/app/share/sunshine/systemd/user/app-io.github.f_e_n_y_x.NovaHost.service" "$HOME/.config/systemd/user/app-io.github.f_e_n_y_x.NovaHost.service"
 echo "Sunshine User Service has been installed."
-echo "Use [systemctl --user enable app-io.github.jacksonpate.Zenith] once to autostart Sunshine on login."
+echo "Use [systemctl --user enable app-io.github.f_e_n_y_x.NovaHost] once to autostart Sunshine on login."
 
 # Load uhid for descriptor-driven gamepad emulation
 UHID=$(cat /app/share/sunshine/modules-load.d/60-sunshine.conf)

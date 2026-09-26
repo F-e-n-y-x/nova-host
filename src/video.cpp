@@ -1470,7 +1470,7 @@ namespace video {
   static encoder_t *chosen_encoder;
 
   /// Whether the last probe rejected an encoder only because no display could be
-  /// opened. Zenith's virtual display is created by the app's prep command, which
+  /// opened. Nova's virtual display is created by the app's prep command, which
   /// runs *after* the launch-time probe, so on a host whose only display is that
   /// VDD the probe is guaranteed to find nothing and settle on software encoding.
   /// This says "ask again once the display exists" rather than "the GPU cannot".

@@ -1,6 +1,6 @@
 # Fetch the signed Windows virtual-display driver payload at package time.
 #
-# Zenith bundles SudoVDA (SudoMaker, MIT/CC0): a UMDF indirect-display driver
+# Nova bundles SudoVDA (SudoMaker, MIT/CC0): a UMDF indirect-display driver
 # whose self-signed package installs on stock Windows once its certificate is
 # in the Root + TrustedPublisher stores — no test mode, Secure Boot stays on
 # (the Apollo project ships the identical flow at scale). nefcon performs the
