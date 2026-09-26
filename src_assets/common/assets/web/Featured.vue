@@ -1,5 +1,4 @@
 <template>
-  <Navbar></Navbar>
   <div id="content" class="container">
     <div class="my-4">
       <h1>{{ $t('featured.title') }}</h1>
@@ -252,7 +251,6 @@
 </template>
 
 <script>
-  import Navbar from './Navbar.vue'
   import SimpleIcon from './SimpleIcon.vue'
   import { formatDistanceToNow, format } from 'date-fns'
   import {
@@ -274,7 +272,6 @@
 
   export default {
     components: {
-      Navbar,
       SimpleIcon,
       ArrowDownCircle,
       Box,

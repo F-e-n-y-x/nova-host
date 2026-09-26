@@ -1,5 +1,4 @@
 <template>
-  <Navbar></Navbar>
   <div id="content" class="container">
     <div class="my-4">
       <h1>{{ $t('apps.applications_title') }}<span v-if="apps.length"> ({{ appCountLabel }})</span></h1>
@@ -566,10 +565,10 @@
 
 <script>
   import { toRaw } from 'vue'
-  import Navbar from './Navbar.vue'
   import Checkbox from './Checkbox.vue'
   import { apiFetch } from './fetch_utils'
   import SunshineVersion from './sunshine_version'
+  import { checkForUpdates } from './nova/api'
   import { Modal } from 'bootstrap/dist/js/bootstrap'
   import {
     ArrowDown,
@@ -654,7 +653,6 @@
 
   export default {
     components: {
-      Navbar,
       Checkbox,
       ArrowDown,
       ArrowRight,
@@ -781,10 +779,8 @@
           this.version = new SunshineVersion(null, r.version);
         });
 
-      fetch("https://api.github.com/repos/jacksonpate/zenith/releases/latest")
-        .then((r) => r.json())
-        .then((r) => this.githubVersion = new SunshineVersion(r, null))
-        .catch((e) => console.error(e));
+      checkForUpdates()
+        .then((r) => { this.githubVersion = r?.latest ? new SunshineVersion(r.latest, null) : null; });
     },
     methods: {
       newApp() {
