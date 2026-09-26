@@ -39,17 +39,47 @@ function closeDrawer(returnFocus = false) {
   if (returnFocus) menuButton.value?.focus()
 }
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+// While the drawer is open, Tab cycles between the menu button and the drawer only.
+function trapTab(event) {
+  const items = [menuButton.value, ...(sidebar.value?.querySelectorAll(FOCUSABLE) || [])].filter(Boolean)
+  if (items.length === 0) return
+  const first = items[0]
+  const last = items[items.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  } else if (!items.includes(document.activeElement)) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
 function onKeydown(event) {
-  if (event.key === 'Escape' && drawerOpen.value) closeDrawer(true)
+  if (!drawerOpen.value) return
+  if (event.key === 'Escape') closeDrawer(true)
+  else if (event.key === 'Tab') trapTab(event)
 }
 
 watch(() => route.fullPath, () => closeDrawer(false))
 watch(drawerOpen, (open) => {
+  document.documentElement.classList.toggle('nv-scroll-locked', open)
   if (open) requestAnimationFrame(() => sidebar.value?.querySelector('a, button')?.focus())
 })
 
+// The drawer only exists below 900px; widening the window closes it so nothing stays inert.
+const desktopQuery = globalThis.matchMedia?.('(min-width: 900px)')
+function onDesktop(event) {
+  if (event.matches) closeDrawer(false)
+}
+
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown)
+  desktopQuery?.addEventListener?.('change', onDesktop)
   try {
     const config = await getConfig()
     username.value = config.username || ''
@@ -57,7 +87,11 @@ onMounted(async () => {
     // The account row just omits the name.
   }
 })
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  desktopQuery?.removeEventListener?.('change', onDesktop)
+  document.documentElement.classList.remove('nv-scroll-locked')
+})
 </script>
 
 <template>
@@ -71,7 +105,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         <X v-if="drawerOpen" :size="22" aria-hidden="true" />
         <Menu v-else :size="22" aria-hidden="true" />
       </button>
-      <RouterLink to="/" class="nv-topbar__brand"><NovaLogo :size="24" /></RouterLink>
+      <RouterLink to="/" class="nv-topbar__brand" :inert="drawerOpen || null"><NovaLogo :size="24" /></RouterLink>
     </header>
 
     <div v-if="drawerOpen" class="nv-shell__backdrop" aria-hidden="true" @click="closeDrawer(true)"></div>
@@ -105,7 +139,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
       </div>
     </aside>
 
-    <main id="nv-main" class="nv-main" tabindex="-1">
+    <main id="nv-main" class="nv-main" tabindex="-1" :inert="drawerOpen || null">
       <slot />
     </main>
 
@@ -116,6 +150,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 <style>
 @layer components {
+  .nv-scroll-locked {
+    overflow: hidden;
+  }
+
   .nv-shell {
     display: flex;
     min-height: 100vh;
@@ -333,6 +371,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
     .nv-shell--drawer-open .nv-sidebar {
       transform: none;
       visibility: visible;
+      overscroll-behavior: contain;
       transition: transform 160ms ease;
     }
 

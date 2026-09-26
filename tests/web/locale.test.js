@@ -5,7 +5,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 import { createI18n } from 'vue-i18n'
-import createSunshineI18n, { loadLocaleMessages } from '../../src_assets/common/assets/web/locale.js'
+import createSunshineI18n, { applyConfiguredLocale, createInstantI18n, loadLocaleMessages } from '../../src_assets/common/assets/web/locale.js'
 
 describe('locale initialization', () => {
   beforeEach(() => {
@@ -57,5 +57,50 @@ describe('locale initialization', () => {
     expect(Object.keys(result.messages)).toEqual(['en'])
     expect(error).toHaveBeenCalledWith('Failed to download translations', expect.any(Error))
     error.mockRestore()
+  })
+
+  it('creates an English instance synchronously without any request', () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const i18n = createInstantI18n()
+
+    expect(fetch).not.toHaveBeenCalled()
+    expect(i18n.locale).toBe('en')
+    expect(Object.keys(i18n.messages)).toEqual(['en'])
+    expect(document.documentElement.lang).toBe('en')
+  })
+
+  function fakeI18n() {
+    const messages = {}
+    return { global: { locale: { value: 'en' }, setLocaleMessage: vi.fn((l, m) => { messages[l] = m }) }, messages }
+  }
+
+  it('switches a mounted instance to the configured locale', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ json: async () => ({ locale: 'de' }) })
+      .mockResolvedValueOnce({ json: async () => ({ greeting: 'Hallo' }) }))
+    const i18n = fakeI18n()
+
+    await expect(applyConfiguredLocale(i18n)).resolves.toBe('de')
+    expect(i18n.global.locale.value).toBe('de')
+    expect(i18n.messages.de).toEqual({ greeting: 'Hallo' })
+    expect(document.documentElement.lang).toBe('de')
+  })
+
+  it('stays in English when the host does not answer in time', async () => {
+    vi.useFakeTimers()
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', vi.fn((path, { signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+    })))
+    const i18n = fakeI18n()
+
+    const result = applyConfiguredLocale(i18n, 2000)
+    await vi.advanceTimersByTimeAsync(2000)
+
+    await expect(result).resolves.toBe('en')
+    expect(i18n.global.locale.value).toBe('en')
+    expect(i18n.global.setLocaleMessage).not.toHaveBeenCalled()
+    error.mockRestore()
+    vi.useRealTimers()
   })
 })

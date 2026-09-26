@@ -50,6 +50,16 @@ describe('SunshineVersion', () => {
     expect(new SunshineVersion(null, 'v2026.801.000001').isGreater(local)).toBe(true)
   })
 
+  it('parses nova-v release tags and compares them with local builds', () => {
+    const release = new SunshineVersion({ name: 'Nova 0.2.0', tag_name: 'nova-v0.2.0' })
+    const local = new SunshineVersion(null, '0.1.0-5013e216-dirty')
+
+    expect(release.versionParts).toEqual([0, 2, 0])
+    expect(release.isGreater(local)).toBe(true)
+    expect(new SunshineVersion(null, '0.2.0-abcdef12').isGreater(release)).toBe(false)
+    expect(release.isGreater('0.2.0')).toBe(false)
+  })
+
   it('handles absent and invalid comparison values', () => {
     const version = new SunshineVersion(null, '2.0.0')
     const unparsedVersion = new SunshineVersion(null, 'placeholder')

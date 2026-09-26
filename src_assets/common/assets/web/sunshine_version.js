@@ -38,10 +38,8 @@ class SunshineVersion {
     if (!version) {
       return null;
     }
-    let v = version;
-    if (v.startsWith("v")) {
-      v = v.substring(1);
-    }
+    // Nova releases are tagged "nova-vX.Y.Z"; older tags are "vX.Y.Z".
+    let v = version.replace(/^(nova-)?v/, '');
     // Local builds carry a "-<commit>[-dirty]" suffix; compare only the release part.
     v = v.split(/[-+]/)[0];
     return v.split('.').map(Number);
