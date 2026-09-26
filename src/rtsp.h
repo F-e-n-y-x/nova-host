@@ -8,6 +8,7 @@
 #include <atomic>
 
 // local includes
+#include "client_permissions.h"
 #include "crypto.h"
 #include "thread_safe.h"
 
@@ -44,6 +45,7 @@ namespace rtsp_stream {
     std::string rtsp_url_scheme;  ///< URL scheme selected by the RTSP SETUP flow.
     uint32_t rtsp_iv_counter;  ///< Counter value mixed into encrypted RTSP IVs.
     std::string client_cert;  ///< PEM certificate for the paired Moonlight client.
+    client_permissions::mask_t permissions = client_permissions::full;  ///< What the client may do in this stream.
   };
 
   /**
@@ -75,6 +77,22 @@ namespace rtsp_stream {
    * @param cert Certificate data or object used by the operation.
    */
   void terminate_sessions_by_cert(std::string_view cert);
+
+  /**
+   * @brief Check whether a client certificate owns an active stream session.
+   *
+   * @param cert PEM certificate of the paired client.
+   * @return `true` when at least one running session belongs to it.
+   */
+  bool has_session_for_cert(std::string_view cert);
+
+  /**
+   * @brief Apply new permissions to every active stream session of a client.
+   *
+   * @param cert PEM certificate of the paired client.
+   * @param permissions New permission mask.
+   */
+  void update_permissions_by_cert(std::string_view cert, client_permissions::mask_t permissions);
 
   /**
    * @brief Runs the RTSP server loop.

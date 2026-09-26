@@ -14,6 +14,7 @@
 #include <vector>
 
 // local includes
+#include "client_permissions.h"
 #include "platform/common.h"
 #include "thread_safe.h"
 
@@ -52,6 +53,21 @@ namespace input {
    * @brief Queue a raw input message for platform passthrough.
    */
   void passthrough(std::shared_ptr<input_t> &input, std::vector<std::uint8_t> &&input_data);
+
+  /**
+   * @brief Decide whether a client's permissions allow an input packet.
+   *
+   * Keyboard and text packets need `input_keyboard`, mouse and scroll packets `input_mouse`,
+   * gamepad packets (including their touchpad, motion and battery reports) `input_controller`,
+   * and touch and pen packets `input_touch_pen`. Packets of unknown type need every input
+   * permission. Packets too short to carry a header are allowed through so passthrough()
+   * can reject them as malformed.
+   *
+   * @param input_data Raw input packet as received from the client.
+   * @param permissions The client's permission mask.
+   * @return `true` when the packet may be processed.
+   */
+  bool is_packet_permitted(std::span<const std::uint8_t> input_data, client_permissions::mask_t permissions);
 
   /**
    * @brief Initialize global input resources and platform backends.
