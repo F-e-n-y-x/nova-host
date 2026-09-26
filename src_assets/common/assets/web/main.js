@@ -1,3 +1,6 @@
+// Must be the first import: it declares the cascade layer order for every other stylesheet.
+import './nova/nova.css'
+
 import { createApp } from 'vue'
 
 import App from './App.vue'

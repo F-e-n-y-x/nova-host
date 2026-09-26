@@ -4,8 +4,8 @@
   <main id="content" class="container" role="main">
     <h1 class="my-4">{{ $t('welcome.greeting') }}</h1>
     <p>{{ $t('welcome.create_creds') }}</p>
-    <div class="d-flex gap-4 align-items-start">
-      <div class="card">
+    <div class="d-flex flex-column flex-md-row gap-4 align-items-stretch align-items-md-start">
+      <div class="card flex-md-fill">
         <div class="card-body">
           <div class="alert alert-warning">
             {{ $t('welcome.create_creds_alert') }}
@@ -37,7 +37,7 @@
           </form>
         </div>
       </div>
-      <div>
+      <div class="flex-md-fill">
         <Resource-Card></Resource-Card>
       </div>
     </div>
