@@ -22,6 +22,7 @@
 #include <Simple-Web-Server/server_https.hpp>
 
 // local includes
+#include "client_permissions.h"
 #include "crypto.h"
 
 /**
@@ -346,8 +347,54 @@ namespace nvhttp {
   std::string get_cert_by_uuid(std::string_view uuid);
 
   /**
+   * @brief Check a user-supplied device name.
+   * @param name Candidate name.
+   * @return `true` when it has 1-64 characters, no leading/trailing spaces and no control characters.
+   */
+  bool is_valid_client_name(std::string_view name);
+
+  /**
+   * @brief Rename a paired client.
+   * @param uuid The UUID of the client.
+   * @param name New name; must pass is_valid_client_name().
+   * @return `true` if the client was found and renamed.
+   */
+  bool set_client_name(std::string_view uuid, std::string_view name);
+
+  /**
+   * @brief Change what a paired client may do. Active streams from it apply the change at once.
+   * @param uuid The UUID of the client.
+   * @param permissions New permission mask (unknown bits are dropped).
+   * @return `true` if the client was found and updated.
+   */
+  bool set_client_permissions(std::string_view uuid, client_permissions::mask_t permissions);
+
+  /**
+   * @brief Look up a paired client's permissions by UUID.
+   * @param uuid The UUID of the client.
+   * @return Its permission mask, or `std::nullopt` when no such client exists.
+   */
+  std::optional<client_permissions::mask_t> get_client_permissions_by_uuid(std::string_view uuid);
+
+  /**
+   * @brief Look up the permissions of the paired client presenting a certificate.
+   * @param cert_pem PEM certificate verified during the TLS handshake.
+   * @return Its permission mask; full access for an empty certificate (plain-HTTP test paths)
+   *         and none for a certificate that isn't paired.
+   */
+  client_permissions::mask_t get_client_permissions(std::string_view cert_pem);
+
+  /**
+   * @brief Record that a paired client just launched or resumed a stream.
+   * @param cert_pem PEM certificate of the client.
+   */
+  void record_client_connected(std::string_view cert_pem);
+
+  /**
    * @brief Get all paired clients.
-   * @return The list of all paired clients.
+   * @return The list of all paired clients: name, uuid, enabled, permissions (flags plus
+   *         "preset"), paired_at and last_connected_at (Unix seconds or null), and connected
+   *         (whether it has an active stream).
    * @examples
    * nlohmann::json clients = nvhttp::get_all_clients();
    * @examples_end

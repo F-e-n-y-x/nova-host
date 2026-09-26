@@ -2137,6 +2137,46 @@ namespace input {
     }
   }
 
+  bool is_packet_permitted(std::span<const std::uint8_t> input_data, const client_permissions::mask_t permissions) {
+    NV_INPUT_HEADER header {};
+    if (input_data.size() < sizeof(header)) {
+      return true;
+    }
+    std::memcpy(&header, input_data.data(), sizeof(header));
+
+    client_permissions::mask_t required;
+    switch (util::endian::little(header.magic)) {
+      case KEY_DOWN_EVENT_MAGIC:
+      case KEY_UP_EVENT_MAGIC:
+      case UTF8_TEXT_EVENT_MAGIC:
+        required = client_permissions::input_keyboard;
+        break;
+      case MOUSE_MOVE_REL_MAGIC_GEN5:
+      case MOUSE_MOVE_ABS_MAGIC:
+      case MOUSE_BUTTON_DOWN_EVENT_MAGIC_GEN5:
+      case MOUSE_BUTTON_UP_EVENT_MAGIC_GEN5:
+      case SCROLL_MAGIC_GEN5:
+      case SS_HSCROLL_MAGIC:
+        required = client_permissions::input_mouse;
+        break;
+      case MULTI_CONTROLLER_MAGIC_GEN5:
+      case SS_CONTROLLER_ARRIVAL_MAGIC:
+      case SS_CONTROLLER_TOUCH_MAGIC:
+      case SS_CONTROLLER_MOTION_MAGIC:
+      case SS_CONTROLLER_BATTERY_MAGIC:
+        required = client_permissions::input_controller;
+        break;
+      case SS_TOUCH_MAGIC:
+      case SS_PEN_MAGIC:
+        required = client_permissions::input_touch_pen;
+        break;
+      default:
+        required = client_permissions::input_all;
+        break;
+    }
+    return client_permissions::has(permissions, required);
+  }
+
   /**
    * @brief Called on the control stream thread to queue an input message.
    * @param input The input context pointer.

@@ -10,6 +10,7 @@ extern "C" {
 }
 
 // standard includes
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <format>
@@ -686,6 +687,37 @@ namespace rtsp_stream {
     }
 
     /**
+     * @brief Check whether any running session belongs to a certificate.
+     *
+     * @param cert Certificate data or object used by the operation.
+     * @return `true` when a session that isn't stopping belongs to it.
+     */
+    bool has_cert(std::string_view cert) {
+      if (cert.empty()) {
+        return false;
+      }
+      auto lg = _session_slots.lock();
+      return std::ranges::any_of(*_session_slots, [&cert](const std::shared_ptr<stream::session_t> &slot) {
+        return stream::session::client_cert(*slot) == cert && stream::session::state(*slot) != stream::session::state_e::STOPPING;
+      });
+    }
+
+    /**
+     * @brief Set the permissions of every session belonging to a certificate.
+     *
+     * @param cert Certificate data or object used by the operation.
+     * @param permissions New permission mask.
+     */
+    void set_permissions_by_cert(std::string_view cert, client_permissions::mask_t permissions) {
+      auto lg = _session_slots.lock();
+      for (const auto &slot : *_session_slots) {
+        if (stream::session::client_cert(*slot) == cert) {
+          stream::session::set_permissions(*slot, permissions);
+        }
+      }
+    }
+
+    /**
      * @brief Removes the provided session from the set of sessions.
      * @param session The session to remove.
      */
@@ -769,6 +801,14 @@ namespace rtsp_stream {
   void terminate_sessions_by_cert(std::string_view cert) {
     server.clear_by_cert(cert);
     input::terminate_gamepads(cert);
+  }
+
+  bool has_session_for_cert(std::string_view cert) {
+    return server.has_cert(cert);
+  }
+
+  void update_permissions_by_cert(std::string_view cert, client_permissions::mask_t permissions) {
+    server.set_permissions_by_cert(cert, permissions);
   }
 
   /**

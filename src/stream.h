@@ -12,6 +12,7 @@
 
 // local includes
 #include "audio.h"
+#include "client_permissions.h"
 #include "crypto.h"
 #include "video.h"
 
@@ -95,5 +96,19 @@ namespace stream {
      * @return PEM certificate associated with the session's client.
      */
     const std::string &client_cert(session_t &session);
+    /**
+     * @brief Current permissions of a stream session's client.
+     *
+     * @param session Active streaming session.
+     * @return Permission mask applied to its input and clipboard traffic.
+     */
+    client_permissions::mask_t permissions(session_t &session);
+    /**
+     * @brief Replace a stream session's permissions; takes effect on the next packet.
+     *
+     * @param session Active streaming session.
+     * @param permissions New permission mask.
+     */
+    void set_permissions(session_t &session, client_permissions::mask_t permissions);
   }  // namespace session
 }  // namespace stream

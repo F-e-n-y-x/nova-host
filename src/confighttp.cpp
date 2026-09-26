@@ -36,6 +36,7 @@
 #endif
 
 // local includes
+#include "client_permissions.h"
 #include "clipboard.h"
 #include "config.h"
 #include "confighttp.h"
@@ -1308,16 +1309,21 @@ namespace confighttp {
   }
 
   /**
-   * @brief Enable or disable a client.
+   * @brief Update a paired client: enable or disable it, rename it, or change its permissions.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
-   * The body for the POST request should be JSON serialized in the following format:
+   * The body for the POST request should be JSON serialized in the following format; every
+   * field except "uuid" is optional and only the fields present are changed:
    * @code{.json}
    * {
    *   "uuid": "<uuid>",
-   *   "enabled": true
+   *   "enabled": true,
+   *   "name": "Living room TV",
+   *   "permissions": {"preset": "play", "clipboard": false}
    * }
    * @endcode
+   * All fields are validated before anything changes. Replies `{"status": true}` on success,
+   * 404 when no client has that UUID and 400 for invalid input.
    *
    * @api_examples{/api/clients/update|:| POST|:| {"uuid":"<uuid>","enabled":true}}
    */
@@ -1338,26 +1344,132 @@ namespace confighttp {
     std::stringstream ss;
     ss << request->content.rdbuf();
     try {
-      nlohmann::json input_tree = nlohmann::json::parse(ss.str());
-      nlohmann::json output_tree;
-      std::string uuid = input_tree.value("uuid", "");
-      bool enabled = input_tree.value("enabled", true);
-      output_tree["status"] = nvhttp::set_client_enabled(uuid, enabled);
+      const nlohmann::json input_tree = nlohmann::json::parse(ss.str());
+      if (!input_tree.is_object()) {
+        bad_request(response, request, "Body must be a JSON object");
+        return;
+      }
+      const std::string uuid = input_tree.value("uuid", "");
+      const auto current_permissions = nvhttp::get_client_permissions_by_uuid(uuid);
+      if (uuid.empty() || !current_permissions) {
+        not_found(response, request, "Unknown device");
+        return;
+      }
 
-      if (!enabled && output_tree["status"]) {
-        auto cert = nvhttp::get_cert_by_uuid(uuid);
-        if (!cert.empty()) {
-          rtsp_stream::terminate_sessions_by_cert(cert);
+      std::optional<bool> enabled;
+      if (const auto it = input_tree.find("enabled"); it != input_tree.end()) {
+        if (!it->is_boolean()) {
+          bad_request(response, request, "enabled must be a boolean");
+          return;
         }
+        enabled = it->get<bool>();
+      }
 
-        if (rtsp_stream::session_count() == 0 && proc::proc.running() > 0) {
-          proc::proc.terminate();
+      std::optional<std::string> name;
+      if (const auto it = input_tree.find("name"); it != input_tree.end()) {
+        if (!it->is_string() || !nvhttp::is_valid_client_name(it->get<std::string>())) {
+          bad_request(response, request, "name must be 1-64 characters without leading or trailing spaces or control characters");
+          return;
+        }
+        name = it->get<std::string>();
+      }
+
+      std::optional<client_permissions::mask_t> permissions;
+      if (const auto it = input_tree.find("permissions"); it != input_tree.end()) {
+        try {
+          permissions = client_permissions::apply_json(*current_permissions, *it);
+        } catch (const std::invalid_argument &e) {
+          bad_request(response, request, e.what());
+          return;
         }
       }
 
+      if (!enabled && !name && !permissions) {
+        bad_request(response, request, "Nothing to update: send enabled, name or permissions");
+        return;
+      }
+
+      bool status = true;
+      if (name) {
+        status = nvhttp::set_client_name(uuid, *name) && status;
+      }
+      if (permissions) {
+        status = nvhttp::set_client_permissions(uuid, *permissions) && status;
+      }
+      if (enabled) {
+        status = nvhttp::set_client_enabled(uuid, *enabled) && status;
+        if (!*enabled && status) {
+          auto cert = nvhttp::get_cert_by_uuid(uuid);
+          if (!cert.empty()) {
+            rtsp_stream::terminate_sessions_by_cert(cert);
+          }
+
+          if (rtsp_stream::session_count() == 0 && proc::proc.running() > 0) {
+            proc::proc.terminate();
+          }
+        }
+      }
+
+      nlohmann::json output_tree;
+      output_tree["status"] = status;
       send_response(response, output_tree);
     } catch (nlohmann::json::exception &e) {
       BOOST_LOG(warning) << "Update Client: "sv << e.what();
+      bad_request(response, request, e.what());
+    }
+  }
+
+  /**
+   * @brief End the active stream of one paired client, leaving its app running.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * The body for the POST request should be JSON serialized in the following format:
+   * @code{.json}
+   * {
+   *   "uuid": "<uuid>"
+   * }
+   * @endcode
+   * Replies `{"status": true}` when a stream was ended and 404 when the client is unknown or
+   * not streaming.
+   *
+   * @api_examples{/api/clients/disconnect|:| POST|:| {"uuid":"<uuid>"}}
+   */
+  void disconnectClient(const resp_https_t &response, const req_https_t &request) {
+    if (!check_content_type(response, request, "application/json")) {
+      return;
+    }
+    if (!authenticate(response, request)) {
+      return;
+    }
+    const std::string client_id = get_client_id(request);
+    if (!validate_csrf_token(response, request, client_id)) {
+      return;
+    }
+
+    print_req(request);
+
+    std::stringstream ss;
+    ss << request->content.rdbuf();
+    try {
+      const nlohmann::json input_tree = nlohmann::json::parse(ss.str());
+      const std::string uuid = input_tree.is_object() ? input_tree.value("uuid", "") : "";
+      const auto cert = uuid.empty() ? std::string {} : nvhttp::get_cert_by_uuid(uuid);
+      if (cert.empty()) {
+        not_found(response, request, "Unknown device");
+        return;
+      }
+      if (!rtsp_stream::has_session_for_cert(cert)) {
+        not_found(response, request, "Device is not streaming");
+        return;
+      }
+
+      rtsp_stream::terminate_sessions_by_cert(cert);
+
+      nlohmann::json output_tree;
+      output_tree["status"] = true;
+      send_response(response, output_tree);
+    } catch (nlohmann::json::exception &e) {
+      BOOST_LOG(warning) << "Disconnect Client: "sv << e.what();
       bad_request(response, request, e.what());
     }
   }
@@ -2432,6 +2544,7 @@ namespace confighttp {
     server.resource["^/api/clients/unpair$"]["POST"] = unpair;
     server.resource["^/api/clients/unpair-all$"]["POST"] = unpairAll;
     server.resource["^/api/clients/update$"]["POST"] = updateClient;
+    server.resource["^/api/clients/disconnect$"]["POST"] = disconnectClient;
     server.resource["^/api/config$"]["GET"] = getConfig;
     server.resource["^/api/config$"]["POST"] = saveConfig;
     server.resource["^/api/configLocale$"]["GET"] = getLocale;
