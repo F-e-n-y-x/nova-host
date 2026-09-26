@@ -21,6 +21,7 @@
 
 // local includes
 #include "config.h"
+#include "config_migration.h"
 #include "entry_handler.h"
 #include "file_handler.h"
 #include "logging.h"
@@ -777,13 +778,13 @@ namespace config {
     },
 
     {},  // capture
-    "auto",  // capture_pacing (Zenith): vblank-paced when client fps fits the display refresh
+    "auto",  // capture_pacing (Nova): vblank-paced when client fps fits the display refresh
     {},  // encoder
     {},  // adapter_name
     {},  // output_name
 
     {
-      // Zenith default: the streamed display becomes the only active one and
+      // Nova default: the streamed display becomes the only active one and
       // matches the client mode — the Windows half of plug-and-play Headless
       // (no-op on platforms without display-device support).
       video_t::dd_t::config_option_e::ensure_only_display,  // configuration_option
@@ -811,7 +812,7 @@ namespace config {
     {},  // virtual_sink
     true,  // stream audio
     true,  // install_steam_drivers
-    true,  // mic_enabled (Zenith remote microphone) — Zenith default: remote mic ON out of the box
+    true,  // mic_enabled (Nova remote microphone) — Nova default: remote mic ON out of the box
   };
 
   /**
@@ -891,12 +892,12 @@ namespace config {
     {},  // Username
     {},  // Password
     {},  // Password Salt
-    platf::appdata().string() + "/zenith.conf",  // config file
+    platf::appdata().string() + "/nova-host.conf",  // config file
     {},  // cmd args
     47989,  // Base port number
     "ipv4",  // Address family
     {},  // Bind address
-    platf::appdata().string() + "/zenith.log",  // log file
+    platf::appdata().string() + "/nova-host.log",  // log file
     false,  // notify_pre_releases
     true,  // system_tray
     {},  // prep commands
@@ -2031,6 +2032,13 @@ namespace config {
     try {
       // Create appdata folder if it does not exist
       file_handler::make_directory(platf::appdata().string());
+
+      // Adopt a pre-rename config file (zenith.conf / sunshine.conf) in the same directory once.
+      if (const auto legacy = config_migration::adopt_legacy_file(sunshine.config_file); legacy.migrated) {
+        BOOST_LOG(info) << "Copied settings from "sv << legacy.source.string() << " to "sv << sunshine.config_file;
+      } else if (!legacy.error.empty()) {
+        BOOST_LOG(warning) << "Could not copy settings from "sv << legacy.source.string() << ": "sv << legacy.error;
+      }
 
       // Create empty config file if it does not exist
       if (!fs::exists(sunshine.config_file)) {

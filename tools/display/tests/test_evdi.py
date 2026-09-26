@@ -3,9 +3,9 @@
 import pytest
 from conftest import FakeRunner
 
-from zenith_display.detect import Environment
-from zenith_display.providers import evdi
-from zenith_display.runner import Result
+from nova_display.detect import Environment
+from nova_display.providers import evdi
+from nova_display.runner import Result
 
 
 def _env(**kw):
@@ -80,7 +80,7 @@ def test_setup_reports_a_pending_reboot_as_success(ostree, capsys, monkeypatch):
     """
     from types import SimpleNamespace
 
-    from zenith_display import cli, providers
+    from nova_display import cli, providers
 
     monkeypatch.setattr(cli.detect_mod, "detect", lambda runner=None: _env())
     monkeypatch.setattr(providers, "chain_for", lambda env: [evdi.EvdiProvider()])

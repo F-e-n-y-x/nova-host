@@ -2,10 +2,10 @@
 
 from conftest import FakeRunner
 
-from zenith_display.detect import Connector, Environment
-from zenith_display.layouts import get_backend
-from zenith_display.providers import chain_for
-from zenith_display.providers.forced_connector import ForcedConnectorProvider
+from nova_display.detect import Connector, Environment
+from nova_display.layouts import get_backend
+from nova_display.providers import chain_for
+from nova_display.providers.forced_connector import ForcedConnectorProvider
 
 
 def _env(**kw):
@@ -77,7 +77,7 @@ def test_forced_connector_create_returns_connector_name():
 
 
 def test_nvenc_supported_thresholds():
-    from zenith_display import detect
+    from nova_display import detect
 
     assert detect.nvenc_supported("570.86.16")
     assert detect.nvenc_supported("550.163.01")  # Debian 13 stable
@@ -91,7 +91,7 @@ def test_nvenc_supported_thresholds():
 
 
 def test_nvidia_driver_version_missing(tmp_path):
-    from zenith_display import detect
+    from nova_display import detect
 
     assert detect.nvidia_driver_version(str(tmp_path / "nope")) == ""
     p = tmp_path / "version"
@@ -125,7 +125,7 @@ def test_a_fallback_provider_can_be_pinned_for_testing():
     machine so the provider above it stands aside. Nobody does that, so fallbacks
     go unexercised until a user with an unlucky machine finds them — which is how
     "evdi streams black on a discrete GPU" became a claim nobody had checked."""
-    from zenith_display import providers
+    from nova_display import providers
 
     env = _env()
     _chosen, report = providers.choose(env, FakeRunner({}), only="evdi")
@@ -136,7 +136,7 @@ def test_pinning_a_provider_that_is_not_in_the_chain_is_an_error():
     """Silently choosing something else would make a test look like it passed."""
     import pytest
 
-    from zenith_display import providers
+    from nova_display import providers
 
     with pytest.raises(RuntimeError, match="no provider named"):
         providers.choose(_env(), FakeRunner({}), only="nonsense")

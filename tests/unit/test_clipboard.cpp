@@ -97,7 +97,7 @@ TEST(ClipboardBlob, UnknownIdsMiss) {
 }
 
 TEST(ClipboardOffer, RegistersFileAndBuildsFoundationSchema) {
-  auto path = std::filesystem::temp_directory_path() / "zenith-clipboard-offer-test.bin";
+  auto path = std::filesystem::temp_directory_path() / "nova-clipboard-offer-test.bin";
   {
     std::ofstream out(path, std::ios::binary);
     out << "0123456789";
@@ -107,7 +107,7 @@ TEST(ClipboardOffer, RegistersFileAndBuildsFoundationSchema) {
   ASSERT_FALSE(offer_text.empty());
 
   auto offer = nlohmann::json::parse(offer_text);
-  EXPECT_EQ(offer.at("name").get<std::string>(), "zenith-clipboard-offer-test.bin");
+  EXPECT_EQ(offer.at("name").get<std::string>(), "nova-clipboard-offer-test.bin");
   EXPECT_EQ(offer.at("size").get<std::uint64_t>(), 10u);
   EXPECT_EQ(offer.at("type").get<std::string>(), "file");
   EXPECT_TRUE(offer.contains("id"));

@@ -1,4 +1,4 @@
-# Zenith — Linux-first Sunshine fork
+# Nova — Linux-first Sunshine fork
 
 Fork of [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine) focused on making the
 Linux host experience match (and pass) what the Windows-only forks ship — without their
@@ -11,7 +11,7 @@ virtual display driver (SudoVDA / ZakoVDD) that hands frames to the encoder at p
 bypassing DXGI Desktop Duplication. **Linux doesn't have that problem** — KMS capture already
 reads the scanout framebuffer zero-copy — but Linux Sunshine is missing the *features* those
 forks pair with it: per-client virtual display management, remote microphone, per-frame HDR
-metadata, event-driven capture pacing. Zenith ports the ideas, not the Windows code.
+metadata, event-driven capture pacing. Nova ports the ideas, not the Windows code.
 
 ## Principles
 
@@ -38,7 +38,7 @@ metadata, event-driven capture pacing. Zenith ports the ideas, not the Windows c
 
 ### M1 — Remote microphone (client mic → host)
 Foundation's most portable win. Protocol side (extra audio stream from Moonlight client)
-reimplemented against upstream; host side is a **PipeWire virtual source** ("Zenith Mic")
+reimplemented against upstream; host side is a **PipeWire virtual source** ("Nova Mic")
 that any app (Discord, games) sees as a real microphone. Works with the enhanced Moonlight
 clients (qiin2333 moonlight-qt / moonlight-android) that already send mic audio.
 - PipeWire native; PulseAudio compat via pipewire-pulse (covers Ubuntu/Debian/Fedora)
@@ -80,14 +80,14 @@ EMA smoothing, injected as HEVC/AV1 metadata) off HLSL:
 - HLG (BT.2100) transfer support alongside HDR10 PQ
 - Gated on GNOME HDR maturity; wired to `mutter` HDR session state
 
-### M5 — Remote camera ("Zenith Cam") — full native, no shortcuts
+### M5 — Remote camera ("Nova Cam") — full native, no shortcuts
 Client camera (iPad/phone) as a host virtual webcam. First in the Moonlight ecosystem —
 nobody sends camera today (verified: Foundation's "webcam" strings are AMF encoder presets;
 VoidLink does mic only). Decision 2026-07-02: skip the RTSP stopgap, build it native.
 - Protocol: new stream type `cam` mirroring the mic design — RTSP SETUP negotiation,
   UDP at base+13, encrypted once the mic AES path lands
 - Host: decode via in-tree FFmpeg (VAAPI/NVDEC) → `v4l2loopback` virtual webcam
-  ("Zenith Cam") next to "Zenith Mic"
+  ("Nova Cam") next to "Nova Mic"
 - Client: moonlight-android fork first (buildable/sideloadable today), iOS/iPad when a
   Mac toolchain exists in the lab
 

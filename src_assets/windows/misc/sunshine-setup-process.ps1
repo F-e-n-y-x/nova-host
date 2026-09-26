@@ -207,7 +207,7 @@ function Invoke-ScriptIfExist {
         -FailureTarget $ScriptPath
 }
 
-# Execute zenith.exe with arguments if it exists.
+# Execute nova-host.exe with arguments if it exists.
 function Invoke-SunshineIfExist {
     <#
     .SYNOPSIS
@@ -228,7 +228,7 @@ function Invoke-SunshineIfExist {
         [string]$Emoji = "🔧"
     )
 
-    $SunshinePath = Join-Path $RootDir "zenith.exe"
+    $SunshinePath = Join-Path $RootDir "nova-host.exe"
     return Invoke-ExecutableIfExist `
         -ExecutablePath $SunshinePath `
         -Arguments $Arguments `

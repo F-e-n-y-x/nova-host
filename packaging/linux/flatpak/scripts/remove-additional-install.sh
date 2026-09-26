@@ -1,8 +1,8 @@
 #!/bin/sh
 
 # User Service
-systemctl --user stop app-io.github.jacksonpate.Zenith
-rm "$HOME/.config/systemd/user/app-io.github.jacksonpate.Zenith.service"
+systemctl --user stop app-io.github.f_e_n_y_x.NovaHost
+rm "$HOME/.config/systemd/user/app-io.github.f_e_n_y_x.NovaHost.service"
 systemctl --user daemon-reload
 echo "Sunshine User Service has been removed."
 

@@ -1,0 +1,231 @@
+# Nova CI — lean per-push validation + packaging across the target distros.
+#
+# x86_64 packages are built WITH CUDA, because without it NVENC is unreachable: kmsgrab
+# refuses the KMS path for a CUDA memory type when SUNSHINE_BUILD_CUDA is undefined and
+# reverts to copying every frame GPU -> RAM -> GPU. A --skip-cuda package therefore cannot
+# do zero-copy capture on any NVIDIA host, which is most of them. The 4.3 GB toolkit is
+# downloaded once and cached; linux_build.sh reuses build/cuda when nvcc is already there.
+#
+# aarch64 keeps --skip-cuda: those rpms target Asahi Linux on Apple Silicon, where there is
+# no NVIDIA GPU to encode on. CUDA is statically linked and libcuda is dlopened, so an
+# x86_64 CUDA build still installs and runs on AMD-only machines — verified: the package
+# gains no libcuda dependency.
+#
+# Upstream LizardByte workflows that trigger on their own were removed from this fork; the
+# reusable ci-*.yml ones stay (inert unless called) to keep upstream merges clean. This is Nova's CI.
+
+name: Nova CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["nova-v*"]  # Nova release tags; plain v* tags are inherited from Sunshine/Nova
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write  # the release job attaches assets on tag push
+
+jobs:
+  build-windows:
+    name: Windows
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-windows.yml
+    with:
+      publish_release: 'false'
+      release_commit: ${{ github.sha }}
+      release_version: ${{ startsWith(github.ref, 'refs/tags/nova-v') && github.ref_name || '0.0.0' }}
+
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 24.04 (deb, x86_64)
+            runner: ubuntu-24.04
+            container: ""
+            sudo_flag: ""
+            package: nova-host.deb
+            artifact: nova-host-ubuntu-24.04-amd64.deb
+            cuda_flag: "--cuda-runfile"
+            cuda_version: "12.9.1"
+          - name: Debian 13 trixie (deb, x86_64)
+            runner: ubuntu-latest
+            container: debian:13
+            sudo_flag: "--sudo-off"
+            package: nova-host.deb
+            artifact: nova-host-debian-13-amd64.deb
+            cuda_flag: "--cuda-runfile"
+            cuda_version: "12.9.1"
+          - name: Fedora 42 (rpm, x86_64)
+            runner: ubuntu-latest
+            container: fedora:42
+            sudo_flag: "--sudo-off"
+            package: nova-host.rpm
+            artifact: nova-host-fedora-42-x86_64.rpm
+            cuda_flag: "--cuda-runfile"
+            cuda_version: "12.9.1"
+          - name: Fedora 42 (rpm, aarch64 / Asahi)
+            runner: ubuntu-24.04-arm
+            container: fedora:42
+            sudo_flag: "--sudo-off"
+            package: nova-host.rpm
+            artifact: nova-host-fedora-42-aarch64.rpm
+            cuda_flag: "--skip-cuda"
+          - name: Fedora 44 (rpm, x86_64)
+            runner: ubuntu-latest
+            container: fedora:44
+            sudo_flag: "--sudo-off"
+            package: nova-host.rpm
+            artifact: nova-host-fedora-44-x86_64.rpm
+            cuda_flag: "--cuda-runfile"
+            cuda_version: "13.1.1"
+          - name: Fedora 44 (rpm, aarch64 / Asahi)
+            runner: ubuntu-24.04-arm
+            container: fedora:44
+            sudo_flag: "--sudo-off"
+            package: nova-host.rpm
+            artifact: nova-host-fedora-44-aarch64.rpm
+            cuda_flag: "--skip-cuda"
+    steps:
+      - name: Install git (container jobs)
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          if command -v dnf >/dev/null; then
+            dnf install -y git
+          else
+            apt-get update && apt-get install -y git
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # The toolkit is 4.3 GB to fetch and ~7 GB extracted; downloading it per job
+      # per push would dominate the run. install_cuda() returns early when
+      # build/cuda/bin/nvcc already exists, so a restored cache is used as-is.
+      # Keyed on the distro too: the tree carries a glibc patch applied in place on
+      # the distros that need it, so one shared copy would be wrong for the others.
+      - name: Cache CUDA toolkit
+        if: matrix.cuda_flag == '--cuda-runfile'
+        uses: actions/cache@v4
+        with:
+          path: build/cuda
+          key: cuda-${{ matrix.cuda_version }}-${{ matrix.artifact }}-v1
+
+      # Tag builds must stamp the tag as the version: without it every release reports the
+      # CMake project() version, the web UI always shows "new version available", and apt
+      # sees each new .deb as the same version.
+      - name: Build
+        shell: bash
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          BUILD_VERSION: ${{ startsWith(github.ref, 'refs/tags/nova-v') && github.ref_name || '' }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          chmod +x ./scripts/linux_build.sh
+          ./scripts/linux_build.sh \
+            ${{ matrix.sudo_flag }} \
+            ${{ matrix.cuda_flag }} \
+            --publisher-name="F-e-n-y-x" \
+            --publisher-website="https://github.com/F-e-n-y-x/nova-host" \
+            --publisher-issue-url="https://github.com/F-e-n-y-x/nova-host/issues"
+
+      # A --skip-cuda build is indistinguishable from a CUDA one until an NVIDIA
+      # user runs it and quietly loses zero-copy capture, so assert it here rather
+      # than discover it from a release. The marker is the body of an
+      # `#ifndef SUNSHINE_BUILD_CUDA` guard in kmsgrab.cpp: present means no CUDA.
+      - name: Verify CUDA is compiled in
+        if: matrix.cuda_flag == '--cuda-runfile'
+        shell: bash
+        run: |
+          bin=./build/nova-host
+          test -f "$bin" || { echo "no binary at $bin"; exit 1; }
+          if grep -qaF "Attempting to use NVENC without CUDA support" "$bin"; then
+            echo "FAIL: ${{ matrix.artifact }} was built WITHOUT CUDA."
+            echo "NVENC would fall back to GPU -> RAM -> GPU for every frame."
+            exit 1
+          fi
+          echo "ok: CUDA is compiled into ${{ matrix.artifact }}"
+
+      # CUDA 13 silently drops sm_50-72; a 12.x package missing sm_61 means GTX 10xx
+      # hosts hit cudaErrorNoKernelImageForDevice and fall back to software encoding.
+      - name: Verify Pascal kernels are compiled in
+        if: matrix.cuda_flag == '--cuda-runfile' && startsWith(matrix.cuda_version, '12.')
+        shell: bash
+        run: |
+          if ./build/cuda/bin/cuobjdump --list-elf ./build/nova-host | grep -q 'sm_61'; then
+            echo "ok: sm_61 (Pascal) kernels present"
+          else
+            echo "FAIL: no sm_61 kernels in ${{ matrix.artifact }}"
+            exit 1
+          fi
+
+      - name: Collect package
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          # CPACK_DEBIAN_FILE_NAME is DEB-DEFAULT (name_version_arch.deb), so match by extension.
+          pkg="${{ matrix.package }}"
+          shopt -s nullglob
+          files=(./build/cpack_artifacts/*."${pkg##*.}")
+          if [[ ${#files[@]} -ne 1 ]]; then
+            echo "expected exactly one ${pkg##*.} package, found: ${files[*]:-none}"
+            exit 1
+          fi
+          cp "${files[0]}" artifacts/${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: [build, build-windows]
+    if: startsWith(github.ref, 'refs/tags/nova-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage release assets
+        shell: bash
+        run: |
+          mkdir -p release
+          # Linux packages are one-file artifacts; the Windows artifact is a
+          # folder — pull just the user-facing installer/portable out of it.
+          find artifacts -type f \( \
+            -name "nova-host-*.deb" -o \
+            -name "nova-host-*.rpm" -o \
+            -name "*installer.msi" -o \
+            -name "*portable.zip" \
+          \) -exec cp {} release/ \;
+          echo "Release assets:"; ls -lh release/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false  # a nova-v* tag is an intentional release; publish it
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: release/*

@@ -1,9 +1,9 @@
 # M1 — Remote Microphone (client mic → host virtual source)
 
-Zenith reimplements the remote-microphone feature pioneered by Sunshine-Foundation, keeping
+Nova reimplements the remote-microphone feature pioneered by Sunshine-Foundation, keeping
 **wire compatibility with their enhanced Moonlight clients** (qiin2333/moonlight-qt,
-qiin2333/moonlight-android, VoidLink iOS) so those clients work against Zenith unchanged.
-Host side is Linux-native: a PipeWire virtual source ("Zenith Mic") instead of Foundation's
+qiin2333/moonlight-android, VoidLink iOS) so those clients work against Nova unchanged.
+Host side is Linux-native: a PipeWire virtual source ("Nova Mic") instead of Foundation's
 WASAPI + virtual audio driver.
 
 Protocol facts below were extracted from foundation-sunshine (GPL-3.0, same license) and
@@ -12,7 +12,7 @@ qiin2333/moonlight-common-c branch `mic`. We reimplement; we do not copy their d
 ## Wire protocol (must match exactly)
 
 **Negotiation**
-- Feature gate: config `stream_mic` (Zenith: `mic_enabled`). When on, the RTSP DESCRIBE SDP
+- Feature gate: config `stream_mic` (Nova: `mic_enabled`). When on, the RTSP DESCRIBE SDP
   advertises: `m=audio <mic_port> RTP/AVP 96`, `a=rtpmap:96 opus/48000/2`,
   `a=fmtp:96 minptime=10;useinbandfec=1`.
 - Client issues RTSP SETUP for stream type `"mic"` (alongside video/audio/control) →
@@ -42,25 +42,25 @@ qiin2333/moonlight-common-c branch `mic`. We reimplement; we do not copy their d
 - `opus_decoder_create(48000, 1)`; drop obviously invalid payloads (first 4 bytes all 0x00 or
   all 0xFF). Foundation uses `opus_decoder_get_nb_samples` + FEC decode on gaps.
 
-## Host architecture (Zenith / Linux)
+## Host architecture (Nova / Linux)
 
 ```
 UDP :base+12 ──► mic recv thread ──► per-client AES-CBC decrypt ──► opus decode (48k mono)
                                                                         │ S16 PCM
                                                     PipeWire pw_stream ◄┘
                                               media.class = Audio/Source
-                                              node "Zenith Mic" — apps record from it
+                                              node "Nova Mic" — apps record from it
 ```
 
 - `src/platform/common.h`: extend `audio_control_t` with `write_mic_data(const char*, size, seq)`
   (mirrors Foundation's contract so core stays platform-agnostic).
 - `src/platform/linux/mic_write.cpp`: PipeWire `pw_stream`, `PW_KEY_MEDIA_CLASS "Audio/Source"`,
-  `node.name = zenith-mic`, `node.description = "Zenith Mic"`, F32/S16 48 kHz mono; opus decode
+  `node.name = nova-mic`, `node.description = "Nova Mic"`, F32/S16 48 kHz mono; opus decode
   lives here (as in Foundation's Windows impl); ring buffer between UDP thread and pw thread;
   silence fill on underrun so the node keeps a live clock.
 - Requires a user-session PipeWire (true for the default systemd user service). Flatpak/system
   service caveats documented later.
-- Windows/macOS: `write_mic_data` returns -1 (feature Linux-only in Zenith).
+- Windows/macOS: `write_mic_data` returns -1 (feature Linux-only in Nova).
 
 ## Scope cuts for v1
 - No mic-config packet handling (0x5505) — fixed 48k mono.

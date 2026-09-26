@@ -868,7 +868,7 @@ namespace platf {
      * @brief Write one remote-microphone Opus payload received from a Moonlight client.
      *
      * Backends that support mic redirection decode the payload and feed a virtual
-     * capture device ("Zenith Mic"). The payload is already decrypted by the caller.
+     * capture device ("Nova Mic"). The payload is already decrypted by the caller.
      *
      * @param data Opus frame payload.
      * @param size Payload size in bytes.

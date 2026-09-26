@@ -11,8 +11,8 @@ import json
 import pytest
 from conftest import FakeRunner
 
-from zenith_display import cli
-from zenith_display.detect import Connector, Environment
+from nova_display import cli
+from nova_display.detect import Connector, Environment
 
 
 @pytest.fixture(autouse=True)

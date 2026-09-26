@@ -4,8 +4,8 @@ import json
 
 from conftest import FakeRunner
 
-from zenith_display.layouts.kscreen import KScreenBackend
-from zenith_display.modes import Mode
+from nova_display.layouts.kscreen import KScreenBackend
+from nova_display.modes import Mode
 
 
 def _backend(fixture_text):
@@ -118,12 +118,12 @@ def test_a_negative_coordinate_is_never_emitted(fixture_text):
 def test_kscreen_failing_with_exit_status_zero_is_still_a_failure(fixture_text):
     """kscreen-doctor prints "applying config failed!" on stdout and exits 0.
 
-    Believing the exit status meant Zenith logged "dual active" at the same moment
+    Believing the exit status meant Nova logged "dual active" at the same moment
     KDE threw the layout away. Every rollback downstream depends on this raising.
     """
     import pytest
 
-    from zenith_display.runner import Result
+    from nova_display.runner import Result
 
     rejection = Result(
         argv=[], returncode=0,   # <- zero. That is the entire problem.

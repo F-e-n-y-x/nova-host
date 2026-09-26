@@ -14,9 +14,9 @@ import struct
 import pytest
 from conftest import FakeRunner
 
-from zenith_display import remedy
-from zenith_display.cli import EXIT_APPLY_FAILED, EXIT_NEEDS_FIXING, EXIT_OK, _block, _offer
-from zenith_display.detect import VENDOR_AMD, VENDOR_NVIDIA, Connector, Environment
+from nova_display import remedy
+from nova_display.cli import EXIT_APPLY_FAILED, EXIT_NEEDS_FIXING, EXIT_OK, _block, _offer
+from nova_display.detect import VENDOR_AMD, VENDOR_NVIDIA, Connector, Environment
 
 
 def _env(**kw):
@@ -44,20 +44,20 @@ def test_a_binary_with_no_capabilities_is_missing_all_of_them(monkeypatch):
         raise OSError(errno.ENODATA, "no data available")
 
     monkeypatch.setattr(os, "getxattr", no_xattr)
-    assert remedy.missing_caps("/usr/local/bin/zenith") == list(remedy.REQUIRED_CAPS)
+    assert remedy.missing_caps("/usr/local/bin/nova-host") == list(remedy.REQUIRED_CAPS)
 
 
 def test_a_fully_capable_binary_is_missing_none(monkeypatch):
     monkeypatch.setattr(os, "getxattr", lambda p, n: _cap_xattr(
         remedy.CAP_SYS_ADMIN, remedy.CAP_SYS_NICE))
-    assert remedy.missing_caps("/usr/local/bin/zenith") == []
+    assert remedy.missing_caps("/usr/local/bin/nova-host") == []
 
 
 def test_a_partially_capable_binary_names_only_what_is_missing(monkeypatch):
     """cap_sys_admin alone gets KMS capture back but leaves the encoder thread at
     ordinary priority, so the gap is worth reporting precisely."""
     monkeypatch.setattr(os, "getxattr", lambda p, n: _cap_xattr(remedy.CAP_SYS_ADMIN))
-    assert remedy.missing_caps("/usr/local/bin/zenith") == ["cap_sys_nice"]
+    assert remedy.missing_caps("/usr/local/bin/nova-host") == ["cap_sys_nice"]
 
 
 def test_unreadable_capabilities_are_unknown_not_healthy(monkeypatch):
@@ -67,27 +67,27 @@ def test_unreadable_capabilities_are_unknown_not_healthy(monkeypatch):
         raise OSError(errno.EOPNOTSUPP, "not supported")
 
     monkeypatch.setattr(os, "getxattr", denied)
-    assert remedy.missing_caps("/usr/local/bin/zenith") is None
+    assert remedy.missing_caps("/usr/local/bin/nova-host") is None
 
 
 def test_a_truncated_capability_blob_is_unknown(monkeypatch):
     monkeypatch.setattr(os, "getxattr", lambda p, n: b"\x00\x00")
-    assert remedy.missing_caps("/usr/local/bin/zenith") is None
+    assert remedy.missing_caps("/usr/local/bin/nova-host") is None
 
 
 def test_the_remedy_is_the_command_the_packaging_would_have_run(monkeypatch):
     """cmake/packaging/linux.cmake grants cap_sys_admin,cap_sys_nice+p. A source
     build must end up in the same state, by the same means."""
-    monkeypatch.setattr(remedy, "find_binary", lambda cwd=None: "/usr/local/bin/zenith")
+    monkeypatch.setattr(remedy, "find_binary", lambda cwd=None: "/usr/local/bin/nova-host")
     monkeypatch.setattr(remedy, "missing_caps", lambda p: list(remedy.REQUIRED_CAPS))
     rem = remedy.check_capabilities(_env())
     assert rem is not None
-    assert rem.commands == [["setcap", "cap_sys_admin,cap_sys_nice+p", "/usr/local/bin/zenith"]]
+    assert rem.commands == [["setcap", "cap_sys_admin,cap_sys_nice+p", "/usr/local/bin/nova-host"]]
     assert "setcap cap_sys_admin,cap_sys_nice+p" in rem.shell()
 
 
 def test_no_remedy_when_the_binary_is_already_capable(monkeypatch):
-    monkeypatch.setattr(remedy, "find_binary", lambda cwd=None: "/usr/local/bin/zenith")
+    monkeypatch.setattr(remedy, "find_binary", lambda cwd=None: "/usr/local/bin/nova-host")
     monkeypatch.setattr(remedy, "missing_caps", lambda p: [])
     assert remedy.check_capabilities(_env()) is None
 
@@ -103,7 +103,7 @@ def test_applying_a_remedy_escalates_only_when_not_root():
     monkeypatch_env = _env(is_root=False)
     runner = FakeRunner()
     rem = remedy.Remedy(key="k", problem="p", detail="d",
-                        commands=[["setcap", "x", "/usr/local/bin/zenith"]])
+                        commands=[["setcap", "x", "/usr/local/bin/nova-host"]])
     assert rem.apply(monkeypatch_env, runner)
     assert runner.trace[-1][0] == "sudo"
 
@@ -152,7 +152,7 @@ def test_no_warning_when_nothing_will_hardware_encode():
 @pytest.fixture
 def capable(monkeypatch):
     """A machine whose only problem is the missing capabilities."""
-    monkeypatch.setattr(remedy, "find_binary", lambda cwd=None: "/usr/local/bin/zenith")
+    monkeypatch.setattr(remedy, "find_binary", lambda cwd=None: "/usr/local/bin/nova-host")
     monkeypatch.setattr(remedy, "missing_caps", lambda p: list(remedy.REQUIRED_CAPS))
 
 
@@ -212,7 +212,7 @@ def test_an_interrupted_prompt_is_a_no(capable, monkeypatch):
 
 def test_a_failing_fix_reports_which_one_and_keeps_going(capable, monkeypatch):
     """Half-fixed is a real state, and the user needs to know which half."""
-    from zenith_display.runner import Result
+    from nova_display.runner import Result
 
     class Failing(FakeRunner):
         def run(self, argv, timeout=15.0, check=False, mutating=True):
@@ -241,7 +241,7 @@ def _nvidia_env(**kw):
 
 
 def _fake_binary(tmp_path, *markers) -> str:
-    path = tmp_path / "zenith"
+    path = tmp_path / "nova-host"
     path.write_bytes(b"padding" * 500 + b"".join(markers) + b"tail" * 500)
     return str(path)
 
@@ -284,7 +284,7 @@ def test_an_amd_host_is_not_asked_for_cuda(tmp_path, monkeypatch):
 def test_a_marker_split_across_two_reads_is_still_found(tmp_path, monkeypatch):
     """The file is scanned a megabyte at a time; a marker straddling a boundary
     must not fall through the gap."""
-    path = tmp_path / "zenith"
+    path = tmp_path / "nova-host"
     chunk = 1 << 20
     head = b"x" * (chunk - len(remedy._NO_CUDA_MARKER) // 2)
     path.write_bytes(head + remedy._NO_CUDA_MARKER + b"y" * 64 + remedy._KMS_MARKER)

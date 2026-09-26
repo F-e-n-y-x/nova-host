@@ -5,9 +5,9 @@ cmake_minimum_required(VERSION 3.24)
 # `third-party/libvirtualhid` requires 3.24
 # todo - set this conditionally
 
-project(Zenith VERSION 0.3.0
+project(Nova VERSION 0.1.0
         DESCRIPTION "Linux-first Sunshine fork — self-hosted game stream host for Moonlight"
-        HOMEPAGE_URL "https://github.com/jacksonpate/zenith")
+        HOMEPAGE_URL "https://github.com/F-e-n-y-x/nova-host")
 
 # Minimum separately installed Virtual HID Driver version supported by this build.
 set(LIBVIRTUALHID_MINIMUM_VERSION "2026.914.1218.10")
@@ -22,7 +22,7 @@ endif()
 
 set(PROJECT_LICENSE "GPL-3.0-only")
 
-set(PROJECT_FQDN "io.github.jacksonpate.Zenith")
+set(PROJECT_FQDN "io.github.f_e_n_y_x.NovaHost")
 
 set(PROJECT_BRIEF_DESCRIPTION "GameStream host for Moonlight")  # must be <= 35 characters
 

@@ -486,7 +486,7 @@ namespace stream {
 
     udp::socket video_sock {io_context};  ///< UDP socket bound for video packet transmission.
     udp::socket audio_sock {io_context};  ///< UDP socket bound for audio packet transmission.
-    udp::socket mic_sock {io_context};  ///< Zenith: UDP socket receiving remote microphone packets (base+12).
+    udp::socket mic_sock {io_context};  ///< Nova: UDP socket receiving remote microphone packets (base+12).
 
     control_server_t control_server;  ///< ENet server for GameStream control packets.
   };
@@ -1528,7 +1528,7 @@ namespace stream {
    * @param ctx Native context object used by the operation or callback.
    */
   /**
-   * @brief Zenith remote microphone (M1) — wire format shared with
+   * @brief Nova remote microphone (M1) — wire format shared with
    *        Sunshine-Foundation clients; see docs/design/remote-mic.md.
    *        Sequence numbers are little-endian on the wire.
    */
@@ -1542,22 +1542,22 @@ namespace stream {
      * @brief Legacy 12-byte mic datagram header (moonlight-common-c mic branch).
      */
     struct packet_header_t {
-      std::uint8_t flags;  ///< RTP-style flags byte; unused by Zenith.
+      std::uint8_t flags;  ///< RTP-style flags byte; unused by Nova.
       std::uint8_t packetType;  ///< ::kPacketTypeOpus for Opus payloads.
       std::uint16_t sequenceNumber;  ///< Wire order little-endian.
-      std::uint32_t timestamp;  ///< Sender timestamp; unused by Zenith.
-      std::uint32_t ssrc;  ///< RTP synchronization source; unused by Zenith.
+      std::uint32_t timestamp;  ///< Sender timestamp; unused by Nova.
+      std::uint32_t ssrc;  ///< RTP synchronization source; unused by Nova.
     };
 
     /**
      * @brief 13-byte mic datagram header carrying the 16-bit extended type.
      */
     struct packet_header_ext_t {
-      std::uint8_t header;  ///< RTP-style flags byte; unused by Zenith.
+      std::uint8_t header;  ///< RTP-style flags byte; unused by Nova.
       std::uint16_t packetType;  ///< ::kPacketTypeExt for Opus payloads.
       std::uint16_t sequenceNumber;  ///< Wire order little-endian.
-      std::uint32_t timestamp;  ///< Sender timestamp; unused by Zenith.
-      std::uint32_t ssrc;  ///< RTP synchronization source; unused by Zenith.
+      std::uint32_t timestamp;  ///< Sender timestamp; unused by Nova.
+      std::uint32_t ssrc;  ///< RTP synchronization source; unused by Nova.
     };
 
 #pragma pack(pop)
@@ -1681,7 +1681,7 @@ namespace stream {
     recv_func_init(video_sock, 0, peer_to_video_session);
     recv_func_init(audio_sock, 1, peer_to_audio_session);
 
-    // Zenith: remote microphone receive chain (own buffer/endpoint; plaintext v1)
+    // Nova: remote microphone receive chain (own buffer/endpoint; plaintext v1)
     udp::endpoint mic_peer;
     std::array<char, 2048> mic_buf;
     std::function<void(const boost::system::error_code, size_t)> mic_recv_func;
@@ -2209,7 +2209,7 @@ namespace stream {
       return -1;
     }
 
-    // Zenith: remote microphone socket (optional feature; failure is non-fatal)
+    // Nova: remote microphone socket (optional feature; failure is non-fatal)
     if (config::audio.mic_enabled) {
       auto mic_port = net::map_port(MIC_STREAM_PORT);
       ctx.mic_sock.open(protocol, ec);
@@ -2222,7 +2222,7 @@ namespace stream {
           ctx.mic_sock.close();
         }
       } else {
-        BOOST_LOG(info) << "Zenith remote microphone listening on port "sv << mic_port;
+        BOOST_LOG(info) << "Nova remote microphone listening on port "sv << mic_port;
       }
     }
 

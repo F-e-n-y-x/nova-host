@@ -26,7 +26,7 @@ force_cuda_runfile=0
 num_processors=$(nproc)
 publisher_name="Third Party Publisher"
 publisher_website=""
-publisher_issue_url="https://github.com/jacksonpate/zenith/issues"
+publisher_issue_url="https://github.com/F-e-n-y-x/nova-host/issues"
 skip_cleanup=0
 skip_cuda=0
 skip_libva=0
@@ -753,8 +753,8 @@ function run_step_cmake() {
     "-DBUILD_WERROR=ON"
     "-DCMAKE_BUILD_TYPE=Release"
     "-DCMAKE_INSTALL_PREFIX=/usr"
-    "-DSUNSHINE_ASSETS_DIR=share/zenith"
-    "-DSUNSHINE_EXECUTABLE_PATH=/usr/bin/zenith"
+    "-DSUNSHINE_ASSETS_DIR=share/nova-host"
+    "-DSUNSHINE_EXECUTABLE_PATH=/usr/bin/nova-host"
     "-DSUNSHINE_ENABLE_DRM=ON"
     "-DSUNSHINE_ENABLE_KWIN=ON"
     "-DSUNSHINE_ENABLE_PORTAL=ON"
@@ -805,13 +805,15 @@ function run_step_validation() {
   echo "Running step: Validation"
 
   # Run appstream validation, etc.
-  appstreamcli validate "build/io.github.jacksonpate.Zenith.metainfo.xml"
+  # --no-net: the release URLs 404 until the repo is public and has a release; checking them
+  # online makes the build depend on GitHub.
+  appstreamcli validate --no-net "build/io.github.f_e_n_y_x.NovaHost.metainfo.xml"
   # --nonet: minimal containers lack a TLS backend for appstream-util's screenshot
   # fetch; validate offline like Fedora packaging does.
-  appstream-util --nonet validate "build/io.github.jacksonpate.Zenith.metainfo.xml"
-  desktop-file-validate "build/io.github.jacksonpate.Zenith.desktop"
+  appstream-util --nonet validate "build/io.github.f_e_n_y_x.NovaHost.metainfo.xml"
+  desktop-file-validate "build/io.github.f_e_n_y_x.NovaHost.desktop"
   if [[ "$appimage_build" == 0 ]]; then
-    desktop-file-validate "build/io.github.jacksonpate.Zenith.terminal.desktop"
+    desktop-file-validate "build/io.github.f_e_n_y_x.NovaHost.terminal.desktop"
   fi
   return 0
 }

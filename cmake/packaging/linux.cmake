@@ -3,27 +3,27 @@
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/assets/"
         DESTINATION "${SUNSHINE_ASSETS_DIR}")
 
-# Zenith display autopilot: plug-and-play Headless/Dual Display support.
-# The default apps.json references `zenith-display`, so it must land on PATH.
+# Nova display autopilot: plug-and-play Headless/Dual Display support.
+# The default apps.json references `nova-display`, so it must land on PATH.
 # configure_file bakes the real libdir into the launcher so it works on any
 # layout (Debian multiarch, lib64, /app for flatpak) without guessing.
-set(ZENITH_DISPLAY_LIBDIR "${CMAKE_INSTALL_FULL_LIBDIR}")
-configure_file("${CMAKE_SOURCE_DIR}/tools/display/zenith-display"
-        "${CMAKE_BINARY_DIR}/zenith-display" @ONLY)
-install(PROGRAMS "${CMAKE_BINARY_DIR}/zenith-display"
+set(NOVA_DISPLAY_LIBDIR "${CMAKE_INSTALL_FULL_LIBDIR}")
+configure_file("${CMAKE_SOURCE_DIR}/tools/display/nova-display"
+        "${CMAKE_BINARY_DIR}/nova-display" @ONLY)
+install(PROGRAMS "${CMAKE_BINARY_DIR}/nova-display"
         DESTINATION "${CMAKE_INSTALL_BINDIR}")
-install(DIRECTORY "${CMAKE_SOURCE_DIR}/tools/display/zenith_display"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/zenith"
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/tools/display/nova_display"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host"
         PATTERN "__pycache__" EXCLUDE)
 
-# The privileged helper `zenith-display setup` installs and puts behind a scoped
+# The privileged helper `nova-display setup` installs and puts behind a scoped
 # sudoers rule. Without it in the package, the drm-debugfs provider finds no
 # helper to install, quietly reports itself unavailable, and every packaged
 # machine falls through to evdi — a kernel module, DKMS, and a Secure Boot
 # enrolment — on hardware that needed none of it. It worked only when setup was
 # run from a source tree, which is not how anybody installs this.
-install(PROGRAMS "${CMAKE_SOURCE_DIR}/tools/display/helpers/zenith-drm-vdd"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/zenith/helpers")
+install(PROGRAMS "${CMAKE_SOURCE_DIR}/tools/display/helpers/nova-drm-vdd"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host/helpers")
 
 # copy assets (excluding shaders) to build directory, for running without install
 file(COPY "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/assets/"
@@ -36,7 +36,7 @@ file(CREATE_LINK "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/assets/shaders"
 if(${SUNSHINE_BUILD_APPIMAGE} OR ${SUNSHINE_BUILD_FLATPAK})
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-sunshine.rules"
             DESTINATION "${SUNSHINE_ASSETS_DIR}/udev/rules.d")
-    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-zenith-vdd.rules"
+    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-nova-host-vdd.rules"
             DESTINATION "${SUNSHINE_ASSETS_DIR}/udev/rules.d")
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-sunshine.conf"
             DESTINATION "${SUNSHINE_ASSETS_DIR}/modules-load.d")
@@ -45,7 +45,7 @@ if(${SUNSHINE_BUILD_APPIMAGE} OR ${SUNSHINE_BUILD_FLATPAK})
 elseif(${SUNSHINE_BUILD_HOMEBREW})
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-sunshine.rules"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/udev/rules.d")
-    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-zenith-vdd.rules"
+    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-nova-host-vdd.rules"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/udev/rules.d")
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-sunshine.conf"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/modules-load.d")
@@ -65,7 +65,7 @@ else()
     endif()
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-sunshine.rules"
             DESTINATION "${SUNSHINE_UDEV_RULES_INSTALL_DIR}")
-    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-zenith-vdd.rules"
+    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-nova-host-vdd.rules"
             DESTINATION "${SUNSHINE_UDEV_RULES_INSTALL_DIR}")
     if(SYSTEMD_FOUND)
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/app-${PROJECT_FQDN}.service"
@@ -74,6 +74,11 @@ else()
                 DESTINATION "${SYSTEMD_MODULES_LOAD_DIR}")
     endif()
 endif()
+
+# The display name is "Nova"; the package, binary and service use the unique id `nova-host`
+# because Debian's `nova-*` packages already belong to OpenStack.
+set(CPACK_DEBIAN_PACKAGE_NAME "nova-host")
+set(CPACK_RPM_PACKAGE_NAME "nova-host")
 
 # RPM specific
 set(CPACK_RPM_PACKAGE_LICENSE "GPLv3")
@@ -114,7 +119,7 @@ endif()
 #
 # An rpm filelist entry is matched against the installed path, so it has to be
 # absolute. SUNSHINE_EXECUTABLE_PATH is both: the packaging scripts pass an
-# absolute /usr/bin/zenith, while a plain `cmake` run defaults it to the bare
+# absolute /usr/bin/nova-host, while a plain `cmake` run defaults it to the bare
 # name (prep/init.cmake) — which matches nothing, and silently applies the caps
 # to no file at all. Normalise rather than assume either form.
 if(IS_ABSOLUTE "${SUNSHINE_EXECUTABLE_PATH}")
@@ -147,7 +152,7 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS "\
 # The display autopilot's universal VDD fallback needs the evdi DKMS module and
 # userspace library. Recommends (not Depends): installed by default, but their
 # absence never blocks the package — Fedora's equivalents live in RPM Fusion,
-# so on RPM `zenith-display setup` remains the bootstrap path.
+# so on RPM `nova-display setup` remains the bootstrap path.
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "evdi-dkms, libevdi1")
 set(CPACK_RPM_PACKAGE_REQUIRES "\
             ${CPACK_RPM_PLATFORM_PACKAGE_REQUIRES} \
@@ -196,12 +201,14 @@ endif()
 
 # This should automatically figure out dependencies on packages
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-# Zenith and a distro `sunshine` are the same app under different names; installing one should
-# supersede the other, not run a second host on the same ports. Conflicts + Replaces gives that
-# clean takeover. No Provides: since the rename, Zenith installs /usr/bin/zenith rather than
-# /usr/bin/sunshine, so it must not claim to satisfy a `sunshine` dependency.
-set(CPACK_DEBIAN_PACKAGE_CONFLICTS "sunshine")
-set(CPACK_DEBIAN_PACKAGE_REPLACES "sunshine")
+# Nova, Nova and a distro `sunshine` are the same host under different names and bind the same
+# ports; installing one must supersede the others, not run a second host. Conflicts + Replaces gives
+# that clean takeover. No Provides: Nova installs /usr/bin/nova-host, so it must not claim to
+# satisfy a `sunshine` or `nova` dependency.
+set(CPACK_DEBIAN_PACKAGE_CONFLICTS "sunshine, zenith")
+set(CPACK_DEBIAN_PACKAGE_REPLACES "sunshine, zenith")
+set(CPACK_RPM_PACKAGE_CONFLICTS "sunshine, zenith")
+set(CPACK_RPM_PACKAGE_OBSOLETES "zenith")
 set(CPACK_RPM_PACKAGE_AUTOREQ ON)
 
 # application icon

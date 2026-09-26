@@ -1,6 +1,6 @@
 /**
  * @file src/clipboard.h
- * @brief Clipboard sync between host and Moonlight clients (Zenith).
+ * @brief Clipboard sync between host and Moonlight clients (Nova).
  *
  * Wire compatibility with the Sunshine-Foundation ecosystem (VoidLink,
  * qiin2333 Moonlight forks). Protocol facts reimplemented from their
@@ -21,7 +21,7 @@
  * the paired HTTPS server (`/api/v1/clipboard/blob`).
  *
  * Unlike Foundation (Windows service in session 0 + user-session GUI agent),
- * Zenith on Linux runs inside the user session and touches the clipboard
+ * Nova on Linux runs inside the user session and touches the clipboard
  * directly through platf::clipboard.
  */
 #pragma once

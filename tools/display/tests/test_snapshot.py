@@ -2,7 +2,7 @@
 
 import os
 
-from zenith_display import snapshot
+from nova_display import snapshot
 
 
 def _environ(tmp_path):
@@ -62,7 +62,7 @@ def test_one_lit_monitor_is_enough_to_be_a_user_layout():
 def test_a_poisoned_snapshot_on_disk_is_discarded_not_replayed(tmp_path):
     """Self-heal for installs upgrading with a bad file already written.
 
-    Older Zenith could persist a mid-teardown capture — every monitor dark — as
+    Older Nova could persist a mid-teardown capture — every monitor dark — as
     the layout to restore *to*.  Loading one must drop it, not hand it to
     restore, or the user's monitors never come back.
     """

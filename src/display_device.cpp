@@ -48,14 +48,14 @@ namespace display_device {
     /**
      * @brief The virtual display the autopilot created for this session, if there is one.
      *
-     * `zenith-display` records the display it just made in its state file. Reading
+     * `nova-display` records the display it just made in its state file. Reading
      * it is how capture finds a display whose name nobody could have known in
      * advance — spawn it on app launch, tear it down on quit, and its connector
      * name is whatever the kernel handed out this time.
      *
      * Empty when no session is live, so a plain desktop stream is untouched.
      */
-    std::string zenith_vdd_output() {
+    std::string vdd_output_from_state() {
 #ifdef __linux__
       namespace fs = std::filesystem;
 
@@ -70,7 +70,7 @@ namespace display_device {
         return {};
       }
 
-      std::ifstream state {base / "zenith" / "display" / "snapshot.json"};
+      std::ifstream state {base / "nova-host" / "display" / "snapshot.json"};
       if (!state) {
         return {};  // no live session — nothing was spawned
       }
@@ -897,8 +897,8 @@ namespace display_device {
     // trusted forever; a display that is created when the app launches and
     // destroyed when it quits has no stable name to write down. Point the config
     // at one and it is wrong the moment the display is torn down and remade.
-    if (const auto vdd {zenith_vdd_output()}; !vdd.empty()) {
-      BOOST_LOG(info) << "Capturing the virtual display Zenith created for this session: "sv << vdd;
+    if (const auto vdd {vdd_output_from_state()}; !vdd.empty()) {
+      BOOST_LOG(info) << "Capturing the virtual display Nova created for this session: "sv << vdd;
       return vdd;
     }
 

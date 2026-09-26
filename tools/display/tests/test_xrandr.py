@@ -2,8 +2,8 @@
 
 from conftest import FakeRunner
 
-from zenith_display.layouts.xrandr import XrandrBackend
-from zenith_display.modes import Mode
+from nova_display.layouts.xrandr import XrandrBackend
+from nova_display.modes import Mode
 
 
 def _backend(fixture_text):
@@ -88,7 +88,7 @@ def test_restore_reapplies_rotation_per_output():
 
 
 def test_restore_continues_past_one_failed_output():
-    from zenith_display.runner import Result
+    from nova_display.runner import Result
 
     backend = _rotated_backend()
     payload = backend.snapshot()

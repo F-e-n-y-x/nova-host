@@ -1,6 +1,6 @@
 """Client mode resolution and CVT-RB timing sanity."""
 
-from zenith_display.modes import Mode, client_mode, cvt_rb
+from nova_display.modes import Mode, client_mode, cvt_rb
 
 
 def test_client_mode_reads_sunshine_env():

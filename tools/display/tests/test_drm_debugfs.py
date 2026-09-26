@@ -9,10 +9,10 @@ no kernel module, so no packaging, no DKMS, and no Secure Boot enrollment.
 import pytest
 from conftest import FakeRunner
 
-from zenith_display.detect import Connector, Environment
-from zenith_display.modes import Mode
-from zenith_display.providers import chain_for
-from zenith_display.providers.drm_debugfs import DrmDebugfsProvider
+from nova_display.detect import Connector, Environment
+from nova_display.modes import Mode
+from nova_display.providers import chain_for
+from nova_display.providers.drm_debugfs import DrmDebugfsProvider
 
 
 def _env(**kw):
@@ -31,8 +31,8 @@ def _spare(name="DP-1", driver="nvidia", card="card1", vendor=""):
 @pytest.fixture
 def helper(monkeypatch):
     """The machine has the privileged helper installed."""
-    from zenith_display.providers import drm_debugfs
-    monkeypatch.setattr(drm_debugfs, "_helper", lambda: "/usr/local/bin/zenith-drm-vdd")
+    from nova_display.providers import drm_debugfs
+    monkeypatch.setattr(drm_debugfs, "_helper", lambda: "/usr/local/bin/nova-drm-vdd")
 
 
 def test_the_helper_is_enough_no_blanket_root_needed(helper):
@@ -59,7 +59,7 @@ def test_create_drives_the_helper_not_a_shell(helper, tmp_path, monkeypatch):
     assert name == "DP-1"
     argv = runner.trace[-1]
     assert argv[:2] == ["sudo", "-n"]
-    assert argv[2].endswith("zenith-drm-vdd")
+    assert argv[2].endswith("nova-drm-vdd")
     assert argv[3:5] == ["on", "DP-1"]
     assert not any(a == "sh" for a in argv), f"must not shell out: {argv}"
 
@@ -139,7 +139,7 @@ def test_it_never_borrows_the_laptop_panel(helper):
 
 
 def test_setup_installs_the_helper_even_though_root_could_manage_without_it(monkeypatch):
-    """`sudo zenith-display setup` printed "provider ready: drm-debugfs" and
+    """`sudo nova-display setup` printed "provider ready: drm-debugfs" and
     installed nothing.
 
     Setup runs as root; streaming does not. Root can write the two kernel files
@@ -150,8 +150,8 @@ def test_setup_installs_the_helper_even_though_root_could_manage_without_it(monk
 
     ensure() is what setup is *for*. It must run whether or not probe passes.
     """
-    from zenith_display import providers
-    from zenith_display.providers import drm_debugfs
+    from nova_display import providers
+    from nova_display.providers import drm_debugfs
 
     ensured = []
 
@@ -174,7 +174,7 @@ def test_setup_installs_the_helper_even_though_root_could_manage_without_it(monk
 def test_root_without_the_helper_is_not_ready(monkeypatch):
     """`_run` drives the helper even as root, so "I am root" was never the same
     thing as "this will work" — it just looked like it."""
-    from zenith_display.providers import drm_debugfs
+    from nova_display.providers import drm_debugfs
 
     monkeypatch.setattr(drm_debugfs, "_helper", lambda: None)
     ok, reason = drm_debugfs.DrmDebugfsProvider().probe(_root_env(), FakeRunner({}))
@@ -183,7 +183,7 @@ def test_root_without_the_helper_is_not_ready(monkeypatch):
 
 
 def _root_env():
-    from zenith_display.detect import Connector, Environment
+    from nova_display.detect import Connector, Environment
     return Environment(
         session_type="wayland", desktop="kde", distro="fedora", tools={},
         connectors=[Connector(sysfs="/sys/class/drm/card1-DP-1", name="DP-1",

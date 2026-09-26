@@ -77,7 +77,7 @@ jobs:
 
           import yaml
 
-          manifest_path = Path("packaging/linux/flatpak/dev.lizardbyte.app.Sunshine.yml")
+          manifest_path = Path("packaging/linux/flatpak/io.github.f_e_n_y_x.NovaHost.yml")
           manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
 
           kde_platform_version = str(manifest["runtime-version"])

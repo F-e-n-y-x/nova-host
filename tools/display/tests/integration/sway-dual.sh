@@ -25,9 +25,9 @@ swaymsg -- output HEADLESS-2 enable mode --custom 1920x1080@60Hz position 2560 0
 
 python3 - <<'PY'
 import json, subprocess, sys
-from zenith_display.layouts.wlr import WlrBackend
-from zenith_display.modes import Mode
-from zenith_display.runner import Runner
+from nova_display.layouts.wlr import WlrBackend
+from nova_display.modes import Mode
+from nova_display.runner import Runner
 
 PHYS = ["HEADLESS-1", "HEADLESS-2"]
 

@@ -1,6 +1,6 @@
 /**
  * @file src/platform/linux/mic_write.h
- * @brief Declarations for the PipeWire remote-microphone output ("Zenith Mic").
+ * @brief Declarations for the PipeWire remote-microphone output ("Nova Mic").
  */
 #pragma once
 
@@ -13,7 +13,7 @@ namespace platf::pw_mic {
   /**
    * @brief A virtual PipeWire source node fed by remote (Moonlight client) microphone audio.
    *
-   * Appears to desktop applications as a normal microphone named "Zenith Mic".
+   * Appears to desktop applications as a normal microphone named "Nova Mic".
    * Payloads are Opus frames (48 kHz mono) as received from the mic UDP stream,
    * already decrypted by the caller.
    */

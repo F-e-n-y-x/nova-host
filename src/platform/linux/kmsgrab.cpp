@@ -473,7 +473,7 @@ namespace platf {
     }
 
     /**
-     * @brief Zenith: kernel-style name for a connector type (inverse of from_view).
+     * @brief Nova: kernel-style name for a connector type (inverse of from_view).
      *
      * Matches the names the kernel and Wayland compositors use ("DP", "HDMI-A",
      * "eDP", ...) so `<type>-<index>` equals the connector name in /sys/class/drm
@@ -1083,7 +1083,7 @@ namespace platf {
       int init(const std::string &display_name, const ::video::config_t &config) {
         delay = ::video::capture_frame_interval(config);
 
-        // Zenith: connector-name output ("DP-1") pins capture to that output.
+        // Nova: connector-name output ("DP-1") pins capture to that output.
         // Resolved against the live plane walk below, never cached enumeration
         // state — indexes from a previous session's monitor layout are stale.
         std::uint32_t want_type = 0;
@@ -1667,7 +1667,7 @@ namespace platf {
       }
 
       /**
-       * @brief Zenith M2: configure present-paced capture from the CRTC's current mode.
+       * @brief Nova M2: configure present-paced capture from the CRTC's current mode.
        *
        * With `capture_pacing = vblank` (or `auto`, the default), the capture loop wakes
        * on DRM CRTC sequence events (i.e. at scanout) instead of a steady-clock timer,
@@ -1731,8 +1731,8 @@ namespace platf {
         return true;
       }
 
-      bool vblank_pacing = false;  ///< Zenith: wake on CRTC sequence events instead of a timer.
-      std::uint32_t vblank_interval = 1;  ///< Zenith: vblanks per captured frame (refresh / client fps).
+      bool vblank_pacing = false;  ///< Nova: wake on CRTC sequence events instead of a timer.
+      std::uint32_t vblank_interval = 1;  ///< Nova: vblanks per captured frame (refresh / client fps).
 
       mem_type_e mem_type;  ///< Mem type.
 
@@ -2403,7 +2403,7 @@ namespace platf {
 
         auto it = crtc_to_monitor.find(plane->crtc_id);
 
-        // Zenith: name displays by connector ("DP-6") like the Wayland backend
+        // Nova: name displays by connector ("DP-6") like the Wayland backend
         // does, so `output_name = DP-6` matches during display refresh and
         // capture can follow a specific output (e.g. the virtual display).
         //

@@ -7,7 +7,7 @@ set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemR
 chcp 65001 >nul
 setlocal
 
-rem Zenith install root (this script lives in scripts\)
+rem Nova install root (this script lives in scripts\)
 for %%I in ("%~dp0\..") do set "ROOT_DIR=%%~fI"
 
 set "DRIVER_SRC=%~dp0driver"
@@ -29,7 +29,7 @@ echo Trusting the SudoVDA driver certificate...
 certutil -addstore -f root "%DIST_DIR%\sudovda.cer"
 certutil -addstore -f TrustedPublisher "%DIST_DIR%\sudovda.cer"
 
-rem Migrate: remove any ZakoVDD device from earlier Zenith builds
+rem Migrate: remove any ZakoVDD device from earlier Nova builds
 "%NEFCON%" --remove-device-node --hardware-id Root\ZakoVDD --class-guid 4d36e968-e325-11ce-bfc1-08002be10318 >nul 2>&1
 
 echo Removing any existing SudoVDA device node...

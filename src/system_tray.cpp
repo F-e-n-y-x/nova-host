@@ -186,11 +186,11 @@ namespace system_tray {
   }
 
   /**
-   * @brief Open the Zenith GitHub repository in the default browser.
+   * @brief Open the Nova GitHub repository in the default browser.
    * @param item The tray menu item that fired (unused).
    */
-  void tray_zenith_repo_cb([[maybe_unused]] struct tray_menu *item) {
-    platf::open_url("https://github.com/jacksonpate/zenith");
+  void tray_repo_cb([[maybe_unused]] struct tray_menu *item) {
+    platf::open_url("https://github.com/F-e-n-y-x/nova-host");
   }
 
   void tray_donate_github_cb([[maybe_unused]] struct tray_menu *item) {
@@ -295,8 +295,8 @@ namespace system_tray {
     .menu =
       (struct tray_menu[]) {
         // Tray menu labels currently use the project's English source strings.
-        {.text = "Open Zenith", .cb = tray_open_ui_cb},
-        {.text = "Zenith on GitHub", .cb = tray_zenith_repo_cb},
+        {.text = "Open Nova", .cb = tray_open_ui_cb},
+        {.text = "Nova on GitHub", .cb = tray_repo_cb},
         {.text = "-"},
   #ifdef _WIN32
         {.text = "Virtual HID Driver", .submenu = virtualhid_license_menu.data()},

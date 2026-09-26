@@ -17,10 +17,10 @@ import json
 
 from conftest import FakeRunner
 
-from zenith_display import snapshot
-from zenith_display.layouts import OutputState, Rect, is_coherent
-from zenith_display.layouts.kscreen import KScreenBackend
-from zenith_display.modes import Mode
+from nova_display import snapshot
+from nova_display.layouts import OutputState, Rect, is_coherent
+from nova_display.layouts.kscreen import KScreenBackend
+from nova_display.modes import Mode
 
 
 def _environ(tmp_path):
@@ -91,7 +91,7 @@ def test_an_incoherent_memory_is_dropped_rather_than_applied(fixture_text):
     """The bug that made this whole design necessary.
 
     KDE rejects a layout whose screens overlap or leave a gap — and it rejects it
-    *whole*, reverting every part of it. Zenith enables the streaming display in
+    *whole*, reverting every part of it. Nova enables the streaming display in
     the same atomic call that positions everything else, so one impossible
     coordinate does not produce a slightly-wrong desk: it produces no streaming
     display at all, and the user sees a plain mirrored desktop with no error.
@@ -238,7 +238,7 @@ def test_a_change_made_during_a_dual_session_is_not_undone(fixture_text):
     whatever it was before the session — silently undoing a deliberate change,
     and leaving a gap in the layout where the resized screen no longer reached.
     """
-    from zenith_display import cli
+    from nova_display import cli
 
     doc = json.loads(fixture_text("kscreen_silverblue.json"))
     for out in doc["outputs"]:
@@ -261,7 +261,7 @@ def test_a_change_made_during_a_dual_session_is_not_undone(fixture_text):
 
 
 def _fake_env():
-    from zenith_display.detect import Environment
+    from nova_display.detect import Environment
     return Environment(session_type="wayland", desktop="kde", distro="fedora", tools={},
                        connectors=[], is_root=False, has_passwordless_sudo=False)
 
@@ -289,7 +289,7 @@ def test_screens_meeting_at_a_corner_are_not():
 
 
 def test_the_poisoned_desk_that_started_all_this():
-    """The literal layout Zenith had memorised and replayed every session: three
+    """The literal layout Nova had memorised and replayed every session: three
     disjoint islands, courtesy of an emergency relight that switched the laptop
     panel on at whatever stale coordinates KDE had lying around.
 

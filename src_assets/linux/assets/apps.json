@@ -8,8 +8,8 @@
       "image-path": "desktop.png",
       "prep-cmd": [
         {
-          "do": "zenith-display headless",
-          "undo": "zenith-display restore",
+          "do": "nova-display headless",
+          "undo": "nova-display restore",
           "elevated": "false"
         }
       ]
@@ -19,8 +19,8 @@
       "image-path": "desktop.png",
       "prep-cmd": [
         {
-          "do": "zenith-display dual",
-          "undo": "zenith-display restore",
+          "do": "nova-display dual",
+          "undo": "nova-display restore",
           "elevated": "false"
         }
       ]
@@ -32,8 +32,8 @@
       ],
       "prep-cmd": [
         {
-          "do": "zenith-display headless",
-          "undo": "zenith-display restore",
+          "do": "nova-display headless",
+          "undo": "nova-display restore",
           "elevated": "false"
         },
         {
