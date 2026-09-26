@@ -41,7 +41,7 @@ jobs:
     with:
       publish_release: 'false'
       release_commit: ${{ github.sha }}
-      release_version: '0.0.0'
+      release_version: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
 
   build:
     name: ${{ matrix.name }}
@@ -125,8 +125,15 @@ jobs:
           path: build/cuda
           key: cuda-${{ matrix.cuda_version }}-${{ matrix.artifact }}-v1
 
+      # Tag builds must stamp the tag as the version: without it every release reports the
+      # CMake project() version, the web UI always shows "new version available", and apt
+      # sees each new .deb as the same version.
       - name: Build
         shell: bash
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          BUILD_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          COMMIT: ${{ github.sha }}
         run: |
           chmod +x ./scripts/linux_build.sh
           ./scripts/linux_build.sh \
