@@ -2,24 +2,40 @@
  * @file tests/unit/test_process.cpp
  * @brief Test src/process.* functions.
  */
-// test imports
+// test includes
 #include "../tests_common.h"
 
-// standard imports
+// standard includes
 #include <filesystem>
 #include <fstream>
 
-// local imports
+// local includes
 #include <src/process.h>
 
 namespace fs = std::filesystem;
+
+TEST(ProcessTest, PrepareCommand) {
+#ifdef SUNSHINE_BUILD_FLATPAK
+  EXPECT_EQ(proc::prepare_command("steam"), "flatpak-spawn --host steam");
+  EXPECT_EQ(proc::prepare_command("flatpak-spawn --host steam"), "flatpak-spawn --host steam");
+  EXPECT_EQ(proc::prepare_command("  flatpak-spawn --host steam  "), "flatpak-spawn --host steam");
+  EXPECT_EQ(proc::prepare_command("  steam  "), "flatpak-spawn --host steam");
+  EXPECT_EQ(proc::prepare_command(""), "");
+  EXPECT_EQ(proc::prepare_command("  \t"), "");
+#else
+  EXPECT_EQ(proc::prepare_command("steam"), "steam");
+  EXPECT_EQ(proc::prepare_command("  steam  "), "  steam  ");
+  EXPECT_EQ(proc::prepare_command("flatpak-spawn --host steam"), "flatpak-spawn --host steam");
+  EXPECT_EQ(proc::prepare_command(""), "");
+#endif
+}
 
 class ProcessPNGTest: public BaseTest {
 protected:
   void SetUp() override {
     BaseTest::SetUp();
     // Create test directory
-    test_dir = fs::temp_directory_path() / "sunshine_process_png_test";  // NOSONAR(cpp:S5443) - safe for tests
+    test_dir = fs::temp_directory_path() / "sunshine_process_png_test";  // NOSONAR(cpp:S5443): safe for tests
     fs::create_directories(test_dir);
   }
 

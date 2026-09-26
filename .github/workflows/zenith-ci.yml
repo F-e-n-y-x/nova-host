@@ -153,7 +153,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts
-          cp ./build/cpack_artifacts/${{ matrix.package }} artifacts/${{ matrix.artifact }}
+          # CPACK_DEBIAN_FILE_NAME is DEB-DEFAULT (name_version_arch.deb), so match by extension.
+          pkg="${{ matrix.package }}"
+          shopt -s nullglob
+          files=(./build/cpack_artifacts/*."${pkg##*.}")
+          if [[ ${#files[@]} -ne 1 ]]; then
+            echo "expected exactly one ${pkg##*.} package, found: ${files[*]:-none}"
+            exit 1
+          fi
+          cp "${files[0]}" artifacts/${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -184,7 +192,7 @@ jobs:
           find artifacts -type f \( \
             -name "zenith-*.deb" -o \
             -name "zenith-*.rpm" -o \
-            -name "*installer.exe" -o \
+            -name "*installer.msi" -o \
             -name "*portable.zip" \
           \) -exec cp {} release/ \;
           echo "Release assets:"; ls -lh release/

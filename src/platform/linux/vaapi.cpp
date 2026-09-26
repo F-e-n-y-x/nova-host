@@ -104,12 +104,12 @@ namespace va {
     struct {
       // DRM PRIME file descriptor for this object.
       // Needs to be closed manually
-      int fd;
+      int fd;  ///< DRM PRIME file descriptor for this object; the owner must close it.
 
       // Total size of this object (may include regions which are not part of the surface)
-      uint32_t size;
+      uint32_t size;  ///< Total byte size of the DRM object.
       // Format modifier applied to this object, not sure what that means
-      uint64_t drm_format_modifier;
+      uint64_t drm_format_modifier;  ///< DRM format modifier applied to this object.
     } objects[4];  ///< DRM PRIME backing objects referenced by the descriptor..
 
     // Number of layers making up the surface.
@@ -117,19 +117,19 @@ namespace va {
 
     struct {
       // DRM format fourcc of this layer (DRM_FOURCC_*).
-      uint32_t drm_format;
+      uint32_t drm_format;  ///< DRM fourcc pixel format for this layer.
 
       // Number of planes in this layer.
-      uint32_t num_planes;
+      uint32_t num_planes;  ///< Number of image planes in this layer.
 
       // references objects --> DRMPRIMESurfaceDescriptor.objects[object_index[0]]
-      uint32_t object_index[4];
+      uint32_t object_index[4];  ///< Index of the backing DRM object for each plane.
 
       // Offset within the object of each plane.
-      uint32_t offset[4];
+      uint32_t offset[4];  ///< Byte offset of each plane within its backing object.
 
       // Pitch of each plane.
-      uint32_t pitch[4];
+      uint32_t pitch[4];  ///< Row pitch in bytes for each plane.
     } layers[4];  ///< DRM PRIME layer descriptions for the frame..
   };
 
@@ -308,14 +308,39 @@ namespace va {
         BOOST_LOG(info) << "Using normal encoding mode"sv;
       }
 
-      VAConfigAttrib rc_attr = {VAConfigAttribRateControl};
-      auto status = vaGetConfigAttributes(va_display, va_profile, va_entrypoint, &rc_attr, 1);
+      // When the compression_level AVOption is set, vaapi_encode.c assigns the value to VAEncMiscParameterBufferQualityLevel
+      VAConfigAttrib quality_attr = {.type = VAConfigAttribEncQualityRange};
+      auto status = vaGetConfigAttributes(va_display, va_profile, va_entrypoint, &quality_attr, 1);
+      if (status != VA_STATUS_SUCCESS || quality_attr.value == VA_ATTRIB_NOT_SUPPORTED) {
+        quality_attr.value = 0;
+      }
+      auto vaapi_quality = config::video.vaapi.vaapi_quality.value_or(0);
+      auto target_quality = 0;
+      switch (vaapi_quality) {
+        default:
+        case 0:  // auto or unset
+          break;
+        case 1:  // low quality (highest value in range)
+        case 2:  // med quality (middle value in range)
+          target_quality = quality_attr.value / vaapi_quality;
+          break;
+        case 3:  // high quality (1)
+          target_quality = 1;
+          break;
+      }
+      if (quality_attr.value > 0) {
+        ctx->compression_level = target_quality;
+        BOOST_LOG(info) << "[VAAPI] Quality level set to "sv << ctx->compression_level << " (fastest level: "sv << quality_attr.value << ")"sv;
+      }
+
+      VAConfigAttrib rc_attr = {.type = VAConfigAttribRateControl};
+      status = vaGetConfigAttributes(va_display, va_profile, va_entrypoint, &rc_attr, 1);
       if (status != VA_STATUS_SUCCESS) {
         // Stick to the default rate control (CQP)
         rc_attr.value = 0;
       }
 
-      VAConfigAttrib slice_attr = {VAConfigAttribEncMaxSlices};
+      VAConfigAttrib slice_attr = {.type = VAConfigAttribEncMaxSlices};
       status = vaGetConfigAttributes(va_display, va_profile, va_entrypoint, &slice_attr, 1);
       if (status != VA_STATUS_SUCCESS) {
         // Assume only a single slice is supported
@@ -337,27 +362,52 @@ namespace va {
       // When we have to resort to the default 1 second VBV for encoding quality reasons,
       // we stick to CBR in order to avoid encoding huge frames after bitrate undershoots
       // leave headroom available in the RC window.
-      if (config::video.vaapi.strict_rc_buffer ||
-          (vendor && strstr(vendor, "Intel")) ||
-          ctx->codec_id == AV_CODEC_ID_AV1) {
-        ctx->rc_buffer_size = ctx->bit_rate * ctx->framerate.den / ctx->framerate.num;
+      //
+      // If a user-supplied rate control is detected, override the whitelist logic to allow
+      // full user control of both the rate control and strict VBV settings.
+      auto auto_whitelist = false;
+      auto rc_mode = config::video.vaapi.vaapi_rc_str;
+      auto rc_vbv = "with standard VBV size";
+      auto rc_whitelist = "";
+      auto rc_val = config::video.vaapi.vaapi_rc.value_or(0);
 
-        if (rc_attr.value & VA_RC_VBR) {
-          BOOST_LOG(info) << "Using VBR with single frame VBV size"sv;
-          av_dict_set(options, "rc_mode", "VBR", 0);
-        } else if (rc_attr.value & VA_RC_CBR) {
-          BOOST_LOG(info) << "Using CBR with single frame VBV size"sv;
-          av_dict_set(options, "rc_mode", "CBR", 0);
-        } else {
-          BOOST_LOG(warning) << "Using CQP with single frame VBV size"sv;
-          av_dict_set_int(options, "qp", config::video.qp, 0);
-        }
-      } else if (!(rc_attr.value & (VA_RC_CBR | VA_RC_VBR))) {
-        BOOST_LOG(warning) << "Using CQP rate control"sv;
-        av_dict_set_int(options, "qp", config::video.qp, 0);
-      } else {
-        BOOST_LOG(info) << "Using default rate control"sv;
+      // Detect whitelisted configurations
+      if ((vendor && std::string_view(vendor).contains("Intel") == true) || ctx->codec_id == AV_CODEC_ID_AV1) {
+        auto_whitelist = true;
+        rc_whitelist = " (whitelist override)";
       }
+
+      // First try user config, else fall back to auto-detection that respects whitelist
+      if (rc_val > 0 && rc_attr.value & rc_val) {
+        // override whitelist if the user-specified RC is supported
+        auto_whitelist = false;
+        rc_whitelist = "";
+      } else if (rc_attr.value & VA_RC_VBR && auto_whitelist) {
+        rc_mode = "vbr";
+        rc_val = VA_RC_VBR;
+      } else if (rc_attr.value & VA_RC_CBR) {
+        rc_mode = "cbr";
+        rc_val = VA_RC_CBR;
+      } else {
+        rc_mode = "cqp";
+        rc_val = VA_RC_CQP;
+      }
+
+      if (config::video.vaapi.strict_rc_buffer || auto_whitelist) {
+        ctx->rc_buffer_size = ctx->bit_rate * ctx->framerate.den / ctx->framerate.num;
+        rc_vbv = "with single frame VBV size";
+      }
+
+      // ffmpeg's rc_mode values don't align with VAAPI's rc_val values, so transform string to uppercase
+      std::transform(rc_mode.begin(), rc_mode.end(), rc_mode.begin(), [](unsigned char c) {
+        return std::toupper(c);
+      });
+      av_dict_set(options, "rc_mode", rc_mode.c_str(), 0);
+      if (rc_val == VA_RC_CQP || rc_val == VA_RC_ICQ || rc_val == VA_RC_QVBR) {
+        BOOST_LOG(warning) << "[VAAPI] Applying QP for compatible rate control method (QP value: "sv << config::video.qp << ")"sv;
+        av_dict_set_int(options, "qp", config::video.qp, 0);
+      }
+      BOOST_LOG(info) << "[VAAPI] Using "sv << rc_mode << " rate control "sv << rc_vbv << rc_whitelist;
     }
 
     /**
@@ -563,8 +613,8 @@ namespace va {
    */
   typedef struct VAAPIDevicePriv {
     union {
-      void *xdisplay;
-      int fd;
+      void *xdisplay;  ///< Native X11 display handle for display-backed contexts.
+      int fd;  ///< DRM file descriptor for device-backed contexts.
     } drm;  ///< Native display or DRM fd passed to FFmpeg's VA-API context.
 
     int drm_fd;  ///< DRM fd.
@@ -749,7 +799,7 @@ namespace va {
   std::unique_ptr<platf::avcodec_encode_device_t> make_avcodec_encode_device(int width, int height, int offset_x, int offset_y, bool vram) {
     auto render_device = platf::resolve_render_device();
 
-    file_t file = ::open(render_device.c_str(), O_RDWR);  // NOSONAR(cpp:S1874) - `_sopen_s` not available
+    file_t file = ::open(render_device.c_str(), O_RDWR);  // NOSONAR(cpp:S1874): `_sopen_s` not available
     if (file.el < 0) {
       char string[1024];
       BOOST_LOG(error) << "Couldn't open "sv << render_device << ": " << strerror_r(errno, string, sizeof(string));

@@ -59,7 +59,7 @@ platform:
 
 | Platform | Package | Notes |
 |----------|---------|-------|
-| **Windows 10/11** | `Zenith-Windows-AMD64-installer.exe` | Bundles the virtual display driver; Secure Boot stays on. |
+| **Windows 10/11** | `Zenith-Windows-AMD64-installer.msi` | Bundles the virtual display driver; Secure Boot stays on. |
 | **Ubuntu / Debian / Mint** | `zenith-*-amd64.deb` | `sudo apt install ./zenith-*.deb` |
 | **Fedora / Nobara / Bazzite** | `zenith-fedora-*-x86_64.rpm` | `sudo dnf install ./zenith-*.rpm` |
 | **Asahi Linux (Apple Silicon)** | `zenith-fedora-*-aarch64.rpm` | Fedora Asahi Remix. |
