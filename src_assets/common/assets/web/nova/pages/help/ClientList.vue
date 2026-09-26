@@ -12,16 +12,16 @@ const { t } = useI18n()
 
 const CLIENTS = [
   { id: 'nebula', name: 'Nebula', url: '', soon: true },
-  { id: 'moonlight', name: 'Moonlight', url: 'https://moonlight-stream.org' },
-  { id: 'artemis', name: 'Artemis', url: 'https://github.com/ClassicOldSong/moonlight-android' },
-  { id: 'voidlink', name: 'VoidLink', url: 'https://github.com/The-Fried-Fish/VoidLink-previously-moonlight-zwm' },
+  { id: 'moonlight', name: 'Moonlight', url: 'https://moonlight-stream.org', kind: 'website' },
+  { id: 'artemis', name: 'Artemis', url: 'https://github.com/ClassicOldSong/moonlight-android', kind: 'github' },
+  { id: 'voidlink', name: 'VoidLink', url: 'https://github.com/The-Fried-Fish/VoidLink-previously-moonlight-zwm', kind: 'github' },
 ]
 
 const clients = computed(() => CLIENTS.map((c) => ({
   ...c,
   platforms: t(`nova.help.platforms_${c.id}`),
   description: t(`nova.help.client_${c.id}`),
-  host: c.url.replace(/^https:\/\//, ''),
+  linkText: c.kind ? `${c.name} ${t(`nova.help.link_${c.kind}`)}` : '',
 })))
 </script>
 
@@ -37,7 +37,7 @@ const clients = computed(() => CLIENTS.map((c) => ({
         <p class="nv-clients__platforms">{{ client.platforms }}</p>
         <p class="nv-secondary nv-clients__desc">{{ client.description }}</p>
         <a v-if="client.url" class="nv-clients__link" :href="client.url" target="_blank" rel="noopener">
-          {{ client.host }}<ExternalLink :size="14" aria-hidden="true" />
+          {{ client.linkText }}<ExternalLink :size="14" aria-hidden="true" />
         </a>
       </li>
     </ul>

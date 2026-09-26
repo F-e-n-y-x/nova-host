@@ -5,7 +5,7 @@
  *
  * Props: platform ('linux' | 'windows' | 'macos' | 'freebsd' | ''), loading (config still loading).
  */
-import { computed, shallowRef } from 'vue'
+import { computed, nextTick, shallowRef, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MonitorCog, Power, RotateCcw, SquareX } from '@lucide/vue'
 import NvCard from '../../components/NvCard.vue'
@@ -71,16 +71,21 @@ const actions = computed(() => ACTIONS
     title: t(`nova.logs.${a.id}`),
     description: t(`nova.logs.${a.id}_desc`),
     button: t(`nova.logs.${a.id}_button`),
+    confirmTitle: t(`nova.logs.${a.id}_confirm_title`),
     confirmDescription: t(`nova.logs.${a.id}_confirm_desc`),
   })))
 
 const pending = shallowRef(null)
 const open = shallowRef(false)
 const busy = shallowRef(false)
+const cancelId = `nv-diag-cancel-${useId()}`
 
-function ask(action) {
+async function ask(action) {
   pending.value = action
   open.value = true
+  // Start on the safe choice; runs after the dialog's own initial focus.
+  await nextTick()
+  setTimeout(() => document.getElementById(cancelId)?.focus(), 0)
 }
 
 async function confirm() {
@@ -113,13 +118,14 @@ async function confirm() {
         </template>
       </NvCard>
       <NvCard v-if="loading" :level="3" class="nv-diag__card" aria-busy="true">
+        <span class="nv-visually-hidden">{{ t('nova.common.loading') }}</span>
         <NvSkeleton :lines="3" />
       </NvCard>
     </div>
 
-    <NvDialog v-model:open="open" :title="pending?.title || ''" :description="pending?.confirmDescription || ''" :persistent="busy">
+    <NvDialog v-model:open="open" :title="pending?.confirmTitle || ''" :description="pending?.confirmDescription || ''" :persistent="busy">
       <template #footer>
-        <NvButton variant="secondary" :disabled="busy" @click="open = false">{{ t('nova.common.cancel') }}</NvButton>
+        <NvButton :id="cancelId" variant="secondary" :disabled="busy" @click="open = false">{{ t('nova.common.cancel') }}</NvButton>
         <NvButton variant="danger-solid" :loading="busy" @click="confirm">{{ pending?.button || t('nova.logs.confirm') }}</NvButton>
       </template>
     </NvDialog>

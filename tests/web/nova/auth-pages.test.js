@@ -51,6 +51,7 @@ describe('Welcome', () => {
     await w.get('form').trigger('submit')
     expect(w.findAll('[aria-invalid="true"]')).toHaveLength(2)
     expect(w.text()).toContain('Enter a username.')
+    expect(document.activeElement).toBe(byLabel(w, 'Username').element)
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -112,7 +113,7 @@ describe('Password', () => {
     const confirm = byLabel(w, 'Confirm new password')
     await confirm.setValue('new secret 2')
     await confirm.trigger('focusout')
-    expect(w.text()).toContain("The passwords don't match.")
+    expect(w.text()).toContain('The passwords don’t match.')
     expect(confirm.attributes('aria-invalid')).toBe('true')
   })
 })
@@ -120,7 +121,7 @@ describe('Password', () => {
 describe('Logout', () => {
   it('offers to sign in again', () => {
     const w = track(mountNova(Logout))
-    expect(w.get('h1').text()).toBe("You're signed out")
+    expect(w.get('h1').text()).toBe('You’re signed out')
     expect(w.findAll('a').find((a) => a.text() === 'Sign in again').attributes('href')).toBe('./')
   })
 })
