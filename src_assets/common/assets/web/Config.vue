@@ -1,491 +1,288 @@
+<script setup>
+/**
+ * Settings page: every host option, grouped into sections with a section nav, search,
+ * "Changed" markers against defaults, and a sticky bar to save (and restart) or discard.
+ */
+import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { SearchX } from '@lucide/vue'
+import NvAlert from './nova/components/NvAlert.vue'
+import NvButton from './nova/components/NvButton.vue'
+import NvDialog from './nova/components/NvDialog.vue'
+import NvEmptyState from './nova/components/NvEmptyState.vue'
+import NvPage from './nova/components/NvPage.vue'
+import NvSkeleton from './nova/components/NvSkeleton.vue'
+import NvTextField from './nova/components/NvTextField.vue'
+import SettingsNav from './configs/components/SettingsNav.vue'
+import SettingsSaveBar from './configs/components/SettingsSaveBar.vue'
+import SettingsSection from './configs/components/SettingsSection.vue'
+import { toast } from './nova/toast.js'
+import { useScrollSpy } from './configs/useScrollSpy.js'
+import { useSettingsForm } from './configs/useSettingsForm.js'
+import { useSettingsSections } from './configs/useSettingsSections.js'
+
+const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
+const form = useSettingsForm()
+const query = shallowRef(typeof route.query.q === 'string' ? route.query.q : '')
+const { sections, matchCount, searching } = useSettingsSections(form, query)
+const sectionIds = computed(() => sections.value.map((s) => s.id))
+const { active } = useScrollSpy(sectionIds)
+const errorCount = computed(() => Object.keys(form.visibleErrors.value).length)
+const dirtyCount = computed(() => form.dirtyKeys.value.length)
+
+const SEARCH_ID = 'settings-search'
+
+/** Focus the first invalid setting, in page order. */
+async function focusFirstError() {
+  await nextTick()
+  const keys = sections.value.flatMap((s) => [...s.items, ...s.primaryGroups.flatMap((g) => g.items),
+    ...s.otherGroups.flatMap((g) => g.items)]).filter((i) => i.kind === 'field').map((i) => i.key)
+  const first = keys.find((key) => form.errors.value[key])
+  if (!first) return
+  const row = document.getElementById(first)
+  const control = row?.querySelector('[aria-invalid="true"], input, select, button[role="switch"]')
+  row?.scrollIntoView({ block: 'center' })
+  ;(control || row)?.focus()
+}
+
+async function save() {
+  try {
+    const ok = await form.save()
+    if (ok) toast.success(t('nova.settings.saved'))
+    else await focusFirstError()
+  } catch (error) {
+    toast.danger(t('nova.settings.save_failed', { error: error.message }))
+  }
+}
+
+async function saveAndRestart() {
+  try {
+    const ok = await form.saveAndRestart()
+    if (ok === true) toast.success(t('nova.settings.restarted'))
+    else if (ok === false) toast.warning(t('nova.settings.restart_slow'))
+    else await focusFirstError()
+  } catch (error) {
+    toast.danger(t('nova.settings.save_failed', { error: error.message }))
+  }
+}
+
+async function restart() {
+  const ok = await form.restart()
+  if (ok) toast.success(t('nova.settings.restarted'))
+  else toast.warning(t('nova.settings.restart_slow'))
+}
+
+/** Scroll to and focus the section or setting named by the URL hash. */
+async function revealHash() {
+  const id = decodeURIComponent(route.hash.replace(/^#/, ''))
+  if (!id || !form.config.value) return
+  await nextTick()
+  const el = document.getElementById(id)
+  if (!el) return
+  el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  el.focus({ preventScroll: true })
+  if (el.classList.contains('nv-cfg-row')) {
+    el.classList.add('nv-cfg-row--flash')
+    setTimeout(() => el.classList.remove('nv-cfg-row--flash'), 2400)
+  }
+}
+watch(() => route.hash, revealHash)
+
+// Discarding edits loses them: confirm first.
+const discardOpen = shallowRef(false)
+function confirmDiscard() {
+  discardOpen.value = false
+  form.discard()
+}
+
+// Search is part of the URL (?q=), so a filtered view can be shared or restored with Back.
+let queryTimer = null
+watch(query, (q) => {
+  clearTimeout(queryTimer)
+  queryTimer = setTimeout(() => {
+    const next = { ...route.query }
+    if (q.trim()) next.q = q
+    else delete next.q
+    // Drop the hash while searching so the router doesn't scroll back to a section.
+    router.replace({ query: next, hash: q.trim() ? '' : route.hash })
+  }, 300)
+})
+
+// Leaving with unsaved changes: ask first.
+const leaveOpen = shallowRef(false)
+let resolveLeave = null
+onBeforeRouteLeave(() => {
+  if (dirtyCount.value === 0) return true
+  leaveOpen.value = true
+  return new Promise((resolve) => { resolveLeave = resolve })
+})
+function answerLeave(leave) {
+  leaveOpen.value = false
+  resolveLeave?.(leave)
+  resolveLeave = null
+}
+
+function onBeforeUnload(event) {
+  if (dirtyCount.value > 0) event.preventDefault()
+}
+
+/** "/" jumps to search, like most settings screens. */
+function onKeydown(event) {
+  if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return
+  const target = event.target
+  if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+  event.preventDefault()
+  document.getElementById(SEARCH_ID)?.focus()
+}
+
+onMounted(async () => {
+  window.addEventListener('beforeunload', onBeforeUnload)
+  window.addEventListener('keydown', onKeydown)
+  await form.load()
+  revealHash()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('keydown', onKeydown)
+  clearTimeout(queryTimer)
+})
+</script>
+
 <template>
-  <div id="content" class="container">
-    <div class="my-4">
-      <h1>{{ $t('config.configuration') }}</h1>
-      <p>{{ $t('config.configuration_desc') }}</p>
-    </div>
-
-    <!-- Search Bar with Autocomplete -->
-    <div class="toolbar mb-3 d-flex flex-wrap align-items-center gap-3">
-      <div class="input-group config-search">
-        <label for="config-search" class="visually-hidden">{{ $t('config.search_options') }}</label>
-        <span class="input-group-text">
-          <search :size="18" class="icon"></search>
-        </span>
-        <input
-          id="config-search"
-          type="text"
-          class="form-control"
-          v-model="searchQuery"
-          :placeholder="$t('config.search_options')"
-          @input="handleSearch"
-          list="config-options"
-        />
+  <NvPage :title="t('nova.nav.settings')">
+    <template #subtitle>{{ t('nova.settings.subtitle') }}</template>
+    <template #actions>
+      <div class="nv-settings-search" role="search">
+        <NvTextField :id="SEARCH_ID" v-model="query" type="search" :label="t('nova.settings.search')" hide-label
+                     :placeholder="t('nova.settings.search_placeholder')" autocomplete="off" />
+        <p class="nv-visually-hidden" role="status" aria-live="polite">
+          {{ searching ? t('nova.settings.results', { n: matchCount }, matchCount) : '' }}
+        </p>
       </div>
-      <datalist id="config-options">
-        <option v-for="option in allConfigOptions" :key="option.key" :value="option.label">
-          {{ option.tab }} - {{ option.label }}
-        </option>
-      </datalist>
-      <span v-if="searchQuery && searchResults.length === 0" class="text-muted small flex-shrink-0">
-        No results found for "{{ searchQuery }}"
-      </span>
-      <span v-else-if="searchQuery" class="text-muted small flex-shrink-0">
-        Found {{ searchResults.length }} result(s)
-      </span>
-    </div>
+    </template>
 
-    <div class="form" v-if="config">
-      <div class="config-layout">
-        <!-- Sidebar navigation -->
-        <nav class="config-nav">
-          <ul class="nav config-nav-list">
-            <li class="nav-item" v-for="tab in generalTabs" :key="tab.id">
-              <button type="button" class="nav-link" :class="{'active': tab.id === currentTab}"
-                @click="currentTab = tab.id">
-                <component :is="getTabIcon(tab.id)" :size="18" class="icon"></component>
-                {{ $t(tab.nameKey) }}
-              </button>
-            </li>
-          </ul>
-          <template v-if="encoderTabs.length">
-            <div class="config-nav-heading">{{ $t('config.encoders') }}</div>
-            <ul class="nav config-nav-list">
-              <li class="nav-item" v-for="tab in encoderTabs" :key="tab.id">
-                <button type="button" class="nav-link" :class="{'active': tab.id === currentTab}"
-                  @click="currentTab = tab.id">
-                  <component :is="getTabIcon(tab.id)" :size="18" class="icon"></component>
-                  {{ $t(tab.nameKey) }}
-                </button>
-              </li>
-            </ul>
-          </template>
-
-          <div class="config-actions">
-            <button class="btn btn-primary" @click="save">
-              <save :size="18" class="icon"></save>
-              {{ $t('_common.save') }}
-            </button>
-            <button class="btn btn-success" @click="apply" v-if="saved && !restarted">
-              <check :size="18" class="icon"></check>
-              {{ $t('_common.apply') }}
-            </button>
-          </div>
-        </nav>
-
-        <!-- Tab content -->
-        <div class="config-content">
-          <div class="alert alert-success mb-4" v-if="saved && !restarted">
-            <b>{{ $t('_common.success') }}</b> {{ $t('config.apply_note') }}
-          </div>
-          <div class="alert alert-success mb-4" v-if="restarted">
-            <b>{{ $t('_common.success') }}</b> {{ $t('config.restart_note') }}
-          </div>
-
-      <!-- General Tab -->
-      <general
-        v-if="currentTab === 'general'"
-        :config="config"
-        :platform="platform">
-      </general>
-
-      <!-- Input Tab -->
-      <inputs
-        v-if="currentTab === 'input'"
-        :config="config"
-        :platform="platform">
-      </inputs>
-
-      <!-- Audio/Video Tab -->
-      <audio-video
-        v-if="currentTab === 'av'"
-        :config="config"
-        :platform="platform"
-      >
-      </audio-video>
-
-      <!-- Network Tab -->
-      <network
-        v-if="currentTab === 'network'"
-        :config="config"
-        :platform="platform">
-      </network>
-
-      <!-- Files Tab -->
-      <files
-        v-if="currentTab === 'files'"
-        :config="config"
-        :platform="platform">
-      </files>
-
-      <!-- Advanced Tab -->
-      <advanced
-        v-if="currentTab === 'advanced'"
-        :config="config"
-        :platform="platform">
-      </advanced>
-
-      <container-encoders
-        :current-tab="currentTab"
-        :config="config"
-        :platform="platform">
-      </container-encoders>
+    <div v-if="form.loading.value && !form.config.value" class="nv-settings-layout" aria-busy="true">
+      <span class="nv-visually-hidden" role="status">{{ t('nova.common.loading') }}</span>
+      <div class="nv-settings-skeleton-nav"><NvSkeleton v-for="n in 8" :key="n" height="28px" /></div>
+      <div class="nv-settings-body">
+        <div v-for="n in 3" :key="n" class="nv-settings-skeleton-card">
+          <NvSkeleton width="40%" height="18px" />
+          <NvSkeleton :lines="3" />
         </div>
       </div>
     </div>
 
-  </div>
+    <NvAlert v-else-if="form.loadError.value" variant="danger" :title="t('nova.settings.load_failed')" live>
+      {{ form.loadError.value.message }}
+      <template #actions><NvButton size="sm" @click="form.load()">{{ t('nova.common.retry') }}</NvButton></template>
+    </NvAlert>
+
+    <div v-else-if="form.config.value" class="nv-settings-layout">
+      <SettingsNav :sections="sections" :active="active" :searching="searching" />
+      <div class="nv-settings-body">
+        <NvEmptyState v-if="searching && sections.length === 0" :title="t('nova.settings.no_results', { q: query.trim() })"
+                      :description="t('nova.settings.no_results_hint')">
+          <template #icon><SearchX :size="28" /></template>
+          <template #actions><NvButton @click="query = ''">{{ t('nova.settings.clear_search') }}</NvButton></template>
+        </NvEmptyState>
+
+        <SettingsSection v-for="section in sections" :key="section.id" :section="section" :config="form.config.value"
+                         :platform="form.platform.value" :errors="form.visibleErrors.value"
+                         :other-open="section.otherMatches" @update="form.setValue" @reset="form.resetValue"
+                         @touch="form.touch" />
+
+        <SettingsSaveBar :count="dirtyCount" :error-count="errorCount" :saving="form.saving.value"
+                         :restarting="form.restarting.value" :needs-restart="form.needsRestart.value"
+                         @discard="discardOpen = true" @save="save" @save-restart="saveAndRestart" @restart="restart"
+                         @dismiss="form.needsRestart.value = false" />
+      </div>
+    </div>
+
+    <NvDialog v-model:open="leaveOpen" :title="t('nova.settings.leave_title')"
+              :description="t('nova.settings.leave_desc', { n: dirtyCount }, dirtyCount)" @close="answerLeave(false)">
+      <template #footer>
+        <NvButton autofocus @click="answerLeave(false)">{{ t('nova.settings.leave_stay') }}</NvButton>
+        <NvButton variant="danger-solid" @click="answerLeave(true)">{{ t('nova.settings.leave_discard') }}</NvButton>
+      </template>
+    </NvDialog>
+
+    <NvDialog v-model:open="discardOpen" :title="t('nova.settings.discard_title')"
+              :description="t('nova.settings.discard_desc', { n: dirtyCount }, dirtyCount)">
+      <template #footer>
+        <NvButton autofocus @click="discardOpen = false">{{ t('nova.common.cancel') }}</NvButton>
+        <NvButton variant="danger-solid" @click="confirmDiscard">{{ t('nova.settings.discard_confirm') }}</NvButton>
+      </template>
+    </NvDialog>
+  </NvPage>
 </template>
 
-<script>
-  import { computed, toRaw } from 'vue'
-  import { apiFetch } from './fetch_utils'
-  import configTabs from './configs/config_tabs.json'
-  import General from './configs/tabs/General.vue'
-  import Inputs from './configs/tabs/Inputs.vue'
-  import Network from './configs/tabs/Network.vue'
-  import Files from './configs/tabs/Files.vue'
-  import Advanced from './configs/tabs/Advanced.vue'
-  import AudioVideo from './configs/tabs/AudioVideo.vue'
-  import ContainerEncoders from './configs/tabs/ContainerEncoders.vue'
-  import {
-    Check,
-    Cpu,
-    FileCog,
-    Gamepad2,
-    Gpu,
-    Network as NetworkIcon,
-    Save,
-    Search,
-    Settings,
-    Sliders,
-    Volume2,
-  } from '@lucide/vue'
-
-  const ENCODER_TAB_IDS = new Set(["nv", "amd", "qsv", "vaapi", "vt", "vulkan", "sw"]);
-
-  /**
-   * Compare configuration values without coercing their types.
-   *
-   * @param {*} value Configured value.
-   * @param {*} defaultValue Default value for the option.
-   * @returns {boolean} Whether both values have the same type and contents.
-   */
-  function configValuesEqual(value, defaultValue) {
-    if (Object.is(value, defaultValue)) {
-      return true;
-    }
-    if (typeof value !== typeof defaultValue || value === null || defaultValue === null || typeof value !== 'object') {
-      return false;
-    }
-    if (Array.isArray(value) !== Array.isArray(defaultValue)) {
-      return false;
-    }
-
-    const valueKeys = Object.keys(value);
-    const defaultKeys = Object.keys(defaultValue);
-    return valueKeys.length === defaultKeys.length && valueKeys.every(key =>
-      Object.hasOwn(defaultValue, key) && configValuesEqual(value[key], defaultValue[key])
-    );
+<style>
+@layer components {
+  .nv-settings-search {
+    width: 320px;
   }
 
-  export default {
-    components: {
-      General,
-      Inputs,
-      Network,
-      Files,
-      Advanced,
-      // They will be accessible via audio-video, container-encoders only.
-      AudioVideo,
-      ContainerEncoders,
-      // icons
-      Cpu,
-      Check,
-      FileCog,
-      Gamepad2,
-      Gpu,
-      NetworkIcon,
-      Save,
-      Search,
-      Settings,
-      Sliders,
-      Volume2,
-    },
-    data() {
-      return {
-        platform: "",
-        saved: false,
-        restarted: false,
-        config: null,
-        currentTab: "general",
-        searchQuery: "",
-        hashChangeHandler: null,
-        // Keep a private copy because platform filtering replaces this array at runtime.
-        tabs: structuredClone(configTabs),
-      };
-    },
-    provide() {
-       return {
-         platform: computed(() => this.platform),
-         searchQuery: computed(() => this.searchQuery),
-       }
-    },
-    computed: {
-      generalTabs() {
-        return this.tabs.filter(tab => !ENCODER_TAB_IDS.has(tab.id));
-      },
-      encoderTabs() {
-        return this.tabs.filter(tab => ENCODER_TAB_IDS.has(tab.id));
-      },
-      allConfigOptions() {
-        const options = [];
-        this.tabs.forEach(tab => {
-          Object.keys(tab.options).forEach(key => {
-            options.push({
-              key: key,
-              label: key.replaceAll('_', ' ').replaceAll(/\b\w/g, l => l.toUpperCase()),
-              tab: this.$t(tab.nameKey),
-              tabId: tab.id
-            });
-          });
-        });
-        return options;
-      },
-      searchResults() {
-        if (!this.searchQuery) return [];
-        const query = this.searchQuery.toLowerCase();
-        return this.allConfigOptions.filter(option =>
-          option.key.toLowerCase().includes(query) ||
-          option.label.toLowerCase().includes(query)
-        );
-      }
-    },
-    created() {
-      fetch("./api/config")
-        .then((r) => r.json())
-        .then((r) => {
-          this.config = r;
-          this.platform = this.config.platform;
-
-          if (this.platform === "windows") {
-            this.tabs = this.tabs.filter((el) => {
-              return el.id !== "vt" && el.id !== "vaapi" && el.id !== "vulkan";
-            });
-          }
-          if (this.platform === "freebsd" || this.platform === "linux") {
-            this.tabs = this.tabs.filter((el) => {
-              return el.id !== "amd" && el.id !== "qsv" && el.id !== "vt";
-            });
-          }
-          if (this.platform === "macos") {
-            this.tabs = this.tabs.filter((el) => {
-              return el.id !== "amd" && el.id !== "nv" && el.id !== "qsv" && el.id !== "vaapi" && el.id !== "vulkan";
-            });
-          }
-
-          // remove values we don't want in the config file
-          delete this.config.platform;
-          delete this.config.status;
-          delete this.config.version;
-
-          // Parse the special options before population if available
-          const specialOptions = ["dd_mode_remapping", "global_prep_cmd"]
-          for (const optionKey of specialOptions) {
-            if (this.config.hasOwnProperty(optionKey)) {
-              this.config[optionKey] = JSON.parse(this.config[optionKey]);
-            }
-          }
-
-          // Populate default values from tabs options
-          this.tabs.forEach(tab => {
-            Object.keys(tab.options).forEach(optionKey => {
-              if (this.config[optionKey] === undefined) {
-                // Make sure to copy by value
-                this.config[optionKey] = structuredClone(toRaw(tab.options[optionKey]));
-              }
-            });
-          });
-        });
-    },
-    methods: {
-      getTabIcon(tabId) {
-        const iconMap = {
-          'general': 'Settings',
-          'input': 'Gamepad2',
-          'av': 'Volume2',
-          'network': 'NetworkIcon',
-          'files': 'FileCog',
-          'advanced': 'Sliders',
-          'nv': 'Gpu',
-          'amd': 'Gpu',
-          'qsv': 'Gpu',
-          'vaapi': 'Gpu',
-          'vt': 'Gpu',
-          'vulkan': 'Gpu',
-          'sw': 'Cpu',
-        };
-        return iconMap[tabId] || 'Settings';
-      },
-      forceUpdate() {
-        this.$forceUpdate()
-      },
-      serialize() {
-        return structuredClone(toRaw(this.config));
-      },
-      save() {
-        this.saved = false;
-        this.restarted = false;
-
-        // create a temp copy of this.config to use for the post request
-        let config = this.serialize();
-
-        // delete default values from this.config
-        this.tabs.forEach(tab => {
-          Object.keys(tab.options).forEach(optionKey => {
-            if (configValuesEqual(config[optionKey], tab.options[optionKey])) {
-              delete config[optionKey]
-            }
-          });
-        });
-
-        return apiFetch("./api/config", {
-          method: "POST",
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(config),
-        }).then((r) => {
-          if (r.status === 200) {
-            this.saved = true
-            return this.saved
-          }
-          else {
-            return false
-          }
-        });
-      },
-      apply() {
-        this.saved = this.restarted = false;
-        let saved = this.save();
-
-        saved.then((result) => {
-          if (result === true) {
-            this.restarted = true;
-            setTimeout(() => {
-              this.saved = this.restarted = false;
-            }, 5000);
-            apiFetch("./api/restart", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              }
-            });
-          }
-        });
-      },
-      handleSearch() {
-        // Clear all highlighting
-        document.querySelectorAll('.config-search-highlight').forEach(el => {
-          el.classList.remove('config-search-highlight');
-        });
-
-        if (!this.searchQuery) {
-          // Show all form groups when search is cleared
-          document.querySelectorAll('.mb-3').forEach(el => {
-            el.style.display = '';
-          });
-          return;
-        }
-
-        const results = this.searchResults;
-
-        if (results.length === 0) {
-          return;
-        }
-
-        // Switch to the tab of the first result
-        if (results.length > 0 && results[0].tabId !== this.currentTab) {
-          this.currentTab = results[0].tabId;
-        }
-
-        // Wait for tab content to render
-        this.$nextTick(() => {
-          // Hide all form groups first
-          document.querySelectorAll('.config-page .mb-3').forEach(el => {
-            el.style.display = 'none';
-          });
-
-          // Show only matching elements
-          results.forEach(result => {
-            const element = document.getElementById(result.key);
-
-            if (element) {
-              // Show the element's container
-              const container = element.closest('.mb-3');
-              if (container) {
-                container.style.display = '';
-              }
-            }
-          });
-
-          // Scroll to and highlight the first result
-          if (results.length > 0) {
-            const firstElement = document.getElementById(results[0].key);
-            if (firstElement) {
-              const container = firstElement.closest('.mb-3');
-              if (container) {
-                container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                container.classList.add('config-search-highlight');
-                setTimeout(() => {
-                  container.classList.remove('config-search-highlight');
-                }, 3000);
-              }
-            }
-          }
-        });
-      },
-    },
-    mounted() {
-      // Handle hashchange events
-      this.hashChangeHandler = () => {
-        let hash = window.location.hash;
-        if (hash) {
-          // remove the # from the hash
-          let stripped_hash = hash.substring(1);
-
-          this.tabs.forEach(tab => {
-            Object.keys(tab.options).forEach(key => {
-              if (tab.id === stripped_hash || key === stripped_hash) {
-                this.currentTab = tab.id;
-              }
-              if (key === stripped_hash) {
-                // sleep for 2 seconds to allow the page to load
-                setTimeout(() => {
-                  let element = document.getElementById(stripped_hash);
-                  if (element) {
-                    window.location.hash = hash;
-                  }
-                }, 2000);
-              }
-
-              if (this.currentTab === tab.id) {
-                // stop looping
-                return true;
-              }
-            });
-          });
-        }
-      };
-
-      // Call handleHash for the initial load
-      this.hashChangeHandler();
-
-      // Add hashchange event listener
-      window.addEventListener("hashchange", this.hashChangeHandler);
-    },
-    beforeUnmount() {
-      window.removeEventListener("hashchange", this.hashChangeHandler);
-    },
+  .nv-settings-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--nv-space-8);
   }
-</script>
+
+  .nv-settings-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-8);
+    flex-grow: 1;
+    min-width: 0;
+    max-width: 880px;
+  }
+
+  .nv-settings-skeleton-nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-2);
+    width: 196px;
+    flex-shrink: 0;
+  }
+
+  .nv-settings-skeleton-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-3);
+    padding: var(--nv-space-5);
+    border-radius: var(--nv-radius-lg);
+    border: 1px solid var(--nv-border);
+    background: var(--nv-surface);
+  }
+
+  @media (max-width: 1023px) {
+    .nv-settings-layout {
+      flex-direction: column;
+      align-items: stretch;
+      gap: var(--nv-space-5);
+    }
+
+    .nv-settings-skeleton-nav {
+      flex-direction: row;
+      width: auto;
+    }
+
+    .nv-settings-body {
+      max-width: none;
+    }
+  }
+
+  @media (max-width: 699px) {
+    .nv-settings-search {
+      width: 100%;
+    }
+
+    .nv-page__actions:has(.nv-settings-search) {
+      width: 100%;
+    }
+  }
+}
+</style>
