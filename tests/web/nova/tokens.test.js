@@ -82,7 +82,8 @@ describe('Nova tokens', () => {
   it('uses no !important and no gradients in Nova styles', () => {
     const root = resolve(process.cwd(), 'src_assets/common/assets/web/nova')
     const files = [resolve(root, 'nova.css'), resolve(root, 'AppShell.vue'),
-      ...['components', 'pages'].flatMap((dir) => readdirSync(resolve(root, dir)).map((f) => resolve(root, dir, f)))]
+      ...['components', 'pages'].flatMap((dir) => readdirSync(resolve(root, dir), { recursive: true })
+        .filter((f) => /\.(vue|css|js)$/.test(f)).map((f) => resolve(root, dir, f)))]
     for (const file of files) {
       const text = readFileSync(file, 'utf8')
       expect(text, file).not.toMatch(/!important/)
