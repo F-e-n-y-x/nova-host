@@ -1,39 +1,51 @@
 <script setup>
 /**
- * One application: a cover tile (grid) or a single-line row (list). Pressing the cover
- * or the name opens the editor, as in game library apps; delete sits beside it.
+ * One application: a cover tile (grid) or a row (list: thumbnail, name, command, status
+ * text, Edit and a "⋯" menu). Pressing the cover or the name opens the editor; below
+ * 900px wide the list's Edit button moves into the menu.
  *
- * Props: app (required), coverUrl ('' shows the initial letter), layout ('grid' | 'list').
+ * Props: app (required), index (host index; used for the element id so focus can return
+ *        to it), coverUrl ('' shows the initial letter), layout ('grid' | 'list').
  * Emits: edit, delete, cover-error.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Pencil, Trash2 } from '@lucide/vue'
-import NvIconButton from '../../components/NvIconButton.vue'
+import NvButton from '../../components/NvButton.vue'
 import NvBadge from '../../components/NvBadge.vue'
+import ActionMenu from './ActionMenu.vue'
 import { appFlags } from './appForm'
 
 const props = defineProps({
   app: { type: Object, required: true },
+  index: { type: Number, required: true },
   coverUrl: { type: String, default: '' },
   layout: { type: String, default: 'grid' },
 })
-defineEmits(['edit', 'delete', 'cover-error'])
+const emit = defineEmits(['edit', 'delete', 'cover-error'])
 const { t } = useI18n()
 
 const name = computed(() => props.app.name || t('nova.apps.unnamed'))
 const initial = computed(() => (props.app.name || '?').charAt(0).toUpperCase())
 const flags = computed(() => appFlags(props.app))
 const command = computed(() => props.app.cmd || t('nova.apps.no_command'))
+const menuItems = computed(() => [
+  { id: 'edit', label: t('nova.apps.edit'), icon: Pencil },
+  { id: 'delete', label: t('nova.apps.delete_ellipsis'), icon: Trash2, danger: true },
+])
+
+function onMenu(id) {
+  emit(id === 'edit' ? 'edit' : 'delete')
+}
 </script>
 
 <template>
   <li :class="['nv-app', `nv-app--${layout}`]">
-    <button type="button" class="nv-app__open" :aria-label="t('nova.apps.edit_named', { name })" @click="$emit('edit')">
+    <button :id="`nv-app-${index}`" type="button" class="nv-app__open" :aria-label="t('nova.apps.edit_named', { name })"
+            @click="emit('edit')">
       <span class="nv-app__cover">
-        <img v-if="coverUrl" :src="coverUrl" alt="" loading="lazy" class="nv-app__img" @error="$emit('cover-error')" />
+        <img v-if="coverUrl" :src="coverUrl" alt="" loading="lazy" class="nv-app__img" @error="emit('cover-error')" />
         <span v-else class="nv-app__initial" aria-hidden="true">{{ initial }}</span>
-        <span v-if="layout === 'grid'" class="nv-app__hint" aria-hidden="true"><Pencil :size="14" />{{ t('nova.apps.edit') }}</span>
       </span>
       <span class="nv-app__text">
         <span class="nv-app__name" :title="name">{{ name }}</span>
@@ -41,12 +53,13 @@ const command = computed(() => props.app.cmd || t('nova.apps.no_command'))
       </span>
     </button>
     <div class="nv-app__meta">
-      <div v-if="flags.length" class="nv-app__flags">
-        <NvBadge v-for="flag in flags" :key="flag">{{ t(flag) }}</NvBadge>
-      </div>
-      <NvIconButton size="sm" class="nv-app__delete" :label="t('nova.apps.delete_named', { name })" @click="$emit('delete')">
-        <Trash2 :size="16" aria-hidden="true" />
-      </NvIconButton>
+      <ul v-if="flags.length" class="nv-app__flags" :aria-label="t('nova.apps.flags_label')">
+        <li v-for="flag in flags" :key="flag"><NvBadge>{{ t(flag) }}</NvBadge></li>
+      </ul>
+      <NvButton v-if="layout === 'list'" size="sm" class="nv-app__edit" @click="emit('edit')">
+        {{ t('nova.apps.edit') }}<span class="nv-visually-hidden"> {{ name }}</span>
+      </NvButton>
+      <ActionMenu :label="t('nova.apps.more_for', { name })" :items="menuItems" @select="onMenu" />
     </div>
   </li>
 </template>
@@ -71,7 +84,6 @@ const command = computed(() => props.app.cmd || t('nova.apps.no_command'))
   }
 
   .nv-app__cover {
-    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -93,7 +105,7 @@ const command = computed(() => props.app.cmd || t('nova.apps.no_command'))
   .nv-app__text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--nv-space-1);
     min-width: 0;
   }
 
@@ -125,9 +137,12 @@ const command = computed(() => props.app.cmd || t('nova.apps.no_command'))
     flex-wrap: wrap;
     gap: var(--nv-space-1);
     min-width: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
 
-  /* Grid: cover tile, name under it, badges and delete in the last row. */
+  /* Grid: cover tile for browsing art; name under it, status and menu below. */
   .nv-app--grid {
     flex-direction: column;
     gap: var(--nv-space-2);
@@ -144,44 +159,6 @@ const command = computed(() => props.app.cmd || t('nova.apps.no_command'))
     font-size: 44px;
   }
 
-  .nv-app--grid .nv-app__meta {
-    justify-content: space-between;
-    align-items: flex-start;
-  }
-
-  .nv-app--grid .nv-app__delete {
-    margin-left: auto;
-    flex-shrink: 0;
-  }
-
-  .nv-app__hint {
-    position: absolute;
-    left: var(--nv-space-2);
-    bottom: var(--nv-space-2);
-    display: inline-flex;
-    align-items: center;
-    gap: var(--nv-space-1);
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: var(--nv-surface);
-    border: 1px solid var(--nv-border-strong);
-    color: var(--nv-text);
-    font-size: var(--nv-text-xs);
-    font-weight: 500;
-    opacity: 0;
-  }
-
-  .nv-app--grid .nv-app__open:hover .nv-app__cover,
-  .nv-app--grid .nv-app__open:focus-visible .nv-app__cover {
-    border-color: var(--nv-accent);
-    box-shadow: 0 0 0 1px var(--nv-accent);
-  }
-
-  .nv-app__open:hover .nv-app__hint,
-  .nv-app__open:focus-visible .nv-app__hint {
-    opacity: 1;
-  }
-
   .nv-app--grid .nv-app__open:focus-visible {
     outline: none;
   }
@@ -191,11 +168,20 @@ const command = computed(() => props.app.cmd || t('nova.apps.no_command'))
     outline-offset: 2px;
   }
 
-  /* List: thumbnail, name and command, badges, delete — one line. */
+  .nv-app--grid .nv-app__meta {
+    align-items: flex-start;
+  }
+
+  .nv-app--grid .nv-menu {
+    margin-left: auto;
+  }
+
+  /* List: rows of at least 56px. */
   .nv-app--list {
     align-items: center;
     gap: var(--nv-space-3);
-    padding: var(--nv-space-2) var(--nv-space-3) var(--nv-space-2) var(--nv-space-2);
+    min-height: 56px;
+    padding: var(--nv-space-2) var(--nv-space-3);
   }
 
   .nv-app--list + .nv-app--list {
@@ -206,13 +192,8 @@ const command = computed(() => props.app.cmd || t('nova.apps.no_command'))
     flex-grow: 1;
     align-items: center;
     gap: var(--nv-space-3);
-    min-height: 56px;
-    padding: var(--nv-space-1);
-    border-radius: var(--nv-radius-md);
-  }
-
-  .nv-app--list .nv-app__open:hover {
-    background: var(--nv-raised);
+    min-height: 44px;
+    border-radius: var(--nv-radius-sm);
   }
 
   .nv-app--list .nv-app__cover {
@@ -225,29 +206,10 @@ const command = computed(() => props.app.cmd || t('nova.apps.no_command'))
     flex-shrink: 0;
   }
 
-  /* With a mouse, delete appears on hover or keyboard focus; touch screens always show it. */
-  @media (hover: hover) {
-    .nv-app__delete {
-      opacity: 0;
-    }
-
-    .nv-app:hover .nv-app__delete,
-    .nv-app:focus-within .nv-app__delete {
-      opacity: 1;
-    }
-  }
-
-  @media (max-width: 600px) {
-    .nv-app--list .nv-app__flags {
+  @media (max-width: 899px) {
+    .nv-app--list .nv-app__flags,
+    .nv-app--list .nv-app__edit {
       display: none;
-    }
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .nv-app__hint,
-    .nv-app__delete,
-    .nv-app__cover {
-      transition: opacity 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
     }
   }
 }

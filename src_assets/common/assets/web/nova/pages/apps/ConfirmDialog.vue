@@ -24,7 +24,7 @@ const { t } = useI18n()
 <template>
   <NvDialog v-model:open="open" :title="title" :description="description">
     <template #footer>
-      <NvButton @click="open = false">{{ t('nova.common.cancel') }}</NvButton>
+      <NvButton autofocus @click="open = false">{{ t('nova.common.cancel') }}</NvButton>
       <NvButton variant="danger-solid" :loading="busy" @click="$emit('confirm')">{{ confirmLabel }}</NvButton>
     </template>
   </NvDialog>

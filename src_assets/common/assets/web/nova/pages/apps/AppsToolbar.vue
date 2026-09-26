@@ -60,6 +60,7 @@ const summary = computed(() => (props.shown === props.total
 
   .nv-apps-toolbar__count {
     margin: 0 0 0 auto;
+    font-variant-numeric: tabular-nums;
     color: var(--nv-text-secondary);
     font-size: var(--nv-text-sm);
   }
