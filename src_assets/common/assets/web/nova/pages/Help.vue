@@ -1,12 +1,12 @@
 <script setup>
 /**
- * Help: project resources, legal documents, credits, and the clients/tools directory.
+ * Help: recommended streaming apps, project resources, legal documents and credits.
  */
 import { useI18n } from 'vue-i18n'
 import NvPage from '../components/NvPage.vue'
 import NvCard from '../components/NvCard.vue'
-import NvButton from '../components/NvButton.vue'
 import ResourceCard from '../../ResourceCard.vue'
+import ClientList from './help/ClientList.vue'
 import { upstreamProjects } from '../project'
 
 const { t } = useI18n()
@@ -16,11 +16,8 @@ const [sunshine, zenith] = upstreamProjects
 <template>
   <NvPage :title="t('nova.help.title')">
     <div class="nv-help">
+      <ClientList />
       <ResourceCard />
-      <NvCard :title="t('nova.help.clients')">
-        <p class="nv-secondary">{{ t('nova.help.clients_desc') }}</p>
-        <template #footer><NvButton variant="secondary" to="/help/clients">{{ t('nova.help.browse_clients') }}</NvButton></template>
-      </NvCard>
       <NvCard :title="t('nova.help.credit_title')">
         <i18n-t keypath="nova.help.credit" tag="p" scope="global">
           <template #sunshine><a :href="sunshine.url" target="_blank" rel="noopener">{{ sunshine.name }}</a></template>
