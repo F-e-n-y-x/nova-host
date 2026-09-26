@@ -110,10 +110,11 @@ def _read_bytes(path: str) -> bytes:
         return b""
 
 
-# Minimum NVIDIA driver the bundled FFmpeg's nvenc accepts. Tied to the
-# build-deps nv-codec-headers pin (sdk/12.0 -> 520); older drivers make
-# Zenith fall back to CPU encoding without any visible error.
-NVENC_MIN_DRIVER = 520
+# Minimum NVIDIA driver the bundled FFmpeg's nvenc accepts. build-deps compiles
+# NVENC against SDK 11.0/12.0/13.0/13.1 and picks the newest one the driver
+# supports at runtime, so the floor is SDK 11.0's 455.28 (AV1 needs SDK 12.0,
+# driver 520+). Older drivers make Zenith fall back to CPU encoding silently.
+NVENC_MIN_DRIVER = 455
 
 
 def nvidia_driver_version(path: str = "/sys/module/nvidia/version") -> str:

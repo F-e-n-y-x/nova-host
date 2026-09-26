@@ -82,9 +82,11 @@ def test_nvenc_supported_thresholds():
     assert detect.nvenc_supported("570.86.16")
     assert detect.nvenc_supported("550.163.01")  # Debian 13 stable
     assert detect.nvenc_supported("535.216.01")  # Ubuntu 24.04 GA
-    assert detect.nvenc_supported("520.56.06")   # SDK 12.0 floor
-    assert not detect.nvenc_supported("515.86.01")
-    assert not detect.nvenc_supported("470.256.02")
+    assert detect.nvenc_supported("520.56.06")   # SDK 12.0 (AV1 floor)
+    assert detect.nvenc_supported("470.256.02")  # SDK 11.x via runtime API selection
+    assert detect.nvenc_supported("455.28")      # SDK 11.0 floor
+    assert not detect.nvenc_supported("450.248.02")
+    assert not detect.nvenc_supported("390.157")
     assert detect.nvenc_supported("weird-vendor-string")  # never warn on guesswork
 
 
