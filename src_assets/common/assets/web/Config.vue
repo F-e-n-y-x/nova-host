@@ -153,7 +153,6 @@ onBeforeUnmount(() => {
 
 <template>
   <NvPage :title="t('nova.nav.settings')">
-    <template #subtitle>{{ t('nova.settings.subtitle') }}</template>
     <template #actions>
       <div class="nv-settings-search" role="search">
         <NvTextField :id="SEARCH_ID" v-model="query" type="search" :label="t('nova.settings.search')" hide-label
@@ -223,6 +222,11 @@ onBeforeUnmount(() => {
 @layer components {
   .nv-settings-search {
     width: 320px;
+  }
+
+  /* Settings has its own search in the top bar (as in the design); the global palette stays on Ctrl/⌘K. */
+  body:has(.nv-settings-search) .nv-topsearch {
+    display: none;
   }
 
   .nv-settings-layout {

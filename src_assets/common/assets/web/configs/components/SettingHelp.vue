@@ -3,7 +3,7 @@
  * Extra help shown under a setting's "More": commands to find device names, what the
  * host logs about displays, and the ports derived from the base port.
  *
- * Props: topic ('adapter_name' | 'output_name' | 'audio_sink' | 'ports'), platform, config.
+ * Props: topic ('adapter_name' | 'output_name' | 'audio_sink' | 'steamgriddb' | 'ports'), platform, config.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -69,6 +69,12 @@ const DISPLAY_LOG = {
         <pre class="nv-cfg-help__code">pactl list short sinks</pre>
         <pre class="nv-cfg-help__code">pactl info | grep Source</pre>
       </template>
+    </template>
+
+    <template v-else-if="topic === 'steamgriddb'">
+      <p>{{ t('nova.settings.steamgriddb_help') }}</p>
+      <a class="nv-cfg-help__link" href="https://www.steamgriddb.com/profile/preferences/api" target="_blank"
+         rel="noopener noreferrer">{{ t('nova.settings.steamgriddb_get_key') }}</a>
     </template>
 
     <template v-else-if="topic === 'ports'">

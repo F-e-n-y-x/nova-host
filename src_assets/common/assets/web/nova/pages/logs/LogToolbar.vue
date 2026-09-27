@@ -3,7 +3,7 @@
  * Log viewer toolbar: level chips, text filter, warning/error navigation, refresh, copy, download.
  *
  * Props: chips ({id, count, on}[]), problemCount, problemPosition (1-based, 0 = none selected),
- * showRefresh, refreshing, canCopy, canDownload. v-model:query for the text filter.
+ * showRefresh, refreshing, canCopy, canDownload, showDownload (off when the page header has it). v-model:query for the text filter.
  * Emits: toggle-group(id), prev, next, refresh, copy, download.
  */
 import { computed } from 'vue'
@@ -22,6 +22,7 @@ const props = defineProps({
   refreshing: { type: Boolean, default: false },
   canCopy: { type: Boolean, default: false },
   canDownload: { type: Boolean, default: false },
+  showDownload: { type: Boolean, default: true },
 })
 defineEmits(['toggle-group', 'prev', 'next', 'refresh', 'copy', 'download'])
 
@@ -68,7 +69,7 @@ const positionLabel = computed(() => {
       <NvButton variant="secondary" :disabled="!canCopy" @click="$emit('copy')">
         <Copy :size="16" aria-hidden="true" />{{ t('nova.logs.copy') }}
       </NvButton>
-      <NvButton variant="secondary" :disabled="!canDownload" @click="$emit('download')">
+      <NvButton v-if="showDownload" variant="secondary" :disabled="!canDownload" @click="$emit('download')">
         <Download :size="16" aria-hidden="true" />{{ t('nova.logs.download') }}
       </NvButton>
     </div>

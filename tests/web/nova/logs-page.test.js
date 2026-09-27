@@ -191,11 +191,11 @@ describe('DiagnosticsPanel', () => {
 
   it('shows platform actions only where they apply', () => {
     const linux = track(mountNova(DiagnosticsPanel, { props: { platform: 'linux' } }))
-    const titles = linux.findAll('.nv-card__title').map((h) => h.text())
+    const titles = linux.findAll('.nv-diag__name').map((h) => h.text())
     expect(titles).toContain('Reset screen-sharing permission')
     expect(titles).not.toContain('Reset saved display settings')
     const windows = track(mountNova(DiagnosticsPanel, { props: { platform: 'windows' } }))
-    expect(windows.findAll('.nv-card__title').map((h) => h.text())).toContain('Reset saved display settings')
+    expect(windows.findAll('.nv-diag__name').map((h) => h.text())).toContain('Reset saved display settings')
   })
 
   it('asks before acting, then reports the result', async () => {
