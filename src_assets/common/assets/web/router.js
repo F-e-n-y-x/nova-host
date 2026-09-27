@@ -26,6 +26,10 @@ const routes = [
   { path: '/pin', redirect: keep('/pair') },
   { path: '/featured', redirect: { path: '/help', hash: '#clients' } },
   { path: '/clients', redirect: keep('/devices') },
+  // Developer-only component gallery; compiled in only for dev or VITE_NOVA_GALLERY=1 builds.
+  ...(import.meta.env.DEV || import.meta.env.VITE_NOVA_GALLERY === '1'
+    ? [{ path: '/__components', component: () => import('./nova/pages/dev/ComponentGallery.vue') }]
+    : []),
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 

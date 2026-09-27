@@ -82,7 +82,7 @@ function onKeydown(event) {
 
 watch(activeId, async (id) => {
   await nextTick()
-  if (id) document.getElementById(id)?.scrollIntoView({ block: 'nearest' })
+  if (id) document.getElementById(id)?.scrollIntoView?.({ block: 'nearest' })
 })
 
 function indexOf(item) {

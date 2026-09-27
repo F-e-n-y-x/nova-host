@@ -95,13 +95,15 @@ onBeforeUnmount(() => {
     gap: var(--nv-space-2);
   }
 
+  @media (min-width: 768px) and (max-width: 1279px) {
+    .nv-page--grid {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+  }
+
   @media (min-width: 768px) and (max-width: 1023px) {
     .nv-page {
       padding: var(--nv-space-5) var(--nv-space-6) var(--nv-space-6);
-    }
-
-    .nv-page--grid {
-      grid-template-columns: repeat(6, minmax(0, 1fr));
     }
   }
 

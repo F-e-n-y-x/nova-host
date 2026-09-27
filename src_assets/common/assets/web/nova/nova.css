@@ -260,6 +260,12 @@
     font-family: var(--nv-font-mono);
     font-size: 0.93em;
     font-variant-numeric: tabular-nums;
+    color: inherit;
+  }
+
+  kbd {
+    background: transparent;
+    box-shadow: none;
   }
 
   [id] {

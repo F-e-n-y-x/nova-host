@@ -111,10 +111,13 @@ const headingId = useId()
     border-top: 1px solid var(--nv-divider);
   }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 1280px) {
     .nv-card[data-cols] {
       grid-column: span var(--nv-card-cols);
     }
+  }
+
+  @media (min-width: 1024px) {
 
     .nv-card--span-2 {
       grid-column: span 2;
@@ -125,7 +128,7 @@ const headingId = useId()
     }
   }
 
-  @media (min-width: 768px) and (max-width: 1023px) {
+  @media (min-width: 768px) and (max-width: 1279px) {
     .nv-card[data-cols] {
       grid-column: 1 / -1;
     }
