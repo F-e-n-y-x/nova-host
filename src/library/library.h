@@ -52,6 +52,17 @@ namespace library {
   std::string resolve_windows_launcher(const std::string &configured);
 
   /**
+   * @brief Pick the Windows game command template from the `windows_launcher` mode.
+   *
+   * @param mode "proton" (GE-Proton through Nova's nova-proton-run wrapper), "wine" or "custom".
+   * @param custom The `windows_exe_launcher` template, used for "custom" when not empty.
+   * @param wrapper Absolute path of nova-proton-run; used for "proton" when that file exists.
+   * @return A template containing "{exe}"; "proton" falls back to resolve_windows_launcher("")
+   *         when the wrapper is missing, and "custom" with an empty template behaves like "proton".
+   */
+  std::string resolve_windows_launcher(std::string_view mode, const std::string &custom, const std::string &wrapper);
+
+  /**
    * @brief Parse a source name.
    *
    * @param name "folder", "lutris", "steam" or "heroic".
@@ -192,6 +203,7 @@ namespace library {
     std::filesystem::path logo;  ///< Stored logo or empty.
     std::filesystem::path icon;  ///< Stored icon or empty.
     std::uint32_t steam_appid = 0;  ///< Matched Steam app id (0 = none), used for store details.
+    std::filesystem::path exe;  ///< Game executable checked before launch (folder scans), or empty.
   };
 
   /**

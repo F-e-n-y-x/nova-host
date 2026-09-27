@@ -10,6 +10,8 @@
       "notify_pre_releases": "disabled",
       "system_tray": "enabled",
       "steamgriddb_api_key": "",
+      "windows_launcher": "proton",
+      "proton_auto_update": "enabled",
       "windows_exe_launcher": ""
     }
   },

@@ -469,6 +469,18 @@ TEST(LibraryCore, ResolvesWindowsLauncher) {
 #endif
 }
 
+TEST(LibraryCore, ResolvesWindowsLauncherMode) {
+  temp_dir_t tmp;
+  const auto wrapper = (tmp.path / "nova-proton-run").string();
+  std::ofstream(wrapper) << "#!/bin/sh\n";
+  EXPECT_EQ(resolve_windows_launcher("proton", "", wrapper), "\"" + wrapper + "\" {exe}");
+  EXPECT_EQ(resolve_windows_launcher("wine", "custom {exe}", wrapper), "wine {exe}");
+  EXPECT_EQ(resolve_windows_launcher("custom", "custom {exe}", wrapper), "custom {exe}");
+  EXPECT_EQ(resolve_windows_launcher("custom", "", wrapper), "\"" + wrapper + "\" {exe}");
+  // Wrapper not installed: fall back to the umu/wine chain instead of a dead path.
+  EXPECT_EQ(resolve_windows_launcher("proton", "", (tmp.path / "missing").string()), resolve_windows_launcher(std::string {}));
+}
+
 TEST(LibraryCore, MergesIntoAppsWithoutDuplicates) {
   nlohmann::json tree = R"({"env": {}, "apps": [{"name": "Zeta", "cmd": "zeta"}, {"name": "Old", "cmd": "steam steam://rungameid/1", "nova-source": "steam", "nova-source-id": "1"}]})"_json;
   std::vector<app_entry_t> entries(3);

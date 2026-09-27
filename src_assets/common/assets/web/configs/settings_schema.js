@@ -76,7 +76,13 @@ export const OPTIONS = {
   system_tray: { type: 'bool' },
   global_prep_cmd: { type: 'PrepCommandsEditor' },
   steamgriddb_api_key: { type: 'secret', mono: true, placeholder: 'Paste your API key', help: 'steamgriddb' },
-  windows_exe_launcher: { type: 'text', mono: true, hideOn: ['windows', 'macos'], placeholder: '/usr/local/bin/run-windows-exe {exe}' },
+
+  // Windows games (Linux)
+  windows_launcher: { type: 'choice', hideOn: ['windows', 'macos'], choices: named('windows_launcher', ['proton', 'wine', 'custom']) },
+  proton_auto_update: { type: 'bool', hideOn: ['windows', 'macos'], when: (c) => (c.windows_launcher || 'proton') === 'proton' },
+  windows_exe_launcher: {
+    type: 'text', mono: true, hideOn: ['windows', 'macos'], placeholder: 'umu-run {exe}', when: (c) => c.windows_launcher === 'custom',
+  },
 
   // Display & capture
   capture: {
@@ -349,7 +355,8 @@ export const OPTIONS = {
  * encoder groups shown inside the Encoder section.
  */
 export const SECTIONS = [
-  { id: 'general', options: ['sunshine_name', 'locale', 'min_log_level', 'notify_pre_releases', 'system_tray', 'global_prep_cmd', 'steamgriddb_api_key', 'windows_exe_launcher'] },
+  { id: 'general', options: ['sunshine_name', 'locale', 'min_log_level', 'notify_pre_releases', 'system_tray', 'global_prep_cmd', 'steamgriddb_api_key'] },
+  { id: 'compat', options: ['windows_launcher', 'proton_auto_update', 'windows_exe_launcher'] },
   {
     id: 'display',
     options: ['capture', 'capture_pacing', 'display_follow', 'display_follow_cmd', 'adapter_name', 'output_name', 'max_bitrate', 'minimum_fps_target', 'max_fps_target',

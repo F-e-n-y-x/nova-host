@@ -27,6 +27,7 @@
 #include "display_device.h"
 #include "input.h"
 #include "logging.h"
+#include "nova_compat.h"
 #include "platform/common.h"
 #include "process.h"
 #include "system_tray.h"
@@ -172,6 +173,7 @@ namespace proc {
   int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t> launch_session) {
     // Ensure starting from a clean slate
     terminate();
+    _last_error.clear();
 
     auto iter = std::find_if(_apps.begin(), _apps.end(), [&app_id](const auto app) {
       return app.id == std::to_string(app_id);
@@ -217,6 +219,22 @@ namespace proc {
         break;
     }
     _env["SUNSHINE_CLIENT_AUDIO_SURROUND_PARAMS"] = launch_session->surround_params;
+
+    // Per-game settings for nova-proton-run; cleared first so one game's options never leak into the next.
+    for (const auto &key : nova_compat::env_keys()) {
+      _env.erase(key);
+    }
+    for (const auto &[key, value] : nova_compat::build_env(_app.name, _app.steam_appid, _app.compat, config::library.proton_auto_update)) {
+      _env[key] = value;
+    }
+
+    // Fail the launch with a clear reason instead of streaming a desktop while the game silently exits.
+    if (auto missing = nova_compat::check_launch_target(_app.nova_exe)) {
+      BOOST_LOG(error) << "Not launching ["sv << _app.name << "]: "sv << *missing;
+      _last_error = std::move(*missing);
+      _app_id = 0;
+      return 404;
+    }
 
     if (!_app.output.empty() && _app.output != "null"sv) {
 #ifdef _WIN32
@@ -311,6 +329,10 @@ namespace proc {
     fg.disable();
 
     return 0;
+  }
+
+  const std::string &proc_t::last_error() const {
+    return _last_error;
   }
 
   int proc_t::running() {
@@ -740,6 +762,8 @@ namespace proc {
         auto auto_detach = app_node.get_optional<bool>("auto-detach"s);
         auto wait_all = app_node.get_optional<bool>("wait-all"s);
         auto exit_timeout = app_node.get_optional<int>("exit-timeout"s);
+        auto nova_exe = app_node.get_optional<std::string>("nova-exe"s);
+        auto steam_appid = app_node.get_optional<std::uint32_t>("nova-steam-appid"s);
 
         std::vector<proc::cmd_t> prep_cmds;
         if (!exclude_global_prep.value_or(false)) {
@@ -809,6 +833,22 @@ namespace proc {
         ctx.auto_detach = auto_detach.value_or(true);
         ctx.wait_all = wait_all.value_or(true);
         ctx.exit_timeout = std::chrono::seconds {exit_timeout.value_or(5)};
+        if (nova_exe) {
+          ctx.nova_exe = parse_env_val(this_env, *nova_exe);
+        }
+        ctx.steam_appid = steam_appid.value_or(0);
+        if (auto compat = app_node.get_child_optional("nova-compat"s)) {
+          ctx.compat.prefix = compat->get<std::string>("prefix"s, "");
+          ctx.compat.fsr = compat->get<int>("fsr"s, 0);
+          ctx.compat.fps_cap = compat->get<int>("fps_cap"s, 0);
+          ctx.compat.mangohud = compat->get<bool>("mangohud"s, false);
+          ctx.compat.proton_version = compat->get<std::string>("proton_version"s, "");
+          if (auto extra = compat->get_child_optional("extra_env"s)) {
+            for (auto &[_, kv] : *extra) {
+              ctx.compat.extra_env.emplace_back(kv.get_value<std::string>());
+            }
+          }
+        }
 
         auto possible_ids = calculate_app_id(name, ctx.image_path, i++);
         if (ids.count(std::get<0>(possible_ids)) == 0) {

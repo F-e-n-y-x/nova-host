@@ -889,6 +889,8 @@ namespace config {
   library_t library {
     {},  // steamgriddb_api_key
     {},  // windows_exe_launcher
+    "proton",  // windows_launcher
+    true,  // proton_auto_update
   };
 
   sunshine_t sunshine {
@@ -1877,6 +1879,8 @@ namespace config {
 
     string_f(vars, "steamgriddb_api_key", library.steamgriddb_api_key);
     string_f(vars, "windows_exe_launcher", library.windows_exe_launcher);
+    string_restricted_f(vars, "windows_launcher", library.windows_launcher, {"proton"sv, "wine"sv, "custom"sv});
+    bool_f(vars, "proton_auto_update", library.proton_auto_update);
 
     bool_f(vars, "notify_pre_releases", sunshine.notify_pre_releases);
     bool_f(vars, "system_tray", sunshine.system_tray);
