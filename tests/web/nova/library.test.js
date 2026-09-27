@@ -7,7 +7,8 @@ import en from '../../../src_assets/common/assets/web/public/assets/locale/en.js
 import Apps from '../../../src_assets/common/assets/web/Apps.vue'
 import AddGamesSheet from '../../../src_assets/common/assets/web/nova/pages/library/AddGamesSheet.vue'
 import {
-  appKind, appRunner, artUrl, importPayload, initialReview, jobFraction, matchLevel, pollJob, probeLibraryApi,
+  appKind, appRunner, applyArtwork, artUrl, cancelJob, importPayload, initialReview, jobFraction, matchLevel, pollJob,
+  probeLibraryApi,
 } from '../../../src_assets/common/assets/web/nova/pages/library/libraryApi.js'
 import { toasts } from '../../../src_assets/common/assets/web/nova/toast.js'
 import { fitSize } from '../../../src_assets/common/assets/web/nova/pages/library/artworkUpload.js'
@@ -126,6 +127,26 @@ describe('library helpers', () => {
     expect(seen).toEqual(['running', 'running', 'done'])
     await expect(pollJob('y', { interval: 0, fetchJob: async () => ({ state: 'failed', error: 'Steam is not installed' }) }))
       .rejects.toThrow('Steam is not installed')
+  })
+
+  it('stops polling when the host cancelled the job', async () => {
+    await expect(pollJob('z', { interval: 0, fetchJob: async () => ({ state: 'cancelled' }) }))
+      .rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('applies only the chosen artwork kinds to an existing app', async () => {
+    stubHost()
+    await applyArtwork(2, { poster: 'c1', hero: 'none', icon: 'c9' })
+    const call = calls.find((c) => c.url === './api/library/artwork/apply')
+    expect(call.method).toBe('POST')
+    expect(call.body).toEqual({ app_index: 2, poster: 'c1', icon: 'c9' })
+    await expect(applyArtwork(2, { poster: 'none' })).rejects.toThrow('nothing chosen')
+  })
+
+  it('asks the host to cancel a job with POST …/cancel', async () => {
+    stubHost()
+    await cancelJob('0123456789abcdef')
+    expect(calls).toContainEqual(expect.objectContaining({ url: './api/library/jobs/0123456789abcdef/cancel', method: 'POST' }))
   })
 
   it('treats an HTML answer or a 404 as "no library API"', async () => {

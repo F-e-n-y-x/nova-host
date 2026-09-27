@@ -87,6 +87,46 @@ namespace library {
   std::optional<std::string> start_import(const nlohmann::json &items, const settings_t &settings);
 
   /**
+   * @brief Ask a running scan, import or artwork job to stop at its next checkpoint.
+   *
+   * @param id Job id.
+   * @return True when the job exists and was still running.
+   */
+  bool cancel_job(const std::string &id);
+
+  /**
+   * @brief Resolve artwork choices ({"poster"|"hero"|"logo"|"icon": candidate id}) to candidates.
+   *
+   * @param choices Choices object from the client.
+   * @return One candidate per chosen kind, in poster/hero/logo/icon order.
+   * @throws std::invalid_argument when the object is malformed, empty, or names an unknown or
+   *         wrong-kind candidate.
+   */
+  std::vector<art_ref_t> parse_art_choices(const nlohmann::json &choices);
+
+  /**
+   * @brief Point an app's artwork field of one kind at a stored file.
+   *
+   * @param app App object from apps.json (modified).
+   * @param kind Artwork kind: poster sets "image-path", others "nova-hero", "nova-logo", "nova-icon".
+   * @param file Stored image.
+   */
+  void set_app_art(nlohmann::json &app, art_kind_e kind, const std::filesystem::path &file);
+
+  /**
+   * @brief Start a background job that stores chosen artwork for an app already in apps.json.
+   *
+   * The job fails instead of writing when the app at @p app_index changed name meanwhile.
+   *
+   * @param app_index Index into the "apps" array.
+   * @param choices Choices object, see @ref parse_art_choices.
+   * @param settings Paths and settings.
+   * @return Job id, or nullopt when too many jobs are running.
+   * @throws std::invalid_argument for invalid choices.
+   */
+  std::optional<std::string> start_apply_artwork(std::size_t app_index, const nlohmann::json &choices, const settings_t &settings);
+
+  /**
    * @brief Current state of a job.
    *
    * @param id Job id.

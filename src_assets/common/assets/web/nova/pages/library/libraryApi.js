@@ -89,6 +89,7 @@ export async function pollJob(id, { onUpdate, signal, interval = POLL_MS, fetchJ
     const job = await fetchJob(id)
     onUpdate?.(job)
     if (job.state === 'done') return job
+    if (job.state === 'cancelled') throw new DOMException('Stopped', 'AbortError')
     if (job.state === 'failed') {
       const error = new Error(job.error || 'failed')
       error.job = job
@@ -241,6 +242,22 @@ export function artUrl(app, index, kind, version = 0) {
 }
 
 /**
+ * Download chosen library artwork for an app that is already in the library.
+ *
+ * @param {number} appIndex Index of the app in /api/apps.
+ * @param {Record<string, string>} choices Candidate id per kind (poster/hero/logo/icon); "none" is skipped.
+ * @returns {Promise<string>} Job id; poll it with pollJob. Rejects when nothing was chosen.
+ */
+export async function applyArtwork(appIndex, choices) {
+  const body = { app_index: appIndex }
+  for (const kind of ART_KINDS) {
+    if (choices?.[kind] && choices[kind] !== 'none') body[kind] = choices[kind]
+  }
+  if (Object.keys(body).length === 1) throw new Error('nothing chosen')
+  return (await postJson('./api/library/artwork/apply', body)).job_id
+}
+
+/**
  * Ask the host to stop a job; failures are ignored (older hosts can't cancel).
  *
  * @param {string} id Job id.
@@ -248,7 +265,7 @@ export function artUrl(app, index, kind, version = 0) {
  */
 export async function cancelJob(id) {
   try {
-    await apiFetch(`./api/library/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    await postJson(`./api/library/jobs/${encodeURIComponent(id)}/cancel`, {})
   } catch {
     // Older hosts can't cancel; the scan finishes in the background and is ignored.
   }

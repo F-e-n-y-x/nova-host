@@ -155,6 +155,7 @@ async function editArtwork(index) {
 }
 
 async function onSaved(name) {
+  artworkChanged = false
   const index = editIndex.value
   closeEditor()
   toast.success(t('nova.apps.saved', { name }))
@@ -163,9 +164,19 @@ async function onSaved(name) {
   focusItem(moved >= 0 ? moved : index)
 }
 
-function onEditorClose() {
+let artworkChanged = false
+
+function onArtworkApplied() {
+  artworkChanged = true
+}
+
+async function onEditorClose() {
   const index = editIndex.value
   closeEditor()
+  if (artworkChanged) {
+    artworkChanged = false
+    await refresh()
+  }
   focusItem(index)
 }
 
@@ -326,7 +337,7 @@ function openAdd() {
     </ul>
 
     <AppEditor ref="editor" :open="editorOpen" :app="editingApp" :index="editIndex ?? -1" :platform="platform"
-               :library-api="libraryApi" :cover-version="coverVersion" @saved="onSaved" @close="onEditorClose"
+               :library-api="libraryApi" :cover-version="coverVersion" @saved="onSaved" @close="onEditorClose" @artwork-applied="onArtworkApplied"
                @delete="askRemove({ index: editIndex, name: editingApp?.name || t('nova.apps.unnamed') })" />
     <AddGamesSheet v-if="libraryApi" v-model:open="addOpen" @imported="onImported" />
     <NvConfirmDialog v-model:open="removing.open" :title="t('nova.apps.delete_title', { name: removing.name })"

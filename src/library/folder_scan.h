@@ -7,6 +7,7 @@
 // standard includes
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -24,6 +25,7 @@ namespace library::folder {
     std::size_t max_games = 500;  ///< Stop after this many games.
     std::size_t max_entries_per_game = 20000;  ///< Directory entries visited per game folder before giving up.
     std::string windows_launcher;  ///< Command template for Windows games, "{exe}" is replaced; empty runs the exe directly.
+    std::function<bool()> cancelled;  ///< Polled while walking; returning true stops the scan early (partial result).
   };
 
   /**

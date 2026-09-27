@@ -602,3 +602,116 @@ TEST(LibraryConfig, DefaultsAreEmpty) {
   EXPECT_TRUE(config::library.steamgriddb_api_key.empty());
   EXPECT_TRUE(config::library.windows_exe_launcher.empty());
 }
+
+TEST(LibraryCore, ParsesArtworkChoicesStrictly) {
+  temp_dir_t tmp;
+  write(tmp.path / "cover.png", png(600, 900));
+  const auto poster = register_candidate({art_kind_e::poster, {}, tmp.path / "cover.png", "Local"});
+  const auto hero = register_candidate({art_kind_e::hero, {}, tmp.path / "cover.png", "Local"});
+
+  const auto refs = parse_art_choices({{"hero", hero}, {"poster", poster}});
+  ASSERT_EQ(refs.size(), 2u);
+  EXPECT_EQ(refs[0].kind, art_kind_e::poster) << "returned in poster/hero/logo/icon order";
+  EXPECT_EQ(refs[1].kind, art_kind_e::hero);
+
+  EXPECT_THROW(parse_art_choices(nlohmann::json::object()), std::invalid_argument);
+  EXPECT_THROW(parse_art_choices(nlohmann::json::array()), std::invalid_argument);
+  EXPECT_THROW(parse_art_choices({{"poster", 7}}), std::invalid_argument);
+  EXPECT_THROW(parse_art_choices({{"poster", "c0000000000"}}), std::invalid_argument);
+  EXPECT_THROW(parse_art_choices({{"logo", poster}}), std::invalid_argument) << "a poster candidate can't be used as a logo";
+}
+
+TEST(LibraryCore, SetsArtworkFieldsPerKind) {
+  nlohmann::json app = {{"name", "Game"}};
+  set_app_art(app, art_kind_e::poster, "/c/poster.png");
+  set_app_art(app, art_kind_e::hero, "/c/hero.jpg");
+  set_app_art(app, art_kind_e::logo, "/c/logo.png");
+  set_app_art(app, art_kind_e::icon, "/c/icon.png");
+  EXPECT_EQ(app["image-path"], "/c/poster.png");
+  EXPECT_EQ(app["nova-hero"], "/c/hero.jpg");
+  EXPECT_EQ(app["nova-logo"], "/c/logo.png");
+  EXPECT_EQ(app["nova-icon"], "/c/icon.png");
+}
+
+TEST(LibraryCore, AppliesArtworkToAnExistingApp) {
+  temp_dir_t tmp;
+  write(tmp.path / "art/cover.png", png(1200, 1800));
+  settings_t settings;
+  settings.home = tmp.path;
+  settings.apps_file = tmp.path / "apps.json";
+  settings.covers_dir = tmp.path / "covers";
+  settings.online = false;
+  write(settings.apps_file, R"({"apps":[{"name":"Alpha","cmd":"a"},{"name":"Beta","cmd":"b","image-path":"/old.png"}]})");
+
+  const auto wait = [](const std::string &id) {
+    for (int i = 0; i < 200; ++i) {
+      const auto status = job_status(id);
+      if (status && (*status)["state"] != "running") {
+        return *status;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    return nlohmann::json {};
+  };
+
+  const auto poster = register_candidate({art_kind_e::poster, {}, tmp.path / "art/cover.png", "Local"});
+  const auto job = start_apply_artwork(1, {{"app_index", 1}, {"poster", poster}}, settings);
+  ASSERT_TRUE(job);
+  const auto status = wait(*job);
+  ASSERT_EQ(status["state"], "done") << status.dump();
+  EXPECT_EQ(status["kind"], "artwork");
+  EXPECT_EQ(status["result"]["applied"], nlohmann::json::array({"poster", "icon"})) << "icon derived from the new poster";
+
+  std::ifstream in(settings.apps_file);
+  const auto tree = nlohmann::json::parse(in);
+  const auto &beta = tree["apps"][1];
+  EXPECT_EQ(beta["name"], "Beta");
+  EXPECT_NE(beta["image-path"], "/old.png");
+  EXPECT_TRUE(fs::exists(beta["image-path"].get<std::string>()));
+  EXPECT_TRUE(fs::exists(beta["nova-icon"].get<std::string>()));
+  EXPECT_FALSE(tree["apps"][0].contains("image-path")) << "other apps are untouched";
+
+  const auto missing = wait(*start_apply_artwork(9, {{"poster", poster}}, settings));
+  EXPECT_EQ(missing["state"], "failed");
+  EXPECT_THROW(start_apply_artwork(0, nlohmann::json::object(), settings), std::invalid_argument);
+}
+
+TEST(LibraryCore, CancelsJobsCooperatively) {
+  EXPECT_FALSE(cancel_job("0000000000000000")) << "unknown ids can't be cancelled";
+
+  temp_dir_t tmp;
+  for (int i = 0; i < 5; ++i) {
+    write_exe(tmp.path / "Games" / ("Game" + std::to_string(i)) / ("Game" + std::to_string(i) + ".exe"), 2);
+  }
+  folder::options_t options;
+  options.windows_launcher = "wine {exe}";
+  options.cancelled = [] {
+    return true;
+  };
+  const auto stopped = folder::scan(tmp.path / "Games", options);
+  EXPECT_TRUE(stopped.games.empty()) << "a cancelled folder walk stops before evaluating games";
+
+  options.cancelled = nullptr;
+  EXPECT_EQ(folder::scan(tmp.path / "Games", options).games.size(), 5u);
+
+  settings_t settings;
+  settings.home = tmp.path;
+  settings.apps_file = tmp.path / "apps.json";
+  settings.covers_dir = tmp.path / "covers";
+  settings.windows_launcher = "wine {exe}";
+  settings.online = false;
+  const auto id = start_scan(source_e::folder, tmp.path / "Games", settings);
+  ASSERT_TRUE(id);
+  cancel_job(*id);
+  nlohmann::json status;
+  for (int i = 0; i < 200; ++i) {
+    status = *job_status(*id);
+    if (status["state"] != "running") {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  // The scan may pass its last checkpoint before the request lands; either way it ends.
+  EXPECT_TRUE(status["state"] == "cancelled" || status["state"] == "done") << status.dump();
+  EXPECT_FALSE(cancel_job(*id)) << "finished jobs can't be cancelled";
+}

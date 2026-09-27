@@ -2889,6 +2889,76 @@ namespace confighttp {
   }
 
   /**
+   * @brief Ask a running library scan, import or artwork job to stop.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * Cancellation is cooperative: the job stops at its next checkpoint and its state becomes
+   * `cancelled`. Responds 404 for unknown ids and 400 when the job already finished.
+   *
+   * @api_examples{/api/library/jobs/0123456789abcdef/cancel|:| POST|:| null}
+   */
+  void postLibraryJobCancel(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    if (!validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    print_req(request);
+    const auto id = request->path_match[1].str();
+    if (!library::job_status(id)) {
+      not_found(response, request, "Job not found");
+      return;
+    }
+    if (!library::cancel_job(id)) {
+      bad_request(response, request, "The job already finished");
+      return;
+    }
+    send_response(response, {{"status", true}});
+  }
+
+  /**
+   * @brief Download chosen artwork for an app already in the library and save it.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * The body is JSON: `{"app_index": 3, "poster"?: "<candidate id>", "hero"?: ..., "logo"?: ..., "icon"?: ...}`
+   * with candidate ids from `/api/library/artwork/search`. Runs as a background job; the response is
+   * `{"status": true, "job_id": "<id>"}` and the job result lists the `applied` kinds.
+   *
+   * @api_examples{/api/library/artwork/apply|:| POST|:| {"app_index":0,"poster":"c1a2b3c4"}}
+   */
+  void postLibraryArtworkApply(const resp_https_t &response, const req_https_t &request) {
+    if (!check_content_type(response, request, "application/json")) {
+      return;
+    }
+    if (!authenticate(response, request)) {
+      return;
+    }
+    if (!validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    print_req(request);
+
+    std::stringstream ss;
+    ss << request->content.rdbuf();
+    try {
+      const auto input = nlohmann::json::parse(ss);
+      if (!input.contains("app_index") || !input["app_index"].is_number_unsigned()) {
+        bad_request(response, request, "'app_index' must be a non-negative integer");
+        return;
+      }
+      const auto job = library::start_apply_artwork(input["app_index"].get<std::size_t>(), input, library::current_settings());
+      if (!job) {
+        bad_request(response, request, "Another scan or import is already running. Try again when it finishes.");
+        return;
+      }
+      send_response(response, {{"status", true}, {"job_id", *job}});
+    } catch (const std::exception &e) {
+      bad_request(response, request, e.what());
+    }
+  }
+
+  /**
    * @brief Search store matches and artwork for a game ("Change match" / "Choose artwork").
    * @param response The HTTP response object.
    * @param request The HTTP request object.
@@ -3047,6 +3117,8 @@ namespace confighttp {
     server.resource["^/api/library/jobs/([0-9a-f]{16})$"]["GET"] = getLibraryJob;
     server.resource["^/api/library/scan/([0-9a-f]{16})$"]["GET"] = getLibraryJob;
     server.resource["^/api/library/import$"]["POST"] = postLibraryImport;
+    server.resource["^/api/library/jobs/([0-9a-f]{16})/cancel$"]["POST"] = postLibraryJobCancel;
+    server.resource["^/api/library/artwork/apply$"]["POST"] = postLibraryArtworkApply;
     server.resource["^/api/library/artwork/search$"]["GET"] = getLibraryArtworkSearch;
     server.resource["^/api/library/candidates/(c[0-9]+[0-9a-f]{6})$"]["GET"] = getLibraryCandidate;
     server.resource["^/api/csrf-token$"]["GET"] = getCSRFToken;

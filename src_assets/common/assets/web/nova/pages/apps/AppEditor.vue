@@ -35,9 +35,9 @@ import DetachedCommandList from './DetachedCommandList.vue'
 import EnvVarsReference from './EnvVarsReference.vue'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 import CoverFinderDialog from './CoverFinderDialog.vue'
-import { postJson } from '../../api'
+import { fetchJson, postJson } from '../../api'
 import { buildPayload, formFromApp, formsDiffer, newAppForm, validateForm } from './appForm'
-import { appRunner, appSource, artUrl, candidateUrl, searchArtwork } from '../library/libraryApi'
+import { applyArtwork, appRunner, appSource, artUrl, candidateUrl, pollJob, searchArtwork } from '../library/libraryApi'
 import { imageToPngBase64, uploadCoverData } from '../library/artworkUpload'
 
 const props = defineProps({
@@ -48,7 +48,7 @@ const props = defineProps({
   libraryApi: { type: Boolean, default: false },
   coverVersion: { type: Number, default: 0 },
 })
-const emit = defineEmits(['saved', 'close', 'delete'])
+const emit = defineEmits(['saved', 'close', 'delete', 'artwork-applied'])
 const { t } = useI18n()
 
 /** Field ids, in form order, for focusing the first error. */
@@ -147,15 +147,53 @@ async function openArtwork() {
   }
 }
 
+const ART_FIELDS = ['image-path', 'nova-hero', 'nova-logo', 'nova-icon']
+
+/**
+ * Apply full-quality library artwork to this (already saved) app on the host, then copy the new
+ * file paths into the form so a later Save keeps them. Other unsaved edits are left alone.
+ *
+ * @returns {Promise<boolean>} False when the host can't apply artwork (older build).
+ */
+async function applyOnHost() {
+  let job
+  try {
+    job = await applyArtwork(props.index, artwork.choice)
+  } catch (error) {
+    if (error?.status === 404) return false
+    throw error
+  }
+  await pollJob(job)
+  const saved = (await fetchJson('./api/apps')).apps?.[props.index]
+  const before = JSON.parse(initial.value)
+  for (const key of ART_FIELDS) {
+    if (saved?.[key] === undefined) continue
+    form.value[key] = saved[key]
+    before[key] = saved[key]
+  }
+  initial.value = JSON.stringify(before)
+  emit('artwork-applied')
+  return true
+}
+
 async function useArtwork() {
-  const id = artwork.choice.poster
-  if (!id || id === 'none') {
+  const chosen = Object.values(artwork.choice || {}).some((id) => id && id !== 'none')
+  if (!chosen) {
     artwork.open = false
     return
   }
   artwork.busy = true
   artwork.error = ''
   try {
+    if (props.app && props.index >= 0 && await applyOnHost()) {
+      artwork.open = false
+      return
+    }
+    const id = artwork.choice.poster
+    if (!id || id === 'none') {
+      artwork.open = false
+      return
+    }
     const candidate = artwork.candidates.poster.find((c) => c.id === id)
     const data = await imageToPngBase64(candidateUrl(candidate))
     form.value['image-path'] = await uploadCoverData(`library_${id}`, data)
@@ -387,12 +425,6 @@ defineExpose({ isDirty, askDiscard, openArtwork })
   .nv-editor__ident,
   .nv-editor {
     flex-shrink: 0;
-  }
-
-  /* The panel is narrower than NvSettingRow's side-by-side breakpoint assumes. */
-  .nv-editor__group .nv-setting:not(.nv-setting--full) {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: var(--nv-space-4);
   }
 
   .nv-editor__hero-art {

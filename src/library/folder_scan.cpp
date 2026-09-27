@@ -114,7 +114,7 @@ namespace library::folder {
       fs::recursive_directory_iterator it(game_dir, fs::directory_options::skip_permission_denied, ec);
       std::size_t visited = 0;
       for (; !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
-        if (++visited > options.max_entries_per_game) {
+        if (++visited > options.max_entries_per_game || ((visited & 0xFF) == 0 && options.cancelled && options.cancelled())) {
           break;
         }
         const auto &entry = *it;
@@ -259,7 +259,7 @@ namespace library::folder {
       std::ranges::sort(children);
 
       for (const auto &child : children) {
-        if (result.games.size() >= options.max_games) {
+        if (result.games.size() >= options.max_games || (options.cancelled && options.cancelled())) {
           return;
         }
         if (looks_like_installer(child) || is_game_dir(child, options)) {

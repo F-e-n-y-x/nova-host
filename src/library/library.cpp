@@ -4,6 +4,7 @@
  */
 // standard includes
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <deque>
@@ -12,6 +13,7 @@
 #include <memory>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
 
 // local includes
@@ -75,14 +77,53 @@ namespace library {
       std::string kind;  ///< "scan" or "import".
       std::string source;  ///< Source name for scans.
       std::mutex mutex;  ///< Guards everything below.
-      std::string state = "running";  ///< "running", "done" or "failed".
+      std::string state = "running";  ///< "running", "done", "failed" or "cancelled".
       std::string stage;  ///< Current step, for progress display.
       std::size_t done = 0;  ///< Items processed in the current stage.
       std::size_t total = 0;  ///< Items in the current stage.
       nlohmann::json result = nlohmann::json::object();  ///< Result once done.
       std::string error;  ///< Failure reason.
       std::vector<detected_game_t> games;  ///< Scan results, used by imports.
+      std::atomic<bool> cancel_requested {false};  ///< Set by @ref library::cancel_job; checked between steps.
     };
+
+    /**
+     * @brief Thrown inside a job when the user asked it to stop.
+     */
+    struct job_cancelled_t: std::exception {
+      /**
+       * @brief Describe the exception.
+       *
+       * @return A fixed message.
+       */
+      const char *what() const noexcept override {
+        return "cancelled";
+      }
+    };
+
+    /**
+     * @brief Stop the current job if the user asked for it.
+     *
+     * @param job Job to check.
+     * @throws job_cancelled_t when cancellation was requested.
+     */
+    void throw_if_cancelled(const std::shared_ptr<job_t> &job) {
+      if (job->cancel_requested.load()) {
+        throw job_cancelled_t {};
+      }
+    }
+
+    /**
+     * @brief Mark a job as cancelled.
+     *
+     * @param job Job.
+     */
+    void mark_cancelled(const std::shared_ptr<job_t> &job) {
+      BOOST_LOG(info) << "Library "sv << job->kind << " job "sv << job->id << " cancelled"sv;
+      std::scoped_lock lock(job->mutex);
+      job->state = "cancelled";
+      job->stage.clear();
+    }
 
     std::mutex jobs_mutex;  ///< Guards @ref jobs and @ref job_order.
     std::map<std::string, std::shared_ptr<job_t>, std::less<>> jobs;  ///< Jobs by id.
@@ -266,6 +307,9 @@ namespace library {
             {
               folder::options_t options;
               options.windows_launcher = settings.windows_launcher;
+              options.cancelled = [job]() {
+                return job->cancel_requested.load();
+              };
               result = folder::scan(path, options);
               break;
             }
@@ -280,16 +324,19 @@ namespace library {
             break;
         }
 
+        throw_if_cancelled(job);
         {
           std::scoped_lock lock(job->mutex);
           job->stage = "Matching";
           job->total = result.games.size();
         }
         enrich(result.games, settings, [&job](std::size_t done, std::size_t total) {
+          throw_if_cancelled(job);
           std::scoped_lock lock(job->mutex);
           job->done = done;
           job->total = total;
         });
+        throw_if_cancelled(job);
 
         nlohmann::json apps;
         {
@@ -312,6 +359,8 @@ namespace library {
         job->result = {{"items", std::move(items)}, {"skipped", std::move(skipped)}};
         job->state = "done";
         job->stage.clear();
+      } catch (const job_cancelled_t &) {
+        mark_cancelled(job);
       } catch (const std::exception &e) {
         BOOST_LOG(warning) << "Library scan failed: "sv << e.what();
         std::scoped_lock lock(job->mutex);
@@ -356,6 +405,7 @@ namespace library {
         }
 
         for (std::size_t n = 0; n < items.size(); ++n) {
+          throw_if_cancelled(job);
           const auto &item = items[n];
           const auto temp_id = item.value("temp_id", std::string {});
           const auto colon = temp_id.find(':');
@@ -443,6 +493,7 @@ namespace library {
           job->done = n + 1;
         }
 
+        throw_if_cancelled(job);
         std::vector<bool> added;
         {
           std::scoped_lock lock(apps_file_mutex());
@@ -470,8 +521,93 @@ namespace library {
         job->result = {{"imported", std::move(imported)}, {"duplicates", std::move(duplicates)}, {"failed", std::move(failed)}};
         job->state = "done";
         job->stage.clear();
+      } catch (const job_cancelled_t &) {
+        mark_cancelled(job);
       } catch (const std::exception &e) {
         BOOST_LOG(warning) << "Library import failed: "sv << e.what();
+        std::scoped_lock lock(job->mutex);
+        job->state = "failed";
+        job->error = e.what();
+      }
+    }
+
+    /**
+     * @brief Run an "apply artwork to an existing app" job.
+     *
+     * @param job Job.
+     * @param app_index Index into the "apps" array.
+     * @param refs Chosen candidates, one per kind.
+     * @param settings Settings.
+     */
+    void run_apply_artwork(const std::shared_ptr<job_t> &job, std::size_t app_index, const std::vector<art_ref_t> &refs, const settings_t &settings) {
+      try {
+        nlohmann::json before;
+        {
+          std::scoped_lock lock(apps_file_mutex());
+          const auto tree = read_apps(settings.apps_file);
+          if (app_index >= tree["apps"].size()) {
+            throw std::runtime_error("That app no longer exists. Reload the library and try again.");
+          }
+          before = tree["apps"][app_index];
+        }
+        const auto source = before.value("nova-source", std::string {"app"});
+        const auto source_id = before.value("nova-source-id", before.value("uuid", before.value("name", std::string {})));
+        const auto dir = art_dir(settings.covers_dir, source, source_id);
+        {
+          std::scoped_lock lock(job->mutex);
+          job->stage = "Downloading artwork";
+          job->total = refs.size();
+        }
+
+        std::map<art_kind_e, fs::path> stored;
+        for (std::size_t n = 0; n < refs.size(); ++n) {
+          throw_if_cancelled(job);
+          if (const auto file = artwork::store(refs[n], dir)) {
+            stored[refs[n].kind] = *file;
+          }
+          std::scoped_lock lock(job->mutex);
+          job->done = n + 1;
+        }
+        if (stored.contains(art_kind_e::poster) && !stored.contains(art_kind_e::icon) && !before.contains("nova-icon")) {
+          if (const auto icon = artwork::icon_from_poster(stored[art_kind_e::poster], dir)) {
+            stored[art_kind_e::icon] = *icon;
+          }
+        }
+        throw_if_cancelled(job);
+
+        nlohmann::json applied = nlohmann::json::array();
+        {
+          std::scoped_lock lock(apps_file_mutex());
+          auto tree = read_apps(settings.apps_file);
+          // Indexes shift when apps are added, renamed or removed meanwhile; refuse rather than
+          // write artwork onto the wrong app.
+          if (app_index >= tree["apps"].size() || tree["apps"][app_index].value("name", std::string {}) != before.value("name", std::string {})) {
+            throw std::runtime_error("The app list changed while downloading. Reload the library and try again.");
+          }
+          auto &app = tree["apps"][app_index];
+          for (const auto &[kind, file] : stored) {
+            set_app_art(app, kind, file);
+            applied.push_back(to_string(kind));
+          }
+          if (!stored.empty()) {
+            const auto tmp = settings.apps_file.string() + ".tmp";
+            {
+              std::ofstream out(tmp, std::ios::trunc);
+              out << tree.dump(4);
+            }
+            fs::rename(tmp, settings.apps_file);
+            proc::refresh(settings.apps_file.string());
+          }
+        }
+
+        std::scoped_lock lock(job->mutex);
+        job->result = {{"app_index", app_index}, {"applied", std::move(applied)}, {"requested", refs.size()}};
+        job->state = "done";
+        job->stage.clear();
+      } catch (const job_cancelled_t &) {
+        mark_cancelled(job);
+      } catch (const std::exception &e) {
+        BOOST_LOG(warning) << "Applying library artwork failed: "sv << e.what();
         std::scoped_lock lock(job->mutex);
         job->state = "failed";
         job->error = e.what();
@@ -719,6 +855,73 @@ namespace library {
     }
     std::thread([job, items, settings]() {
       run_import(job, items, settings);
+    }).detach();
+    return job->id;
+  }
+
+  bool cancel_job(const std::string &id) {
+    const auto job = find_job(id);
+    if (!job) {
+      return false;
+    }
+    std::scoped_lock lock(job->mutex);
+    if (job->state != "running") {
+      return false;
+    }
+    job->cancel_requested = true;
+    return true;
+  }
+
+  std::vector<art_ref_t> parse_art_choices(const nlohmann::json &choices) {
+    if (!choices.is_object()) {
+      throw std::invalid_argument("Artwork choices must be an object");
+    }
+    std::vector<art_ref_t> refs;
+    for (const auto kind : {art_kind_e::poster, art_kind_e::hero, art_kind_e::logo, art_kind_e::icon}) {
+      const auto key = to_string(kind);
+      if (!choices.contains(key)) {
+        continue;
+      }
+      if (!choices[key].is_string()) {
+        throw std::invalid_argument(std::string("'") + key + "' must be a candidate id");
+      }
+      const auto ref = candidate(choices[key].get<std::string>());
+      if (!ref || ref->kind != kind) {
+        throw std::invalid_argument(std::string("Unknown or expired ") + key + " choice. Search artwork again.");
+      }
+      refs.push_back(*ref);
+    }
+    if (refs.empty()) {
+      throw std::invalid_argument("Choose at least one of poster, hero, logo or icon");
+    }
+    return refs;
+  }
+
+  void set_app_art(nlohmann::json &app, art_kind_e kind, const fs::path &file) {
+    switch (kind) {
+      case art_kind_e::poster:
+        app["image-path"] = file.string();
+        break;
+      case art_kind_e::hero:
+        app["nova-hero"] = file.string();
+        break;
+      case art_kind_e::logo:
+        app["nova-logo"] = file.string();
+        break;
+      case art_kind_e::icon:
+        app["nova-icon"] = file.string();
+        break;
+    }
+  }
+
+  std::optional<std::string> start_apply_artwork(std::size_t app_index, const nlohmann::json &choices, const settings_t &settings) {
+    auto refs = parse_art_choices(choices);
+    auto job = create_job("artwork", {});
+    if (!job) {
+      return std::nullopt;
+    }
+    std::thread([job, app_index, refs = std::move(refs), settings]() {
+      run_apply_artwork(job, app_index, refs, settings);
     }).detach();
     return job->id;
   }
