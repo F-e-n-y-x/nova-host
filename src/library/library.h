@@ -19,6 +19,7 @@
 
 // local includes
 #include "library_types.h"
+#include "match.h"
 #include "metadata.h"
 
 namespace library {
@@ -179,6 +180,36 @@ namespace library {
    * @return {"matches":[{appid,name}], "artwork":{poster:[...],hero:[...],logo:[...],icon:[...]}}.
    */
   nlohmann::json artwork_search(const std::string &query, std::uint32_t appid, const settings_t &settings);
+
+  /**
+   * @brief A match candidate as JSON for the web UI, with a poster preview candidate id.
+   *
+   * @param c Candidate.
+   * @return {source, appid, igdb_id, sgdb_id, name, year, edition, type, unlisted, confidence, poster}.
+   */
+  nlohmann::json match_json(const match::candidate_t &c);
+
+  /**
+   * @brief Where custom artwork for one kind comes from (exactly one is used).
+   */
+  struct custom_art_t {
+    std::optional<std::string> bytes;  ///< Uploaded image bytes.
+    std::optional<std::string> url;  ///< Image URL the user pasted (fetched with SSRF protection).
+    bool reset = false;  ///< Go back to the automatic choice for this kind.
+  };
+
+  /**
+   * @brief Start a job that sets one kind of artwork of an app from an upload, a URL, or the automatic choice.
+   *
+   * The result is `{"app_index", "kind", "applied": bool, "cleared": bool}`; failures carry a message for the user.
+   *
+   * @param app_index Index into the apps list.
+   * @param kind Artwork kind.
+   * @param source Image source.
+   * @param settings Settings.
+   * @return Job id, or nullopt when too many jobs are running.
+   */
+  std::optional<std::string> start_custom_artwork(std::size_t app_index, art_kind_e kind, custom_art_t source, const settings_t &settings);
 
   /**
    * @brief A game ready to be written to apps.json.

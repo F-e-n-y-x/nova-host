@@ -900,6 +900,7 @@ namespace config {
     false,  // art_humor
     {},  // igdb_client_id
     {},  // igdb_client_secret
+    {},  // steam_web_api_key
     {},  // rawg_api_key
   };
 
@@ -1900,6 +1901,7 @@ namespace config {
     bool_f(vars, "art_humor", library.art_humor);
     string_f(vars, "igdb_client_id", library.igdb_client_id);
     string_f(vars, "igdb_client_secret", library.igdb_client_secret);
+    string_f(vars, "steam_web_api_key", library.steam_web_api_key);
     string_f(vars, "rawg_api_key", library.rawg_api_key);
 
     bool_f(vars, "notify_pre_releases", sunshine.notify_pre_releases);

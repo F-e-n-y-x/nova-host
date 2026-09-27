@@ -2090,7 +2090,9 @@ namespace nvhttp {
   }
 
   /**
-   * @brief GET /nova/v1/apps/<id>/art/<poster|hero|logo|icon>: one piece of an app's artwork.
+   * @brief GET /nova/v1/apps/<id>/art/<poster|hero|logo|icon|background>: one piece of an app's artwork.
+   *
+   * A background that was never set falls back to the hero.
    *
    * @param response HTTPS response.
    * @param request HTTPS request.
@@ -2102,7 +2104,11 @@ namespace nvhttp {
     }
     const auto app = nova_find_app(request, request->path_match[1].str());
     const auto kind = library::parse_kind(request->path_match[2].str());
-    const auto file = app && kind ? library::app_art(*app, *kind, platf::appdata() / "covers" / "library") : std::nullopt;
+    const auto covers = platf::appdata() / "covers" / "library";
+    auto file = app && kind ? library::app_art(*app, *kind, covers) : std::nullopt;
+    if (!file && app && kind == library::art_kind_e::background) {
+      file = library::app_art(*app, library::art_kind_e::hero, covers);
+    }
     if (!file) {
       nova_json(response, SimpleWeb::StatusCode::client_error_not_found, {{"error", "artwork not found"}});
       return;
@@ -2343,7 +2349,7 @@ namespace nvhttp {
     https_server.resource["^/bitrate$"]["GET"] = bitrate;
     https_server.resource["^/nova/v1/capabilities$"]["GET"] = nova_capabilities;
     https_server.resource["^/nova/v1/apps$"]["GET"] = nova_apps;
-    https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/art/(poster|hero|logo|icon)$"]["GET"] = nova_app_art;
+    https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/art/(poster|hero|logo|icon|background)$"]["GET"] = nova_app_art;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/details$"]["GET"] = nova_app_details;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/screenshot/([0-9]{1,2})$"]["GET"] = nova_app_screenshot;
     https_server.resource["^/api/v1/clipboard/blob$"]["POST"] = clipboard_blob_post;

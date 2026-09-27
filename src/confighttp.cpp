@@ -50,8 +50,11 @@
 #include "input.h"
 #include "library/artwork.h"
 #include "library/library.h"
+#include "library/match.h"
 #include "library/metadata.h"
+#include "library/steam_catalog.h"
 #include "library/title.h"
+#include "library/url_fetch.h"
 #include "logging.h"
 #include "network.h"
 #include "nova_client_api.h"
@@ -2973,6 +2976,74 @@ namespace confighttp {
   }
 
   /**
+   * @brief Set one kind of an app's artwork from an upload, an image URL, or back to automatic.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * The body is `{"app_index": 3, "kind": "poster|hero|logo|icon|background"}` plus one of `"data": "<base64 PNG/JPEG>"`,
+   * `"url": "https://…"` (downloaded with SSRF protection, at most 20 MB) or `"reset": true`. The reply is
+   * `{"status": true, "job_id": "<id>"}`; the job result is `{"app_index", "kind", "applied", "cleared"}`.
+   *
+   * @api_examples{/api/library/artwork/custom|:| POST|:| {"app_index":3,"kind":"hero","url":"https://example.com/hero.jpg"}}
+   */
+  void postLibraryArtworkCustom(const resp_https_t &response, const req_https_t &request) {
+    if (!check_content_type(response, request, "application/json")) {
+      return;
+    }
+    if (!authenticate(response, request)) {
+      return;
+    }
+    if (!validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    print_req(request);
+    std::stringstream ss;
+    ss << request->content.rdbuf();
+    const auto input = nlohmann::json::parse(ss.str(), nullptr, false);
+    if (!input.is_object() || !input.contains("app_index") || !input["app_index"].is_number_unsigned()) {
+      bad_request(response, request, "'app_index' must be a non-negative integer");
+      return;
+    }
+    const auto kind = library::parse_kind(input.value("kind", std::string {}));
+    if (!kind) {
+      bad_request(response, request, "'kind' must be poster, hero, logo, icon or background");
+      return;
+    }
+    library::custom_art_t source;
+    const int given = (input.contains("data") ? 1 : 0) + (input.contains("url") ? 1 : 0) + (input.value("reset", false) ? 1 : 0);
+    if (given != 1) {
+      bad_request(response, request, "Give exactly one of 'data', 'url' or 'reset': true");
+      return;
+    }
+    if (input.contains("data")) {
+      if (!input["data"].is_string() || input["data"].get<std::string>().size() > 28 * 1024 * 1024) {
+        bad_request(response, request, "'data' must be a base64 image of at most 20 MB");
+        return;
+      }
+      try {
+        source.bytes = SimpleWeb::Crypto::Base64::decode(input["data"].get<std::string>());
+      } catch (const std::exception &) {
+        bad_request(response, request, "'data' isn't valid base64");
+        return;
+      }
+    } else if (input.contains("url")) {
+      std::string error;
+      if (!input["url"].is_string() || !library::url_fetch::check_url(input["url"].get<std::string>(), error)) {
+        bad_request(response, request, error.empty() ? "'url' must be an https:// image link" : error);
+        return;
+      }
+      source.url = input["url"].get<std::string>();
+    } else {
+      source.reset = true;
+    }
+    const auto job = library::start_custom_artwork(input["app_index"].get<std::size_t>(), *kind, std::move(source), library::current_settings());
+    if (!job) {
+      bad_request(response, request, "Another library job is already running. Try again when it finishes.");
+      return;
+    }
+    send_response(response, {{"status", true}, {"job_id", *job}});
+  }
+
+  /**
    * @brief Parse a JSON request body after the usual content-type, auth and CSRF checks.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
@@ -3096,6 +3167,7 @@ namespace confighttp {
     }
     print_req(request);
     auto out = nova_api::metadata_summary(library::load_apps(config::stream.file_apps)["apps"]);
+    out["catalog"] = library::steam_catalog::status();
     out["status"] = true;
     send_response(response, out);
   }
@@ -3216,10 +3288,12 @@ namespace confighttp {
   }
 
   /**
-   * @brief Search candidate matches for "Change match": Steam store and (with credentials) IGDB.
+   * @brief Search candidate matches for "Change match": Steam store (several spellings), the local
+   * Steam catalogue, SteamGridDB and IGDB when configured, merged and ranked.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
-   * Query: `q=<title>`. Reply: `{"steam": [{appid, name, confidence}], "igdb": [{id, name, year, confidence}]}`.
+   * Query: `q=<title>`, an app id or a Steam store URL. Reply: `{"candidates": [{source, appid, igdb_id,
+   * sgdb_id, name, year, edition, type, unlisted, confidence, poster}], "igdb": bool, "steamgriddb": bool, "catalog": {...}}`.
    *
    * @api_examples{/api/library/metadata/search?q=Far%20Cry%205|:| GET|:| null}
    */
@@ -3236,22 +3310,13 @@ namespace confighttp {
       return;
     }
     const auto meta = library::metadata::from_config();
-    nlohmann::json steam = nlohmann::json::array();
-    nlohmann::json igdb = nlohmann::json::array();
-    for (const auto &hit : library::artwork::store_search(q)) {
-      if (steam.size() >= 8) {
-        break;
-      }
-      steam.push_back({{"appid", hit.appid}, {"name", hit.name}, {"confidence", library::title::similarity(q, hit.name)}});
+    nlohmann::json candidates = nlohmann::json::array();
+    for (const auto &c : library::match::search(q, library::match::live_sources(meta))) {
+      candidates.push_back(library::match_json(c));
     }
-    if (meta.igdb_enabled()) {
-      for (const auto &game : library::metadata::igdb_search(meta, q)) {
-        const auto date = library::metadata::format_date(game.first_release);
-        igdb.push_back({{"id", game.id}, {"name", game.name}, {"year", date.size() >= 4 ? date.substr(date.size() - 4) : std::string {}}, {"confidence", library::title::similarity(q, game.name)}});
-      }
-    }
-    send_response(response, {{"status", true}, {"steam", std::move(steam)}, {"igdb", std::move(igdb)}});
+    send_response(response, {{"status", true}, {"candidates", std::move(candidates)}, {"igdb", meta.igdb_enabled()}, {"steamgriddb", !meta.steamgriddb_api_key.empty()}, {"catalog", library::steam_catalog::status()}});
   }
+
 
   /**
    * @brief Search store matches and artwork for a game ("Change match" / "Choose artwork").
@@ -3305,7 +3370,8 @@ namespace confighttp {
     std::error_code ec;
     const auto preview_dir = fs::temp_directory_path(ec) / "nova-host-previews" / request->path_match[1].str();
     auto preview_ref = *ref;
-    preview_ref.kind = ref->kind == library::art_kind_e::hero ? library::art_kind_e::hero : library::art_kind_e::poster;
+    const bool wide = ref->kind == library::art_kind_e::hero || ref->kind == library::art_kind_e::background;
+    preview_ref.kind = wide ? library::art_kind_e::hero : library::art_kind_e::poster;
     const auto cached = preview_dir / (preview_ref.kind == library::art_kind_e::hero ? "hero.jpg" : "poster.png");
     const auto stored = fs::is_regular_file(cached, ec) ? std::optional<fs::path> {cached} : library::artwork::store(preview_ref, preview_dir);
     if (!stored) {
@@ -3407,13 +3473,14 @@ namespace confighttp {
     server.resource["^/api/covers/([0-9]+)$"]["GET"] = getCover;
     server.resource["^/api/covers/upload$"]["POST"] = uploadCover;
     // Nova game library
-    server.resource["^/api/covers/([0-9]+)/(poster|hero|logo|icon)$"]["GET"] = getAppArt;
+    server.resource["^/api/covers/([0-9]+)/(poster|hero|logo|icon|background)$"]["GET"] = getAppArt;
     server.resource["^/api/library/scan$"]["POST"] = postLibraryScan;
     server.resource["^/api/library/jobs/([0-9a-f]{16})$"]["GET"] = getLibraryJob;
     server.resource["^/api/library/scan/([0-9a-f]{16})$"]["GET"] = getLibraryJob;
     server.resource["^/api/library/import$"]["POST"] = postLibraryImport;
     server.resource["^/api/library/jobs/([0-9a-f]{16})/cancel$"]["POST"] = postLibraryJobCancel;
     server.resource["^/api/library/artwork/apply$"]["POST"] = postLibraryArtworkApply;
+    server.resource["^/api/library/artwork/custom$"]["POST"] = postLibraryArtworkCustom;
     server.resource["^/api/library/artwork/search$"]["GET"] = getLibraryArtworkSearch;
     server.resource["^/api/library/candidates/(c[0-9]+[0-9a-f]{6})$"]["GET"] = getLibraryCandidate;
     server.resource["^/api/library/metadata/refresh$"]["POST"] = postLibraryMetadataRefresh;

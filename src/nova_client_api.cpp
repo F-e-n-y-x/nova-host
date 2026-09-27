@@ -360,9 +360,11 @@ namespace nova_api {
       }
       const auto name = str(app, "name");
       nlohmann::json has;
-      for (const auto kind : {library::art_kind_e::poster, library::art_kind_e::hero, library::art_kind_e::logo, library::art_kind_e::icon}) {
+      for (const auto kind : library::all_art_kinds) {
         has[library::to_string(kind)] = library::app_art(app, kind, covers_dir).has_value();
       }
+      // Clients may always ask for a background; it falls back to the hero.
+      has["background"] = has["background"].get<bool>() || has["hero"].get<bool>();
       nlohmann::json entry = {
         {"id", app_id(app)},
         {"index", i},

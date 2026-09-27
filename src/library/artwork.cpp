@@ -259,11 +259,15 @@ namespace library::artwork {
     return out;
   }
 
+  std::string url_escape(const std::string &s) {
+    return escape(s);
+  }
+
   bool allowed_host(std::string_view host) {
-    static constexpr std::array<std::string_view, 12> exact {
+    static constexpr std::array<std::string_view, 14> exact {
       "store.steampowered.com", "steamcdn-a.akamaihd.net", "www.steamgriddb.com", "images.gog.com", "m.media-amazon.com",
       "images-na.ssl-images-amazon.com", "cdn2.unrealengine.com", "id.twitch.tv", "api.igdb.com", "images.igdb.com",
-      "api.rawg.io", "media.rawg.io"
+      "api.rawg.io", "media.rawg.io", "api.steampowered.com", "steamspy.com"
     };
     static constexpr std::array<std::string_view, 4> suffixes {".steamstatic.com", ".steamgriddb.com", ".epicgames.com", ".gog-statics.com"};
     if (std::ranges::find(exact, host) != exact.end()) {
@@ -370,7 +374,7 @@ namespace library::artwork {
     }
     for (const auto &item : doc["data"]) {
       if (item.is_object() && item.contains("id") && item["id"].is_number_unsigned()) {
-        out.push_back({item["id"].get<std::uint64_t>(), item.value("name", std::string {})});
+        out.push_back({item["id"].get<std::uint64_t>(), item.value("name", std::string {}), item.contains("release_date") && item["release_date"].is_number_integer() ? item["release_date"].get<std::int64_t>() : 0});
       }
     }
     return out;
@@ -433,13 +437,17 @@ namespace library::artwork {
     if (!bytes) {
       return std::nullopt;
     }
-    const auto img = decode(*bytes);
+    return store_bytes(ref.kind, *bytes, dir);
+  }
+
+  std::optional<fs::path> store_bytes(art_kind_e kind, std::string_view bytes, const fs::path &dir) {
+    const auto img = decode(bytes);
     if (!img) {
       return std::nullopt;
     }
     fs::path target;
     std::string encoded;
-    switch (ref.kind) {
+    switch (kind) {
       case art_kind_e::poster:
         target = dir / "poster.png";
         encoded = encode_png(fit(*img, 600, 900));
@@ -455,6 +463,10 @@ namespace library::artwork {
       case art_kind_e::icon:
         target = dir / "icon.png";
         encoded = encode_png(square(*img, 256));
+        break;
+      case art_kind_e::background:
+        target = dir / "background.jpg";
+        encoded = encode_jpeg(fit(*img, 2560, 1440), 85);
         break;
     }
     if (encoded.empty() || !write_atomic(target, encoded)) {

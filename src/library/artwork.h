@@ -84,6 +84,14 @@ namespace library::artwork {
   bool allowed_host(std::string_view host);
 
   /**
+   * @brief Percent-encode text for a URL query value.
+   *
+   * @param s Text.
+   * @return Encoded text.
+   */
+  std::string url_escape(const std::string &s);
+
+  /**
    * @brief Download a URL over HTTPS from an allowed host.
    *
    * No redirects are followed; the response must be 200 and at most @p max_bytes.
@@ -158,6 +166,7 @@ namespace library::artwork {
   struct sgdb_game_t {
     std::uint64_t id = 0;  ///< SteamGridDB game id.
     std::string name;  ///< Game name.
+    std::int64_t release_date = 0;  ///< Release date (Unix seconds), 0 when unknown.
   };
 
   /**
@@ -210,6 +219,18 @@ namespace library::artwork {
    * @return Written file, or nullopt when the image couldn't be loaded or isn't valid.
    */
   std::optional<std::filesystem::path> store(const art_ref_t &ref, const std::filesystem::path &dir);
+
+  /**
+   * @brief Validate, re-encode and store image bytes as one kind of artwork (see @ref store).
+   *
+   * Backgrounds are written as JPEG scaled to fit 2560x1440.
+   *
+   * @param kind Artwork kind.
+   * @param bytes PNG or JPEG image.
+   * @param dir Destination folder, created if needed.
+   * @return Written file, or nullopt when the bytes aren't a valid image.
+   */
+  std::optional<std::filesystem::path> store_bytes(art_kind_e kind, std::string_view bytes, const std::filesystem::path &dir);
 
   /**
    * @brief Make a square icon from a stored poster.

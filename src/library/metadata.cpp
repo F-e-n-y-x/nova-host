@@ -3,6 +3,7 @@
  * @brief Game details and artwork source settings, plus the IGDB and RAWG lookups used for non-Steam games.
  */
 // standard includes
+#include <charconv>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -21,6 +22,7 @@
 using namespace std::literals;
 
 namespace library::metadata {
+  using artwork::url_escape;
   namespace {
     constexpr std::size_t max_api_bytes = 2 * 1024 * 1024;  ///< Largest metadata API reply accepted.
     constexpr double match_threshold = 0.72;  ///< Minimum title similarity for an automatic match.
@@ -56,18 +58,6 @@ namespace library::metadata {
       return s;
     }
 
-    /**
-     * @brief Percent-encode a query value.
-     *
-     * @param s Input.
-     * @return Encoded string.
-     */
-    std::string url_escape(const std::string &s) {
-      char *e = curl_easy_escape(nullptr, s.c_str(), static_cast<int>(s.size()));
-      std::string out = e ? e : "";
-      curl_free(e);
-      return out;
-    }
 
     /**
      * @brief String field of a JSON object, or empty.
@@ -216,7 +206,8 @@ namespace library::metadata {
 
     constexpr std::string_view igdb_fields =
       "fields name,summary,first_release_date,genres.name,cover.image_id,artworks.image_id,screenshots.image_id,"
-      "involved_companies.developer,involved_companies.publisher,involved_companies.company.name;";  ///< Fields Nova asks IGDB for.
+      "involved_companies.developer,involved_companies.publisher,involved_companies.company.name,"
+      "external_games.uid,external_games.category,external_games.external_game_source;";  ///< Fields Nova asks IGDB for.
 
     /**
      * @brief IGDB image URL.
@@ -278,6 +269,7 @@ namespace library::metadata {
     s.igdb_client_id = l.igdb_client_id;
     s.igdb_client_secret = l.igdb_client_secret;
     s.rawg_api_key = l.rawg_api_key;
+    s.steam_web_api_key = l.steam_web_api_key;
     return s;
   }
 
@@ -401,6 +393,18 @@ namespace library::metadata {
           }
           if (game.publisher.empty() && ic.value("publisher", false)) {
             game.publisher = name;
+          }
+        }
+      }
+      if (g.contains("external_games") && g["external_games"].is_array()) {
+        for (const auto &ext : g["external_games"]) {
+          // Source/category 1 is Steam; uid is the app id as text.
+          const bool steam = ext.is_object() && (ext.value("external_game_source", 0) == 1 || ext.value("category", 0) == 1);
+          const auto uid = steam ? str(ext, "uid") : std::string {};
+          std::uint32_t appid = 0;
+          if (!uid.empty() && std::from_chars(uid.data(), uid.data() + uid.size(), appid).ec == std::errc {} && appid) {
+            game.steam_appid = appid;
+            break;
           }
         }
       }

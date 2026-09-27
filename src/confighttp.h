@@ -41,7 +41,7 @@ namespace confighttp {
   /**
    * @brief Config keys whose values are write-only secrets in the admin API.
    */
-  inline constexpr std::array<std::string_view, 3> secret_config_keys {"steamgriddb_api_key", "igdb_client_secret", "rawg_api_key"};
+  inline constexpr std::array<std::string_view, 4> secret_config_keys {"steamgriddb_api_key", "igdb_client_secret", "steam_web_api_key", "rawg_api_key"};
 
   /**
    * @brief Replace stored secret values with a placeholder before sending config to the web UI.

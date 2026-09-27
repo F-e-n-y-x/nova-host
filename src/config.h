@@ -416,6 +416,7 @@ namespace config {
     bool art_humor;  ///< Nova: allow SteamGridDB images marked as humor.
     std::string igdb_client_id;  ///< Nova: Twitch application client id for IGDB lookups (non-Steam games).
     std::string igdb_client_secret;  ///< Nova: Twitch application client secret for IGDB; never returned in plain text by /api/config.
+    std::string steam_web_api_key;  ///< Nova: optional Steam Web API key for the full Steam app list used when matching titles; never returned in plain text by /api/config.
     std::string rawg_api_key;  ///< Nova: optional RAWG API key, a fallback source of game details; never returned in plain text by /api/config.
   };
 

@@ -41,6 +41,7 @@ namespace library::metadata {
     std::string igdb_client_id;  ///< Twitch client id for IGDB.
     std::string igdb_client_secret;  ///< Twitch client secret for IGDB.
     std::string rawg_api_key;  ///< RAWG API key.
+    std::string steam_web_api_key;  ///< Steam Web API key (full Steam catalogue for matching).
 
     /**
      * @brief Whether IGDB lookups are possible.
@@ -124,6 +125,7 @@ namespace library::metadata {
     std::string developer;  ///< First developer company.
     std::string publisher;  ///< First publisher company.
     std::string cover_image_id;  ///< Cover image id.
+    std::uint32_t steam_appid = 0;  ///< Steam app id from IGDB's external games, 0 when unknown.
     std::vector<std::string> artwork_image_ids;  ///< Artwork (banner) image ids.
     std::vector<std::string> screenshot_image_ids;  ///< Screenshot image ids.
   };

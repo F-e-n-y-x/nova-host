@@ -611,6 +611,31 @@ supported on the current platform.
     </tr>
 </table>
 
+### steam_web_api_key
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Optional Steam Web API key (from steamcommunity.com/dev/apikey). With it Nova downloads the full list of
+            Steam games to match titles the store search no longer returns (delisted or renamed games). Without it, the
+            most-owned games from SteamSpy are used. The stored key is shown as ********.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            steam_web_api_key =
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            steam_web_api_key = 0123456789abcdefghijklmnopqrst
+            @endcode</td>
+    </tr>
+</table>
+
 ### rawg_api_key
 
 <table>
