@@ -5,22 +5,30 @@
  * with unsaved edits asks first; the page's route guard uses askDiscard() the same way,
  * so Back never drops edits silently.
  *
+ * Layout (Library design): hero banner with the poster overlapping it, name + source line and
+ * "Change artwork", then Name / Command / Working folder, before-and-after commands, and an
+ * "Advanced" disclosure (detached commands, behaviour, exit timeout, output log, variables).
+ *
  * Props: open, app (the app to edit, or null to add one), index (-1 to add),
- *        platform (host platform from /api/config).
+ *        platform (host platform from /api/config), libraryApi (host has library artwork search),
+ *        coverVersion (cache-busting counter for stored artwork).
  * Emits: saved(name) after the host accepts the change, close when it should close.
- * Exposes: isDirty (boolean), askDiscard(onDiscard).
+ * Exposes: isDirty (boolean), askDiscard(onDiscard), openArtwork().
  */
 import { computed, nextTick, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Search } from '@lucide/vue'
-import NvDialog from '../../components/NvDialog.vue'
+import { ImagePlus, Search, Trash2 } from '@lucide/vue'
+import NvSheet from '../../components/NvSheet.vue'
+import NvConfirmDialog from '../../components/NvConfirmDialog.vue'
+import NvArt from '../../components/NvArt.vue'
+import NvActionMenu from '../../components/NvActionMenu.vue'
 import NvButton from '../../components/NvButton.vue'
 import NvTextField from '../../components/NvTextField.vue'
 import NvNumberField from '../../components/NvNumberField.vue'
 import NvSwitch from '../../components/NvSwitch.vue'
 import NvSettingRow from '../../components/NvSettingRow.vue'
 import NvAlert from '../../components/NvAlert.vue'
-import AppSheet from './AppSheet.vue'
+import ArtworkPicker from '../library/ArtworkPicker.vue'
 import PathField from './PathField.vue'
 import PrepCommandList from './PrepCommandList.vue'
 import DetachedCommandList from './DetachedCommandList.vue'
@@ -29,14 +37,18 @@ import FileBrowserDialog from './FileBrowserDialog.vue'
 import CoverFinderDialog from './CoverFinderDialog.vue'
 import { postJson } from '../../api'
 import { buildPayload, formFromApp, formsDiffer, newAppForm, validateForm } from './appForm'
+import { appRunner, appSource, artUrl, candidateUrl, searchArtwork } from '../library/libraryApi'
+import { imageToPngBase64, uploadCoverData } from '../library/artworkUpload'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   app: { type: Object, default: null },
   index: { type: Number, default: -1 },
   platform: { type: String, default: '' },
+  libraryApi: { type: Boolean, default: false },
+  coverVersion: { type: Number, default: 0 },
 })
-const emit = defineEmits(['saved', 'close'])
+const emit = defineEmits(['saved', 'close', 'delete'])
 const { t } = useI18n()
 
 /** Field ids, in form order, for focusing the first error. */
@@ -50,6 +62,7 @@ const saveError = shallowRef('')
 const saving = shallowRef(false)
 const discard = reactive({ open: false, then: null })
 const coversOpen = shallowRef(false)
+const artwork = reactive({ open: false, loading: false, error: '', busy: false, candidates: {}, choice: { poster: 'none' } })
 const browser = ref({ open: false, type: 'any', title: '', start: '', apply: null })
 
 const isWindows = computed(() => props.platform === 'windows')
@@ -61,9 +74,22 @@ const errors = computed(() => Object.fromEntries(Object.entries(allErrors.value)
   .filter(([key]) => submitted.value || touched.has(key))))
 const coverPreview = computed(() => {
   if (isNew.value || !form.value['image-path']) return ''
-  return form.value['image-path'] === props.app?.['image-path'] ? `./api/covers/${props.index}` : ''
+  return form.value['image-path'] === props.app?.['image-path'] ? artUrl(props.app, props.index, 'poster', props.coverVersion) : ''
 })
-const coverInitial = computed(() => (form.value.name || '?').charAt(0).toUpperCase())
+const heroSrc = computed(() => (isNew.value ? '' : artUrl(props.app, props.index, 'hero', props.coverVersion)))
+const artTitle = computed(() => form.value.name || t('nova.apps.unnamed'))
+const metaLine = computed(() => {
+  const parts = []
+  const source = appSource(props.app || {})
+  parts.push(t(`nova.library.source_${source}`))
+  const runner = appRunner(form.value)
+  const runnerLabel = runner ? t(`nova.library.${runner}`) : ''
+  if (runnerLabel && !parts.includes(runnerLabel)) parts.push(runnerLabel)
+  return parts.join(' · ')
+})
+const footerMenu = computed(() => [
+  { id: 'delete', label: t('nova.library.menu_delete'), icon: Trash2, danger: true, onSelect: () => emit('delete') },
+])
 const runGlobalPrep = computed({
   get: () => !form.value['exclude-global-prep-cmd'],
   set: (v) => { form.value['exclude-global-prep-cmd'] = !v },
@@ -100,6 +126,64 @@ function askDiscard(onDiscard) {
 
 function requestClose() {
   askDiscard(() => emit('close'))
+}
+
+/** NvSheet close guard: ask first when there are unsaved edits. */
+function beforeClose() {
+  requestClose()
+  return false
+}
+
+/** Open the artwork sheet (poster candidates from the host's library search, or upload). */
+async function openArtwork() {
+  Object.assign(artwork, { open: true, error: '', candidates: {}, choice: { poster: 'none' }, loading: props.libraryApi })
+  if (!props.libraryApi) return
+  try {
+    artwork.candidates = (await searchArtwork({ q: form.value.name })).artwork
+  } catch {
+    artwork.error = t('nova.addgames.search_failed')
+  } finally {
+    artwork.loading = false
+  }
+}
+
+async function useArtwork() {
+  const id = artwork.choice.poster
+  if (!id || id === 'none') {
+    artwork.open = false
+    return
+  }
+  artwork.busy = true
+  artwork.error = ''
+  try {
+    const candidate = artwork.candidates.poster.find((c) => c.id === id)
+    const data = await imageToPngBase64(candidateUrl(candidate))
+    form.value['image-path'] = await uploadCoverData(`library_${id}`, data)
+    artwork.open = false
+  } catch {
+    artwork.error = t('nova.library.art_apply_failed')
+  } finally {
+    artwork.busy = false
+  }
+}
+
+async function onUpload(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  artwork.busy = true
+  artwork.error = ''
+  const url = URL.createObjectURL(file)
+  try {
+    const data = await imageToPngBase64(url)
+    form.value['image-path'] = await uploadCoverData(`upload_${Date.now()}`, data)
+    artwork.open = false
+  } catch {
+    artwork.error = t('nova.library.art_upload_failed')
+  } finally {
+    URL.revokeObjectURL(url)
+    artwork.busy = false
+  }
 }
 
 function confirmDiscard() {
@@ -160,39 +244,35 @@ async function save() {
   }
 }
 
-defineExpose({ isDirty, askDiscard })
+defineExpose({ isDirty, askDiscard, openArtwork })
 </script>
 
 <template>
-  <AppSheet :open="open" :title="title" @close-request="requestClose">
+  <NvSheet :open="open" :title="title" :before-close="beforeClose" body-class="nv-editor__body">
+    <div class="nv-editor__hero">
+      <NvArt class="nv-editor__hero-art" :title="artTitle" :src="heroSrc" kind="hero" :show-title="false" decorative />
+    </div>
+    <div class="nv-editor__ident">
+      <div class="nv-editor__poster">
+        <NvArt :title="artTitle" :src="coverPreview" kind="poster" :show-title="false" decorative />
+      </div>
+      <div class="nv-editor__ident-text">
+        <span class="nv-editor__name">{{ artTitle }}</span>
+        <span class="nv-editor__meta">{{ metaLine }}</span>
+      </div>
+      <NvButton size="sm" class="nv-editor__change-art" @click="openArtwork"><ImagePlus :size="16" aria-hidden="true" />{{ t('nova.library.change_artwork') }}</NvButton>
+    </div>
+
     <form id="nv-app-editor" class="nv-editor" novalidate @submit.prevent="save" @focusout="onFocusOut">
       <NvAlert v-if="saveError" variant="danger" live :title="t('nova.apps.save_failed_title')">{{ saveError }}</NvAlert>
 
-      <section class="nv-editor__section" aria-labelledby="nv-editor-basics">
-        <h3 id="nv-editor-basics" class="nv-editor__heading">{{ t('nova.apps.section_basics') }}</h3>
+      <section class="nv-editor__section" :aria-label="t('nova.apps.section_basics')">
         <NvTextField v-model="form.name" :label="t('nova.apps.field_name')" :hint="t('nova.apps.field_name_hint')"
                      :error="errors.name ? t(errors.name) : ''" :id="FIELD_IDS.name" required />
         <PathField v-model="form.cmd" :label="t('nova.apps.field_command')" :hint="t('nova.apps.field_command_hint')"
                    @browse="browseField('cmd', 'executable', 'nova.apps.browse_program')" />
         <PathField v-model="form['working-dir']" :label="t('nova.apps.field_working_dir')" :hint="t('nova.apps.field_working_dir_hint')"
                    @browse="browseField('working-dir', 'directory', 'nova.apps.browse_folder')" />
-      </section>
-
-      <section class="nv-editor__section" aria-labelledby="nv-editor-cover">
-        <h3 id="nv-editor-cover" class="nv-editor__heading">{{ t('nova.apps.section_cover') }}</h3>
-        <div class="nv-editor__cover">
-          <div class="nv-editor__cover-preview">
-            <img v-if="coverPreview" :src="coverPreview" alt="" class="nv-editor__cover-img" />
-            <span v-else aria-hidden="true">{{ coverInitial }}</span>
-          </div>
-          <div class="nv-editor__cover-fields">
-            <PathField v-model="form['image-path']" :label="t('nova.apps.field_image')" :hint="t('nova.apps.field_image_hint')"
-                       @browse="browseField('image-path', 'file', 'nova.apps.browse_file')" />
-            <div>
-              <NvButton size="sm" @click="coversOpen = true"><Search :size="16" aria-hidden="true" />{{ t('nova.apps.find_cover') }}</NvButton>
-            </div>
-          </div>
-        </div>
       </section>
 
       <section class="nv-editor__section" aria-labelledby="nv-editor-prep">
@@ -208,61 +288,162 @@ defineExpose({ isDirty, askDiscard })
         <PrepCommandList v-model="form['prep-cmd']" :platform="platform" @browse="browsePrep" />
       </section>
 
-      <section class="nv-editor__section" aria-labelledby="nv-editor-detached">
-        <h3 id="nv-editor-detached" class="nv-editor__heading">{{ t('nova.apps.section_detached') }}</h3>
-        <p class="nv-editor__desc">{{ t('nova.apps.detached_desc') }}</p>
-        <DetachedCommandList v-model="form.detached" @browse="browseDetached" />
-      </section>
+      <details class="nv-editor__advanced">
+        <summary>{{ t('nova.library.advanced') }}</summary>
+        <div class="nv-editor__advanced-body">
+          <section class="nv-editor__section" aria-labelledby="nv-editor-cover">
+            <h3 id="nv-editor-cover" class="nv-editor__heading">{{ t('nova.apps.section_cover') }}</h3>
+            <PathField v-model="form['image-path']" :label="t('nova.apps.field_image')" :hint="t('nova.apps.field_image_hint')"
+                       @browse="browseField('image-path', 'file', 'nova.apps.browse_file')" />
+            <div><NvButton size="sm" @click="coversOpen = true"><Search :size="16" aria-hidden="true" />{{ t('nova.apps.find_cover') }}</NvButton></div>
+          </section>
 
-      <section class="nv-editor__section" aria-labelledby="nv-editor-behaviour">
-        <h3 id="nv-editor-behaviour" class="nv-editor__heading">{{ t('nova.apps.section_behaviour') }}</h3>
-        <div class="nv-editor__group">
-          <NvSettingRow :label="t('nova.apps.field_auto_detach')" :description="t('nova.apps.field_auto_detach_hint')">
-            <template #default="{ labelId, descriptionId }">
-              <NvSwitch v-model="form['auto-detach']" :labelledby="labelId" :describedby="descriptionId" show-state />
-            </template>
-          </NvSettingRow>
-          <NvSettingRow :label="t('nova.apps.field_wait_all')" :description="t('nova.apps.field_wait_all_hint')">
-            <template #default="{ labelId, descriptionId }">
-              <NvSwitch v-model="form['wait-all']" :labelledby="labelId" :describedby="descriptionId" show-state />
-            </template>
-          </NvSettingRow>
-          <NvSettingRow v-if="isWindows" :label="t('nova.apps.field_elevated')" :description="t('nova.apps.field_elevated_hint')">
-            <template #default="{ labelId, descriptionId }">
-              <NvSwitch v-model="form.elevated" :labelledby="labelId" :describedby="descriptionId" show-state />
-            </template>
-          </NvSettingRow>
+          <section class="nv-editor__section" aria-labelledby="nv-editor-detached">
+            <h3 id="nv-editor-detached" class="nv-editor__heading">{{ t('nova.apps.section_detached') }}</h3>
+            <p class="nv-editor__desc">{{ t('nova.apps.detached_desc') }}</p>
+            <DetachedCommandList v-model="form.detached" @browse="browseDetached" />
+          </section>
+
+          <section class="nv-editor__section" aria-labelledby="nv-editor-behaviour">
+            <h3 id="nv-editor-behaviour" class="nv-editor__heading">{{ t('nova.apps.section_behaviour') }}</h3>
+            <div class="nv-editor__group">
+              <NvSettingRow :label="t('nova.apps.field_auto_detach')" :description="t('nova.apps.field_auto_detach_hint')">
+                <template #default="{ labelId, descriptionId }">
+                  <NvSwitch v-model="form['auto-detach']" :labelledby="labelId" :describedby="descriptionId" show-state />
+                </template>
+              </NvSettingRow>
+              <NvSettingRow :label="t('nova.apps.field_wait_all')" :description="t('nova.apps.field_wait_all_hint')">
+                <template #default="{ labelId, descriptionId }">
+                  <NvSwitch v-model="form['wait-all']" :labelledby="labelId" :describedby="descriptionId" show-state />
+                </template>
+              </NvSettingRow>
+              <NvSettingRow v-if="isWindows" :label="t('nova.apps.field_elevated')" :description="t('nova.apps.field_elevated_hint')">
+                <template #default="{ labelId, descriptionId }">
+                  <NvSwitch v-model="form.elevated" :labelledby="labelId" :describedby="descriptionId" show-state />
+                </template>
+              </NvSettingRow>
+            </div>
+            <NvNumberField v-model="form['exit-timeout']" :label="t('nova.apps.field_exit_timeout')" :unit="t('nova.apps.seconds')"
+                           :min="0" :hint="t('nova.apps.field_exit_timeout_hint')"
+                           :error="errors.exitTimeout ? t(errors.exitTimeout) : ''" :id="FIELD_IDS.exitTimeout" />
+            <PathField v-model="form.output" :label="t('nova.apps.field_output')" :hint="t('nova.apps.field_output_hint')"
+                       @browse="browseField('output', 'any', 'nova.apps.browse_file')" />
+          </section>
+
+          <EnvVarsReference :platform="platform" />
         </div>
-        <NvNumberField v-model="form['exit-timeout']" :label="t('nova.apps.field_exit_timeout')" :unit="t('nova.apps.seconds')"
-                       :min="0" :hint="t('nova.apps.field_exit_timeout_hint')"
-                       :error="errors.exitTimeout ? t(errors.exitTimeout) : ''" :id="FIELD_IDS.exitTimeout" />
-        <PathField v-model="form.output" :label="t('nova.apps.field_output')" :hint="t('nova.apps.field_output_hint')"
-                   @browse="browseField('output', 'any', 'nova.apps.browse_file')" />
-      </section>
-
-      <EnvVarsReference :platform="platform" />
+      </details>
     </form>
 
+    <template v-if="!isNew" #footer-start>
+      <NvActionMenu align="start" :label="t('nova.apps.more')" :items="footerMenu" />
+    </template>
     <template #footer>
       <NvButton @click="requestClose">{{ t('nova.common.cancel') }}</NvButton>
       <NvButton type="submit" form="nv-app-editor" variant="primary" :loading="saving">{{ t('nova.apps.save') }}</NvButton>
     </template>
-  </AppSheet>
+  </NvSheet>
 
-  <NvDialog v-model:open="discard.open" :title="t('nova.apps.discard_title')" :description="t('nova.apps.discard_desc')">
+  <NvSheet v-model:open="artwork.open" size="lg" :title="t('nova.library.artwork_title', { name: artTitle })"
+           :subtitle="t('nova.library.artwork_subtitle')">
+    <NvAlert v-if="artwork.error" variant="danger" live :title="t('nova.library.art_error_title')">{{ artwork.error }}</NvAlert>
+    <ArtworkPicker v-if="libraryApi" v-model="artwork.choice" :artwork="artwork.candidates" :title="artTitle"
+                   :kinds="['poster']" :loading="artwork.loading">
+      <template #footnote><p class="nv-editor__desc">{{ t('nova.library.art_other_kinds') }}</p></template>
+    </ArtworkPicker>
+    <label class="nv-editor__upload">
+      <ImagePlus :size="18" aria-hidden="true" />
+      <span>{{ t('nova.library.art_upload') }}</span>
+      <input type="file" accept="image/png,image/jpeg,image/webp" class="nv-visually-hidden" @change="onUpload" />
+    </label>
+    <div><NvButton size="sm" variant="ghost" @click="coversOpen = true"><Search :size="16" aria-hidden="true" />{{ t('nova.apps.find_cover') }}</NvButton></div>
     <template #footer>
-      <NvButton autofocus @click="discard.open = false">{{ t('nova.apps.keep_editing') }}</NvButton>
-      <NvButton variant="danger-solid" @click="confirmDiscard">{{ t('nova.apps.discard') }}</NvButton>
+      <NvButton @click="artwork.open = false">{{ t('nova.common.cancel') }}</NvButton>
+      <NvButton variant="primary" :loading="artwork.busy" @click="useArtwork">{{ t('nova.addgames.use_artwork') }}</NvButton>
     </template>
-  </NvDialog>
+  </NvSheet>
+
+  <NvConfirmDialog v-model:open="discard.open" :title="t('nova.apps.discard_title')" :description="t('nova.apps.discard_desc')"
+                   :confirm-label="t('nova.apps.discard')" @confirm="confirmDiscard" />
 
   <FileBrowserDialog v-model:open="browser.open" :type="browser.type" :title="browser.title" :start-path="browser.start"
                      @select="(p) => browser.apply?.(p)" />
-  <CoverFinderDialog v-model:open="coversOpen" :initial-query="form.name" @chosen="(p) => (form['image-path'] = p)" />
+  <CoverFinderDialog v-model:open="coversOpen" :initial-query="form.name" @chosen="(p) => { form['image-path'] = p; artwork.open = false }" />
 </template>
 
 <style>
 @layer components {
+  .nv-sheet__body.nv-editor__body {
+    padding-top: 0;
+  }
+
+  .nv-editor__hero {
+    flex-shrink: 0;
+    margin: 0 calc(-1 * var(--nv-space-6));
+    height: 160px;
+    overflow: hidden;
+  }
+
+  .nv-editor__ident,
+  .nv-editor {
+    flex-shrink: 0;
+  }
+
+  /* The panel is narrower than NvSettingRow's side-by-side breakpoint assumes. */
+  .nv-editor__group .nv-setting:not(.nv-setting--full) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--nv-space-4);
+  }
+
+  .nv-editor__hero-art {
+    width: 100%;
+    height: 100%;
+  }
+
+  .nv-editor__ident {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    gap: var(--nv-space-4);
+    margin-top: -56px;
+    margin-bottom: var(--nv-space-5);
+  }
+
+  .nv-editor__poster {
+    flex-shrink: 0;
+    width: 76px;
+    border: 2px solid var(--nv-panel);
+    border-radius: var(--nv-radius-md);
+    overflow: hidden;
+    box-shadow: var(--nv-shadow);
+  }
+
+  .nv-editor__ident-text {
+    flex-grow: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-bottom: var(--nv-space-1);
+  }
+
+  .nv-editor__name {
+    font-size: var(--nv-text-lg);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .nv-editor__meta,
+  .nv-editor__desc {
+    margin: 0;
+    color: var(--nv-text-secondary);
+    font-size: var(--nv-text-sm);
+  }
+
+  .nv-editor__change-art {
+    flex-shrink: 0;
+  }
+
   .nv-editor {
     display: flex;
     flex-direction: column;
@@ -276,14 +457,9 @@ defineExpose({ isDirty, askDiscard })
   }
 
   .nv-editor__heading {
+    margin: 0;
     font-size: var(--nv-text-md);
     font-weight: 600;
-  }
-
-  .nv-editor__desc {
-    margin: 0;
-    color: var(--nv-text-secondary);
-    font-size: var(--nv-text-sm);
   }
 
   .nv-editor__group {
@@ -292,51 +468,53 @@ defineExpose({ isDirty, askDiscard })
     background: var(--nv-raised);
   }
 
-  .nv-editor__cover {
-    display: flex;
-    gap: var(--nv-space-4);
-    align-items: flex-start;
+  .nv-editor__advanced {
+    border-top: 1px solid var(--nv-divider);
+    padding-top: var(--nv-space-3);
   }
 
-  .nv-editor__cover-preview {
-    flex-shrink: 0;
-    width: 96px;
-    aspect-ratio: 3 / 4;
+  .nv-editor__advanced > summary {
+    min-height: 36px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    border-radius: var(--nv-radius-md);
-    border: 1px solid var(--nv-border);
-    background: var(--nv-raised);
     color: var(--nv-text-secondary);
-    font-size: var(--nv-text-2xl);
-    font-weight: 600;
+    font-size: var(--nv-text-sm);
+    cursor: pointer;
   }
 
-  .nv-editor__cover-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .nv-editor__cover-fields {
-    flex-grow: 1;
-    min-width: 0;
+  .nv-editor__advanced-body {
     display: flex;
     flex-direction: column;
+    gap: var(--nv-space-6);
+    padding-top: var(--nv-space-4);
+  }
+
+  .nv-editor__upload {
+    display: flex;
+    align-items: center;
     gap: var(--nv-space-3);
+    min-height: 56px;
+    padding: 0 var(--nv-space-4);
+    border: 1px dashed var(--nv-border-strong);
+    border-radius: var(--nv-radius-lg);
+    color: var(--nv-text-secondary);
+    cursor: pointer;
+  }
+
+  .nv-editor__upload:focus-within {
+    outline: var(--nv-focus-width) solid var(--nv-focus);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 1023px) {
+    .nv-editor__hero {
+      margin: 0 calc(-1 * var(--nv-space-4));
+    }
   }
 
   @media (max-width: 600px) {
-    .nv-editor__group {
-    border-radius: var(--nv-radius-lg);
-    border: 1px solid var(--nv-border);
-    background: var(--nv-raised);
-  }
-
-  .nv-editor__cover {
-      flex-direction: column;
+    .nv-editor__ident {
+      flex-wrap: wrap;
     }
   }
 }

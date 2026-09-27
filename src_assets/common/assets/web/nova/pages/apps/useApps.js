@@ -10,11 +10,17 @@ import { apiFetch } from '../../../fetch_utils'
 /**
  * Applications page state.
  *
- * @returns {object} `apps` (useAsync result), `platform`, `total`, `coverUrl(app, index)`,
+ * @returns {object} `apps` (useAsync result), `platform`, `total`, `running` (index of the
+ *   running app, -1 when none or unknown), `coverVersion`, `coverUrl(app, index)`,
  *   `markCoverBroken(index)`, `refresh()`, `removeApp(index)`, `closeRunning()`.
  */
 export function useApps() {
-  const apps = useAsync(async () => (await fetchJson('./api/apps')).apps || [])
+  const running = shallowRef(-1)
+  const apps = useAsync(async () => {
+    const body = await fetchJson('./api/apps')
+    running.value = Number.isInteger(body.running_index) ? body.running_index : -1
+    return body.apps || []
+  })
   const platform = shallowRef('')
   const coverVersion = shallowRef(0)
   const brokenCovers = reactive(new Set())
@@ -48,5 +54,5 @@ export function useApps() {
     return postJson('./api/apps/close')
   }
 
-  return { apps, platform, total, coverUrl, markCoverBroken, refresh, removeApp, closeRunning }
+  return { apps, platform, total, running, coverVersion, coverUrl, markCoverBroken, refresh, removeApp, closeRunning }
 }
