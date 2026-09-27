@@ -111,11 +111,11 @@ TEST_F(DisplayFollowTest, MissingCommandIsSkipped) {
   EXPECT_TRUE(calls.empty());
 }
 
-TEST_F(DisplayFollowTest, MirrorLeavesDisplayAlone) {
+TEST_F(DisplayFollowTest, MirrorAlsoFollowsTheClientSize) {
   auto controller = make();
-  EXPECT_EQ(controller.on_stream_request("virtual", script, phone("mirror"), false, false), display_follow::outcome_e::skipped_mirror);
-  EXPECT_TRUE(calls.empty());
-  EXPECT_FALSE(controller.active());
+  EXPECT_EQ(controller.on_stream_request("virtual", script, phone("mirror"), false, false), display_follow::outcome_e::switched);
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_TRUE(controller.active());
 }
 
 TEST_F(DisplayFollowTest, LegacyPrepAndBusyAreSkipped) {

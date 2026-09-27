@@ -35,7 +35,7 @@ namespace display_follow {
     int width = 0;  ///< Requested width in pixels.
     int height = 0;  ///< Requested height in pixels.
     int fps = 0;  ///< Requested frame rate.
-    std::string mode;  ///< "virtual", "mirror", or empty for the default (virtual).
+    std::string mode;  ///< "virtual", "mirror", or empty for the default (virtual); both follow the client size, passed on as NOVA_DISPLAY_MODE.
     std::string app_name;  ///< App being launched or resumed, for logging.
     std::string client_name;  ///< Device name, for logging.
   };
@@ -48,7 +48,6 @@ namespace display_follow {
     failed,  ///< The command failed or timed out.
     skipped_off,  ///< The feature is disabled or no command is configured.
     skipped_missing_cmd,  ///< The configured command does not exist on disk.
-    skipped_mirror,  ///< The client asked for Mirror, so the desktop is left as it is.
     skipped_legacy,  ///< The app's own prep command already switches the display on launch.
     skipped_busy,  ///< Another client is already streaming; its mode is kept.
   };

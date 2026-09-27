@@ -75,10 +75,6 @@ namespace display_follow {
       BOOST_LOG(debug) << "Display follow: ["sv << cmd << "] not found, skipping"sv;
       return outcome_e::skipped_missing_cmd;
     }
-    if (request.mode == "mirror") {
-      BOOST_LOG(info) << "Display follow: "sv << request.client_name << " chose Mirror for ["sv << request.app_name << "], leaving the desktop as is"sv;
-      return outcome_e::skipped_mirror;
-    }
     if (legacy_prep) {
       BOOST_LOG(info) << "Display follow: ["sv << request.app_name << "] switches the display with its own prep command, skipping"sv;
       return outcome_e::skipped_legacy;
