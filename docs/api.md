@@ -105,3 +105,22 @@ curl -u user:pass -H "X-CSRF-Token: your_token_here" \
 
 ## GET /api/virtual-input/status
 @copydoc confighttp::getVirtualInputStatus()
+
+## Nova client API
+
+Paired devices (Nebula, or any client that sends its paired client certificate) call these on the
+GameStream HTTPS port (47984 by default). No web UI login is involved; each device only sees what its
+permissions allow, and devices without "launch apps" only see the running app.
+
+| Request | Reply |
+|---|---|
+| `GET /nova/v1/capabilities` | `{"nova": true, "version": "<version>", "features": ["apps", "art", "details", "display_mode", "bitrate", "sessions"]}` |
+| `GET /nova/v1/apps` | `[{"id", "index", "appid", "name", "running", "source", "has": {"poster", "hero", "logo", "icon"}, "last_played", "playtime_s", "mode_default"}]` — `id` is stable across reorders and renames of imported games; `appid` is the GameStream id to pass to `/launch`; `mode_default` is `"virtual"`, `"mirror"` or `null` |
+| `GET /nova/v1/apps/<id>/art/<poster\|hero\|logo\|icon>` | The image, with `ETag` and `Cache-Control: private, max-age=86400` (`304` on `If-None-Match`) |
+| `GET /nova/v1/apps/<id>/details` | `{"id", "description", "genres", "developer", "publisher", "release_date", "screenshots", "metacritic", "steam_appid", "last_played", "playtime_s", "last_session": {"device", "resolution", "fps", "codec"}}` — store fields come from Steam's `appdetails` API (fetched once, cached 30 days, HTML stripped); `screenshots` are host-proxied paths |
+| `GET /nova/v1/apps/<id>/screenshot/<n>` | A store screenshot, downloaded once and re-encoded to JPEG on the host |
+| `GET /bitrate?bitrate=<kbps>` | Changes the caller's running stream bitrate (Sunshine-Foundation compatible). XML `<root status_code="200"><bitrate>1</bitrate><applied_kbps>…</applied_kbps></root>`; `0` when the device isn't streaming. Clamped to 500 kbps – `max_bitrate` (or 800 Mbps) |
+
+`/launch` and `/resume` also accept `nova_display=virtual|mirror`. Nova exports it to prep commands as
+`NOVA_DISPLAY_MODE` (when neither the client nor the app's `nova-display-mode` sets one, the variable is unset).
+Playtime and last played come from `app_stats.json` next to the state file.

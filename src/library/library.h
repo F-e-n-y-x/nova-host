@@ -191,6 +191,7 @@ namespace library {
     std::filesystem::path hero;  ///< Stored hero or empty.
     std::filesystem::path logo;  ///< Stored logo or empty.
     std::filesystem::path icon;  ///< Stored icon or empty.
+    std::uint32_t steam_appid = 0;  ///< Matched Steam app id (0 = none), used for store details.
   };
 
   /**

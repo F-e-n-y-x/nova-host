@@ -14,6 +14,7 @@
 // local includes
 #include "config.h"
 #include "logging.h"
+#include "nova_client_api.h"
 
 using namespace std::literals;
 
@@ -362,6 +363,7 @@ namespace stream_stats {
     if (!config::sunshine.flags[config::flag::FRESH_STATE]) {
       save_history(history_path(), copy);
     }
+    nova_api::record_session(copy.front());
   }
 
   std::vector<snapshot_t> active_sessions(bool with_samples) {

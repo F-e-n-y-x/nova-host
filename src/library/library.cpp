@@ -25,6 +25,7 @@
 #include "src/boost_process_compat.h"
 #include "src/config.h"
 #include "src/logging.h"
+#include "src/nova_client_api.h"
 #include "src/platform/common.h"
 #include "src/process.h"
 #include "steam.h"
@@ -284,6 +285,7 @@ namespace library {
       e.working_dir = game.working_dir;
       e.source = to_string(game.source);
       e.source_id = game.source_id;
+      e.steam_appid = game.steam_appid;
       return e;
     }
 
@@ -514,9 +516,14 @@ namespace library {
 
         nlohmann::json imported = nlohmann::json::array();
         nlohmann::json duplicates = nlohmann::json::array();
+        std::vector<nlohmann::json> fetch_details;
         for (std::size_t i = 0; i < entries.size(); ++i) {
           (added[i] ? imported : duplicates).push_back({{"temp_id", temp_ids[i]}, {"name", entries[i].name}, {"has_poster", !entries[i].poster.empty()}});
+          if (added[i] && entries[i].steam_appid != 0) {
+            fetch_details.push_back({{"name", entries[i].name}, {"nova-steam-appid", entries[i].steam_appid}});
+          }
         }
+        nova_api::prefetch_details(std::move(fetch_details));
         std::scoped_lock lock(job->mutex);
         job->result = {{"imported", std::move(imported)}, {"duplicates", std::move(duplicates)}, {"failed", std::move(failed)}};
         job->state = "done";
@@ -987,6 +994,9 @@ namespace library {
         {"nova-source", e.source},
         {"nova-source-id", e.source_id},
       };
+      if (e.steam_appid != 0) {
+        app["nova-steam-appid"] = e.steam_appid;
+      }
       if (!e.working_dir.empty()) {
         app["working-dir"] = escape_dollars(e.working_dir);
       }
