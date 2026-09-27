@@ -75,7 +75,8 @@ namespace library::artwork {
   /**
    * @brief Whether Nova may download images or call APIs on a host.
    *
-   * Only Steam, SteamGridDB, Epic, GOG and Amazon image hosts are allowed.
+   * Only Steam, SteamGridDB, Epic, GOG and Amazon image hosts, plus the IGDB/Twitch and RAWG
+   * metadata APIs, are allowed.
    *
    * @param host Host name from a URL.
    * @return True when allowed.
@@ -93,6 +94,39 @@ namespace library::artwork {
    * @return Body, or nullopt on any failure.
    */
   std::optional<std::string> http_get(const std::string &url, std::size_t max_bytes, const std::string &bearer = {});
+
+  /**
+   * @brief HTTPS request to an allowed host with extra headers and an optional POST body.
+   *
+   * Same safety rules as @ref http_get (HTTPS only, allowlisted host, no redirects, size cap).
+   *
+   * @param url HTTPS URL.
+   * @param max_bytes Size limit.
+   * @param headers Extra request headers ("Name: value").
+   * @param post_body When set, the request is a POST with this body.
+   * @return Body, or nullopt on any failure or non-200 status.
+   */
+  std::optional<std::string> http_request(const std::string &url, std::size_t max_bytes, const std::vector<std::string> &headers, const std::optional<std::string> &post_body = std::nullopt);
+
+  /**
+   * @brief Filters applied to SteamGridDB image requests.
+   */
+  struct sgdb_options_t {
+    std::string poster_style;  ///< Grid style (alternate, blurred, white_logo, material, no_logo); empty = any.
+    std::string hero_style;  ///< Hero style (alternate, blurred, material); empty = any.
+    bool animated = false;  ///< Also accept animated images.
+    bool nsfw = false;  ///< Also accept images marked NSFW.
+    bool humor = false;  ///< Also accept images marked as humor.
+  };
+
+  /**
+   * @brief Query string for a SteamGridDB image endpoint.
+   *
+   * @param opts Filters.
+   * @param kind Artwork kind (styles only apply to posters and heroes; posters also ask for 600x900).
+   * @return Query without the leading '?', e.g. "types=static&nsfw=false&humor=false&dimensions=600x900".
+   */
+  std::string sgdb_query(const sgdb_options_t &opts, art_kind_e kind);
 
   /**
    * @brief A Steam store search hit.
@@ -159,9 +193,10 @@ namespace library::artwork {
    * @param api_key User's SteamGridDB API key.
    * @param game_id SteamGridDB game id (used when @p steam_appid is 0).
    * @param steam_appid Steam app id, preferred when known.
+   * @param opts Style and content filters.
    * @return Posters, heroes, logos and icons (a few of each).
    */
-  std::vector<art_ref_t> sgdb_artwork(const std::string &api_key, std::uint64_t game_id, std::uint32_t steam_appid);
+  std::vector<art_ref_t> sgdb_artwork(const std::string &api_key, std::uint64_t game_id, std::uint32_t steam_appid, const sgdb_options_t &opts = {});
 
   /**
    * @brief Load, validate and store one piece of artwork in a folder.

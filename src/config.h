@@ -403,6 +403,20 @@ namespace config {
   struct library_t {
     std::string steamgriddb_api_key;  ///< Nova: optional SteamGridDB API key for extra artwork; never returned in plain text by /api/config.
     std::string windows_exe_launcher;  ///< Nova: command template for detected Windows games; "{exe}" is replaced by the quoted path. Empty picks a default.
+    bool metadata_steam;  ///< Nova: fetch game details (description, genres, screenshots) from the Steam store.
+    std::string metadata_language;  ///< Nova: Steam store language for details, e.g. "english", "german", "schinese".
+    bool metadata_auto_fetch;  ///< Nova: fetch details and artwork automatically on import and on first request.
+    int metadata_ttl_days;  ///< Nova: days before cached details are fetched again (1-365).
+    std::string art_source_priority;  ///< Nova: comma-separated artwork sources, best first (steam, steamgriddb, lutris, igdb); sources left out are not used.
+    bool art_prefer_official;  ///< Nova: rank official store artwork (Steam) first, whatever the priority list says.
+    std::string art_steamgriddb_poster_style;  ///< Nova: SteamGridDB poster style filter (alternate, blurred, white_logo, material, no_logo); empty = any.
+    std::string art_steamgriddb_hero_style;  ///< Nova: SteamGridDB hero style filter (alternate, blurred, material); empty = any.
+    bool art_allow_animated;  ///< Nova: allow animated SteamGridDB images.
+    bool art_nsfw;  ///< Nova: allow SteamGridDB images marked NSFW.
+    bool art_humor;  ///< Nova: allow SteamGridDB images marked as humor.
+    std::string igdb_client_id;  ///< Nova: Twitch application client id for IGDB lookups (non-Steam games).
+    std::string igdb_client_secret;  ///< Nova: Twitch application client secret for IGDB; never returned in plain text by /api/config.
+    std::string rawg_api_key;  ///< Nova: optional RAWG API key, a fallback source of game details; never returned in plain text by /api/config.
   };
 
   extern video_t video;

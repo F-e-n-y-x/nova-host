@@ -37,6 +37,7 @@
 #include "library/library.h"
 #include "logging.h"
 #include "network.h"
+#include "library/metadata.h"
 #include "nova_client_api.h"
 #include "nvhttp.h"
 #include "platform/common.h"
@@ -2131,7 +2132,7 @@ namespace nvhttp {
     if (const auto it = all.find(app->value("name", std::string {})); it != all.end()) {
       stats = it->second;
     }
-    nova_json(response, SimpleWeb::StatusCode::success_ok, nova_api::details_reply(id, nova_api::store_details(*app, true), stats));
+    nova_json(response, SimpleWeb::StatusCode::success_ok, nova_api::details_reply(id, nova_api::store_details(*app, library::metadata::from_config().auto_fetch), stats));
   }
 
   /**

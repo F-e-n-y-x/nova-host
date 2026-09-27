@@ -519,8 +519,12 @@ namespace library {
         std::vector<nlohmann::json> fetch_details;
         for (std::size_t i = 0; i < entries.size(); ++i) {
           (added[i] ? imported : duplicates).push_back({{"temp_id", temp_ids[i]}, {"name", entries[i].name}, {"has_poster", !entries[i].poster.empty()}});
-          if (added[i] && entries[i].steam_appid != 0) {
-            fetch_details.push_back({{"name", entries[i].name}, {"nova-steam-appid", entries[i].steam_appid}});
+          if (added[i] && settings.meta.auto_fetch) {
+            nlohmann::json app = {{"name", entries[i].name}, {"cmd", entries[i].cmd}};
+            if (entries[i].steam_appid != 0) {
+              app["nova-steam-appid"] = entries[i].steam_appid;
+            }
+            fetch_details.push_back(std::move(app));
           }
         }
         nova_api::prefetch_details(std::move(fetch_details));
@@ -645,6 +649,69 @@ namespace library {
     return m;
   }
 
+  std::optional<std::string> start_task(const std::string &kind, task_fn_t work) {
+    auto job = create_job(kind, {});
+    if (!job) {
+      return std::nullopt;
+    }
+    std::thread([job, work = std::move(work)]() {
+      const task_progress_t progress = [job](std::size_t done, std::size_t total, const std::string &stage) {
+        std::scoped_lock lock(job->mutex);
+        job->done = done;
+        job->total = total;
+        job->stage = stage;
+      };
+      const std::function<bool()> cancelled = [job]() {
+        return job->cancel_requested.load();
+      };
+      try {
+        auto result = work(progress, cancelled);
+        if (job->cancel_requested.load()) {
+          mark_cancelled(job);
+          return;
+        }
+        std::scoped_lock lock(job->mutex);
+        job->result = std::move(result);
+        job->state = "done";
+        job->stage.clear();
+      } catch (const std::exception &e) {
+        BOOST_LOG(warning) << "Library "sv << job->kind << " job failed: "sv << e.what();
+        std::scoped_lock lock(job->mutex);
+        job->state = "failed";
+        job->error = e.what();
+      }
+    }).detach();
+    return job->id;
+  }
+
+  nlohmann::json load_apps(const fs::path &path) {
+    return read_apps(path);
+  }
+
+  std::optional<nlohmann::json> update_app(const fs::path &path, std::size_t index, const std::function<void(nlohmann::json &)> &edit) {
+    std::scoped_lock lock(apps_file_mutex());
+    auto tree = read_apps(path);
+    if (index >= tree["apps"].size() || !tree["apps"][index].is_object()) {
+      return std::nullopt;
+    }
+    edit(tree["apps"][index]);
+    const auto tmp = path.string() + ".tmp";
+    {
+      std::ofstream out(tmp, std::ios::trunc);
+      out << tree.dump(4);
+      if (!out) {
+        return std::nullopt;
+      }
+    }
+    std::error_code ec;
+    fs::rename(tmp, path, ec);
+    if (ec) {
+      return std::nullopt;
+    }
+    proc::refresh(path.string());
+    return tree["apps"][index];
+  }
+
   std::string resolve_windows_launcher(const std::string &configured) {
 #ifdef _WIN32
     return configured;
@@ -672,6 +739,7 @@ namespace library {
     s.covers_dir = platf::appdata() / "covers" / "library";
     s.steamgriddb_api_key = config::library.steamgriddb_api_key;
     s.windows_launcher = resolve_windows_launcher(config::library.windows_exe_launcher);
+    s.meta = metadata::from_config();
     return s;
   }
 
@@ -764,7 +832,7 @@ namespace library {
             return r.url == url;
           });
         };
-        if (game.steam_appid == 0) {
+        if (game.steam_appid == 0 && (settings.meta.steam || settings.meta.art_source_enabled("steam"))) {
           const auto query = title::clean(game.title);
           const auto hits = artwork::store_search(query);
           double best = 0.0;
@@ -780,14 +848,25 @@ namespace library {
           }
           std::this_thread::sleep_for(250ms);
         }
-        if (game.steam_appid) {
+        if (game.steam_appid && settings.meta.art_source_enabled("steam")) {
           for (auto &ref : steam::cdn_artwork(game.steam_appid)) {
             if (!has_url(ref.url)) {
               game.artwork.push_back(std::move(ref));
             }
           }
         }
-        if (!settings.steamgriddb_api_key.empty()) {
+        if (settings.meta.igdb_enabled() && settings.meta.art_source_enabled("igdb")) {
+          const auto query = title::clean(game.title);
+          for (const auto &hit : metadata::igdb_search(settings.meta, query)) {
+            if (title::similarity(query, hit.name) >= match_threshold) {
+              for (auto &ref : metadata::igdb_artwork(hit)) {
+                game.artwork.push_back(std::move(ref));
+              }
+              break;
+            }
+          }
+        }
+        if (!settings.steamgriddb_api_key.empty() && settings.meta.art_source_enabled("steamgriddb")) {
           std::uint64_t sgdb_id = 0;
           if (game.steam_appid == 0) {
             const auto query = title::clean(game.title);
@@ -798,11 +877,12 @@ namespace library {
               }
             }
           }
-          for (auto &ref : artwork::sgdb_artwork(settings.steamgriddb_api_key, sgdb_id, game.steam_appid)) {
+          for (auto &ref : artwork::sgdb_artwork(settings.steamgriddb_api_key, sgdb_id, game.steam_appid, settings.meta.sgdb)) {
             game.artwork.push_back(std::move(ref));
           }
         }
       }
+      metadata::rank_artwork(game.artwork, settings.meta);
       if (progress) {
         progress(i + 1, total);
       }
@@ -813,7 +893,7 @@ namespace library {
     nlohmann::json matches = nlohmann::json::array();
     detected_game_t probe;
     probe.title = query;
-    if (settings.online && appid == 0 && !query.empty()) {
+    if (settings.online && appid == 0 && !query.empty() && (settings.meta.steam || settings.meta.art_source_enabled("steam"))) {
       for (const auto &hit : artwork::store_search(query)) {
         if (matches.size() >= 8) {
           break;
@@ -827,9 +907,18 @@ namespace library {
     }
     if (appid) {
       probe.steam_appid = appid;
-      probe.artwork = steam::cdn_artwork(appid);
+      if (settings.meta.art_source_enabled("steam")) {
+        probe.artwork = steam::cdn_artwork(appid);
+      }
     }
-    if (settings.online && !settings.steamgriddb_api_key.empty()) {
+    if (settings.online && settings.meta.igdb_enabled() && settings.meta.art_source_enabled("igdb") && !query.empty()) {
+      const auto hits = metadata::igdb_search(settings.meta, query);
+      if (!hits.empty()) {
+        auto refs = metadata::igdb_artwork(hits.front());
+        probe.artwork.insert(probe.artwork.end(), refs.begin(), refs.end());
+      }
+    }
+    if (settings.online && !settings.steamgriddb_api_key.empty() && settings.meta.art_source_enabled("steamgriddb")) {
       std::uint64_t sgdb_id = 0;
       if (appid == 0 && !query.empty()) {
         const auto hits = artwork::sgdb_search(settings.steamgriddb_api_key, query);
@@ -837,9 +926,10 @@ namespace library {
           sgdb_id = hits.front().id;
         }
       }
-      auto refs = artwork::sgdb_artwork(settings.steamgriddb_api_key, sgdb_id, appid);
+      auto refs = artwork::sgdb_artwork(settings.steamgriddb_api_key, sgdb_id, appid, settings.meta.sgdb);
       probe.artwork.insert(probe.artwork.end(), refs.begin(), refs.end());
     }
+    metadata::rank_artwork(probe.artwork, settings.meta);
     auto described = game_to_json(probe, "search");
     return {{"matches", std::move(matches)}, {"artwork", std::move(described["artwork"])}};
   }

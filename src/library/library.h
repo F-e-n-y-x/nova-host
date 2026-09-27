@@ -19,6 +19,7 @@
 
 // local includes
 #include "library_types.h"
+#include "metadata.h"
 
 namespace library {
 
@@ -32,6 +33,7 @@ namespace library {
     std::string steamgriddb_api_key;  ///< Optional SteamGridDB key; enables SteamGridDB artwork.
     std::string windows_launcher;  ///< Resolved command template for Windows executables.
     bool online = true;  ///< Whether to call Steam/SteamGridDB (false in tests).
+    metadata::settings_t meta;  ///< Details/artwork source settings (priority, styles, keys).
   };
 
   /**
@@ -249,5 +251,43 @@ namespace library {
    * @return The mutex.
    */
   std::mutex &apps_file_mutex();
+
+  /**
+   * @brief Progress callback of a background task: items done, items total, current step.
+   */
+  using task_progress_t = std::function<void(std::size_t, std::size_t, const std::string &)>;
+
+  /**
+   * @brief Work of a background task. Returns the job result; call the second argument between
+   *        items and stop early when it returns true (the job then ends as "cancelled").
+   */
+  using task_fn_t = std::function<nlohmann::json(const task_progress_t &, const std::function<bool()> &)>;
+
+  /**
+   * @brief Run work as a library job (same status, progress and cancel endpoints as scans).
+   *
+   * @param kind Job kind shown in the status, e.g. "metadata".
+   * @param work Work to run on a background thread.
+   * @return Job id, or nullopt when too many jobs are running.
+   */
+  std::optional<std::string> start_task(const std::string &kind, task_fn_t work);
+
+  /**
+   * @brief Read apps.json.
+   *
+   * @param path apps.json path.
+   * @return Parsed tree, always with an "apps" array.
+   */
+  nlohmann::json load_apps(const std::filesystem::path &path);
+
+  /**
+   * @brief Change one app in apps.json under the apps file lock, then reload the app list.
+   *
+   * @param path apps.json path.
+   * @param index App index.
+   * @param edit Called with the app object; may modify it.
+   * @return The app after the edit, or nullopt when the index is out of range or the write failed.
+   */
+  std::optional<nlohmann::json> update_app(const std::filesystem::path &path, std::size_t index, const std::function<void(nlohmann::json &)> &edit);
 
 }  // namespace library

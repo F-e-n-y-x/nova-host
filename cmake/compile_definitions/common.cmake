@@ -157,6 +157,8 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/library/library.cpp"
         "${CMAKE_SOURCE_DIR}/src/library/library.h"
         "${CMAKE_SOURCE_DIR}/src/library/library_types.h"
+        "${CMAKE_SOURCE_DIR}/src/library/metadata.cpp"
+        "${CMAKE_SOURCE_DIR}/src/library/metadata.h"
         "${CMAKE_SOURCE_DIR}/src/library/lutris.cpp"
         "${CMAKE_SOURCE_DIR}/src/library/lutris.h"
         "${CMAKE_SOURCE_DIR}/src/library/steam.cpp"

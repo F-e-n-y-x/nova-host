@@ -8,6 +8,7 @@
 #include <chrono>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -16,6 +17,7 @@
 #include "file_handler.h"
 #include "library/artwork.h"
 #include "library/library.h"
+#include "library/metadata.h"
 #include "library/title.h"
 #include "logging.h"
 #include "nova_client_api.h"
@@ -182,16 +184,6 @@ namespace nova_api {
     }
 
     /**
-     * @brief Path of cached store details for a Steam app.
-     *
-     * @param appid Steam app id.
-     * @return JSON file path.
-     */
-    fs::path details_cache_path(std::uint32_t appid) {
-      return metadata_dir() / ("steam-" + std::to_string(appid) + ".json");
-    }
-
-    /**
      * @brief Path of the title → Steam app id match cache.
      *
      * @return JSON file path.
@@ -235,10 +227,14 @@ namespace nova_api {
       const auto query = library::title::clean(name);
       std::uint32_t best_id = 0;
       double best = 0.0;
+      std::string best_name;
       for (const auto &hit : library::artwork::store_search(query)) {
         if (const double s = library::title::similarity(query, hit.name); s > best) {
           best = s;
-          best_id = s >= 0.72 ? hit.appid : best_id;
+          if (s >= 0.72) {
+            best_id = hit.appid;
+            best_name = hit.name;
+          }
         }
       }
       std::lock_guard lock {data_mutex()};
@@ -248,7 +244,7 @@ namespace nova_api {
           matches = std::move(fresh);
         }
       }
-      matches[key] = {{"appid", best_id}, {"checked_at", unix_now()}};
+      matches[key] = {{"appid", best_id}, {"checked_at", unix_now()}, {"name", best_name}, {"confidence", best_id ? best : 0.0}};
       write_atomic(matches_path(), matches.dump(2));
       return best_id;
     }
@@ -592,6 +588,7 @@ namespace nova_api {
     }
     return nlohmann::json {
       {"appid", appid},
+      {"name", strip_html(str(d, "name"), 200)},
       {"description", description},
       {"genres", std::move(genres)},
       {"developer", first("developers")},
@@ -621,43 +618,305 @@ namespace nova_api {
     return 0;
   }
 
-  std::optional<nlohmann::json> store_details(const nlohmann::json &app, bool allow_network) {
-    auto appid = steam_appid_for(app);
-    const auto source = str(app, "nova-source");
-    // Title search only for real programs: skip desktops and command-less entries.
-    if (appid == 0 && !str(app, "cmd").empty() && !str(app, "name").starts_with("Desktop")) {
-      appid = resolve_appid_by_title(str(app, "name"), allow_network);
+  std::uint64_t igdb_id_for(const nlohmann::json &app) {
+    try {
+      if (app.contains("nova-igdb-id")) {
+        const auto &v = app["nova-igdb-id"];
+        if (v.is_number_unsigned() || v.is_number_integer()) {
+          return v.get<std::uint64_t>();
+        }
+        if (v.is_string()) {
+          return std::stoull(v.get<std::string>());
+        }
+      }
+    } catch (...) {
     }
-    if (appid == 0) {
-      return std::nullopt;
+    return 0;
+  }
+
+  namespace {
+    /**
+     * @brief Whether an app is a real program worth a title search (not a desktop or a command-less entry).
+     *
+     * @param app App object.
+     * @return True for programs.
+     */
+    bool is_program(const nlohmann::json &app) {
+      return !str(app, "cmd").empty() && !str(app, "name").starts_with("Desktop");
     }
-    const auto path = details_cache_path(appid);
-    {
-      std::lock_guard lock {data_mutex()};
-      if (const auto text = read_file(path)) {
-        const auto cached = nlohmann::json::parse(*text, nullptr, false);
-        if (cached.is_object() && unix_now() - cached.value("fetched_at", std::int64_t {0}) < DETAILS_TTL_S) {
-          if (cached.contains("data") && cached["data"].is_object()) {
-            return cached["data"];
+
+    /**
+     * @brief Stable file-name-safe key for a title.
+     *
+     * @param name Title.
+     * @return Hex hash of the normalized title, or empty.
+     */
+    std::string title_key(const std::string &name) {
+      const auto key = library::title::match_key(name);
+      return key.empty() ? std::string {} : std::format("{:016x}", fnv1a(key));
+    }
+
+    /**
+     * @brief Result of one fetch attempt: nullopt = network failure (don't cache); inner nullopt = source has no data.
+     */
+    using fetch_result_t = std::optional<std::optional<nlohmann::json>>;
+
+    /**
+     * @brief Cached details under @p cache_key, fetched with @p fetch when missing, stale or forced.
+     *
+     * Stale data is still returned when the network may not be used.
+     *
+     * @param cache_key File name (without extension) inside metadata_dir().
+     * @param source Source name stored with the data ("steam", "igdb", "rawg").
+     * @param ttl_s Freshness in seconds.
+     * @param allow_network Whether a fetch may run.
+     * @param force Fetch even when the cache is fresh.
+     * @param fetch Fetcher.
+     * @return Details, or nullopt.
+     */
+    std::optional<nlohmann::json> cached_or_fetch(const std::string &cache_key, const char *source, std::int64_t ttl_s, bool allow_network, bool force, const std::function<fetch_result_t()> &fetch) {
+      const auto path = metadata_dir() / (cache_key + ".json");
+      std::optional<nlohmann::json> stale;
+      {
+        std::lock_guard lock {data_mutex()};
+        if (const auto text = read_file(path)) {
+          const auto cached = nlohmann::json::parse(*text, nullptr, false);
+          if (cached.is_object()) {
+            const bool fresh = unix_now() - cached.value("fetched_at", std::int64_t {0}) < ttl_s;
+            std::optional<nlohmann::json> data;
+            if (cached.contains("data") && cached["data"].is_object()) {
+              data = cached["data"];
+            }
+            if (fresh && !force) {
+              return data;  // may be a remembered "no data"
+            }
+            stale = data;
           }
-          return std::nullopt;  // remembered "no data"
+        }
+      }
+      if (!allow_network) {
+        return stale;
+      }
+      std::lock_guard fetch_lock {fetch_mutex()};
+      const auto result = fetch();
+      if (!result) {
+        BOOST_LOG(info) << "Nova: couldn't fetch "sv << source << " details ("sv << cache_key << ')';
+        return stale;  // network failure: keep what we had, try again next time
+      }
+      auto data = *result;
+      const auto now = unix_now();
+      if (data) {
+        (*data)["source"] = source;
+        (*data)["cache_key"] = cache_key;
+        (*data)["fetched_at"] = now;
+      }
+      nlohmann::json cached = {{"fetched_at", now}, {"source", source}, {"data", data ? *data : nlohmann::json(nullptr)}};
+      std::lock_guard lock {data_mutex()};
+      write_atomic(path, cached.dump(2));
+      return data;
+    }
+
+    /**
+     * @brief Best IGDB title match.
+     *
+     * @param meta Settings.
+     * @param name Title.
+     * @return Game and similarity, or nullopt.
+     */
+    std::optional<std::pair<library::metadata::igdb_game_t, double>> igdb_best(const library::metadata::settings_t &meta, const std::string &name) {
+      const auto query = library::title::clean(name);
+      std::optional<std::pair<library::metadata::igdb_game_t, double>> best;
+      for (auto &game : library::metadata::igdb_search(meta, query)) {
+        const double s = library::title::similarity(query, game.name);
+        if (s >= 0.72 && (!best || s > best->second)) {
+          best = std::pair {std::move(game), s};
+        }
+      }
+      return best;
+    }
+  }  // namespace
+
+  std::optional<nlohmann::json> store_details(const nlohmann::json &app, bool allow_network, bool force) {
+    const auto meta = library::metadata::from_config();
+    const std::int64_t ttl = static_cast<std::int64_t>(meta.ttl_days) * 24 * 3600;
+    const auto name = str(app, "name");
+    const auto igdb_override = igdb_id_for(app);
+
+    if (meta.steam && igdb_override == 0) {
+      auto appid = steam_appid_for(app);
+      if (appid == 0 && is_program(app)) {
+        appid = resolve_appid_by_title(name, allow_network || force);
+      }
+      if (appid != 0) {
+        const auto key = "steam-" + std::to_string(appid) + "-" + meta.language;
+        auto data = cached_or_fetch(key, "steam", ttl, allow_network || force, force, [appid, &meta]() -> fetch_result_t {
+          const auto body = library::artwork::http_get("https://store.steampowered.com/api/appdetails?appids=" + std::to_string(appid) + "&l=" + meta.language, 4 * 1024 * 1024);
+          if (!body) {
+            return std::nullopt;
+          }
+          return parse_steam_appdetails(*body, appid);
+        });
+        if (data) {
+          return data;
         }
       }
     }
-    if (!allow_network) {
-      return std::nullopt;
+
+    if (meta.igdb_enabled() && (igdb_override != 0 || is_program(app))) {
+      const auto key = igdb_override ? "igdb-" + std::to_string(igdb_override) : "igdb-t-" + title_key(name);
+      if (igdb_override || key != "igdb-t-") {
+        auto data = cached_or_fetch(key, "igdb", ttl, allow_network || force, force, [&meta, igdb_override, &name]() -> fetch_result_t {
+          if (igdb_override) {
+            const auto game = library::metadata::igdb_game(meta, igdb_override);
+            if (!game) {
+              return std::optional<nlohmann::json> {};
+            }
+            auto d = library::metadata::igdb_details(*game);
+            d["name"] = game->name;
+            d["match_confidence"] = 1.0;
+            return d;
+          }
+          const auto best = igdb_best(meta, name);
+          if (!best) {
+            return std::optional<nlohmann::json> {};
+          }
+          auto d = library::metadata::igdb_details(best->first);
+          d["name"] = best->first.name;
+          d["match_confidence"] = best->second;
+          return d;
+        });
+        if (data) {
+          return data;
+        }
+      }
     }
-    std::lock_guard fetch_lock {fetch_mutex()};
-    const auto body = library::artwork::http_get("https://store.steampowered.com/api/appdetails?appids=" + std::to_string(appid) + "&l=english", 4 * 1024 * 1024);
-    if (!body) {
-      BOOST_LOG(info) << "Nova: couldn't fetch store details for Steam app "sv << appid;
-      return std::nullopt;  // network failure: try again next time, don't cache
+
+    if (!meta.rawg_api_key.empty() && is_program(app)) {
+      if (const auto tk = title_key(name); !tk.empty()) {
+        return cached_or_fetch("rawg-t-" + tk, "rawg", ttl, allow_network || force, force, [&meta, &name]() -> fetch_result_t {
+          return library::metadata::rawg_details(meta, name);
+        });
+      }
     }
-    auto data = parse_steam_appdetails(*body, appid);
-    nlohmann::json cached = {{"fetched_at", unix_now()}, {"data", data ? *data : nlohmann::json(nullptr)}};
+    return std::nullopt;
+  }
+
+  nlohmann::json metadata_status(const nlohmann::json &app) {
+    const auto meta = library::metadata::from_config();
+    const auto name = str(app, "name");
+    nlohmann::json out = {
+      {"name", name},
+      {"override", {{"steam_appid", app.contains("nova-steam-appid") && str(app, "nova-source") != "steam" ? nlohmann::json(steam_appid_for(app)) : nlohmann::json(nullptr)}, {"igdb_id", igdb_id_for(app) ? nlohmann::json(igdb_id_for(app)) : nlohmann::json(nullptr)}}},
+      {"match", nullptr},
+      {"details", nullptr},
+    };
+    auto appid = steam_appid_for(app);
+    double confidence = appid ? 1.0 : 0.0;
+    std::string matched_name;
+    if (appid == 0 && is_program(app)) {
+      std::lock_guard lock {data_mutex()};
+      if (const auto text = read_file(matches_path())) {
+        const auto matches = nlohmann::json::parse(*text, nullptr, false);
+        const auto key = library::title::match_key(name);
+        if (matches.is_object() && matches.contains(key) && matches[key].is_object()) {
+          appid = matches[key].value("appid", 0U);
+          confidence = matches[key].value("confidence", appid ? 0.72 : 0.0);
+          matched_name = matches[key].value("name", std::string {});
+        }
+      }
+    }
+    const auto details = store_details(app, false);
+    if (details) {
+      const auto source = details->value("source", std::string {});
+      out["details"] = {{"source", source}, {"fetched_at", details->value("fetched_at", std::int64_t {0})}, {"has_description", !details->value("description", std::string {}).empty()}};
+      if (source == "igdb") {
+        out["match"] = {{"source", "igdb"}, {"id", details->value("igdb_id", std::uint64_t {0})}, {"name", details->value("name", std::string {})}, {"confidence", details->value("match_confidence", 1.0)}};
+        return out;
+      }
+      if (source == "rawg") {
+        out["match"] = {{"source", "rawg"}, {"id", details->value("rawg_id", std::uint64_t {0})}, {"name", name}, {"confidence", 0.72}};
+        return out;
+      }
+      if (matched_name.empty()) {
+        matched_name = details->value("name", std::string {});
+      }
+    }
+    if (appid && meta.steam) {
+      out["match"] = {{"source", "steam"}, {"id", appid}, {"name", matched_name}, {"confidence", confidence}};
+    }
+    return out;
+  }
+
+  void forget_app_metadata(const nlohmann::json &app) {
+    const auto name = str(app, "name");
     std::lock_guard lock {data_mutex()};
-    write_atomic(path, cached.dump(2));
-    return data;
+    if (const auto text = read_file(matches_path())) {
+      auto matches = nlohmann::json::parse(*text, nullptr, false);
+      if (matches.is_object()) {
+        matches.erase(library::title::match_key(name));
+        write_atomic(matches_path(), matches.dump(2));
+      }
+    }
+    std::error_code ec;
+    std::vector<std::string> stems;  // exact cache keys; files are "<key>.json" and "<key>-shots/"
+    if (const auto tk = title_key(name); !tk.empty()) {
+      stems.push_back("igdb-t-" + tk);
+      stems.push_back("rawg-t-" + tk);
+    }
+    if (const auto id = igdb_id_for(app)) {
+      stems.push_back("igdb-" + std::to_string(id));
+    }
+    const auto steam_prefix = steam_appid_for(app) ? "steam-" + std::to_string(steam_appid_for(app)) + "-" : std::string {};
+    for (const auto &entry : fs::directory_iterator(metadata_dir(), ec)) {
+      const auto file = entry.path().filename().string();
+      const bool exact = std::ranges::any_of(stems, [&file](const std::string &stem) {
+        return file == stem + ".json" || file == stem + "-shots";
+      });
+      if (exact || (!steam_prefix.empty() && file.starts_with(steam_prefix))) {
+        fs::remove_all(entry.path(), ec);
+      }
+    }
+  }
+
+  std::size_t clear_metadata_cache() {
+    std::lock_guard lock {data_mutex()};
+    std::error_code ec;
+    std::size_t removed = 0;
+    for (const auto &entry : fs::directory_iterator(metadata_dir(), ec)) {
+      if (entry.path().filename() == "refresh.json") {
+        continue;
+      }
+      removed += fs::remove_all(entry.path(), ec) > 0 ? 1 : 0;
+    }
+    return removed;
+  }
+
+  void record_refresh(std::size_t matched, std::size_t total) {
+    std::lock_guard lock {data_mutex()};
+    write_atomic(metadata_dir() / "refresh.json", nlohmann::json {{"last_refresh_at", unix_now()}, {"matched", matched}, {"total", total}}.dump(2));
+  }
+
+  nlohmann::json metadata_summary(const nlohmann::json &apps) {
+    std::size_t total = 0;
+    std::size_t matched = 0;
+    if (apps.is_array()) {
+      for (const auto &app : apps) {
+        if (!app.is_object() || !is_program(app)) {
+          continue;
+        }
+        ++total;
+        matched += store_details(app, false) ? 1 : 0;
+      }
+    }
+    nlohmann::json out = {{"total", total}, {"matched", matched}, {"last_refresh_at", nullptr}};
+    std::lock_guard lock {data_mutex()};
+    if (const auto text = read_file(metadata_dir() / "refresh.json")) {
+      const auto j = nlohmann::json::parse(*text, nullptr, false);
+      if (j.is_object() && j.contains("last_refresh_at")) {
+        out["last_refresh_at"] = j["last_refresh_at"];
+      }
+    }
+    return out;
   }
 
   nlohmann::json details_reply(const std::string &id, const std::optional<nlohmann::json> &store, const std::optional<app_stats_t> &stats) {
@@ -681,7 +940,12 @@ namespace nova_api {
           out[field] = (*store)[field];
         }
       }
-      out["steam_appid"] = store->value("appid", 0U);
+      if (store->value("source", std::string {"steam"}) == "steam" && store->contains("appid")) {
+        out["steam_appid"] = store->value("appid", 0U);
+      }
+      if (store->contains("fetched_at")) {
+        out["metadata_updated_at"] = (*store)["fetched_at"];
+      }
       if (store->contains("screenshot_urls") && (*store)["screenshot_urls"].is_array()) {
         for (std::size_t n = 0; n < (*store)["screenshot_urls"].size(); ++n) {
           out["screenshots"].push_back("/nova/v1/apps/" + id + "/screenshot/" + std::to_string(n));
@@ -706,8 +970,11 @@ namespace nova_api {
     if (!store || !store->contains("screenshot_urls") || n >= (*store)["screenshot_urls"].size()) {
       return std::nullopt;
     }
-    const auto appid = store->value("appid", 0U);
-    const auto path = metadata_dir() / ("steam-" + std::to_string(appid)) / ("shot-" + std::to_string(n) + ".jpg");
+    auto dir_key = store->value("cache_key", std::string {});
+    if (dir_key.empty()) {
+      dir_key = "steam-" + std::to_string(store->value("appid", 0U));
+    }
+    const auto path = metadata_dir() / (dir_key + "-shots") / ("shot-" + std::to_string(n) + ".jpg");
     std::error_code ec;
     if (fs::exists(path, ec)) {
       return path;

@@ -312,6 +312,328 @@ supported on the current platform.
     </tr>
 </table>
 
+### metadata_steam
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Fetch game details (description, genres, developer, release date, screenshots, Metacritic score) from the Steam store for the game library (Nova). Games are matched by their Steam app id, or by title.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            metadata_steam = enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            metadata_steam = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### metadata_language
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Language of Steam store details (Nova), as the store's `l=` value, e.g. `english`, `german`, `french`, `schinese`, `japanese`. Letters only.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            metadata_language = english
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            metadata_language = german
+            @endcode</td>
+    </tr>
+</table>
+
+### metadata_auto_fetch
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Fetch game details and artwork automatically when games are imported and the first time a device opens a game (Nova). When disabled, details are only fetched when you choose "Refresh" in the Web UI.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            metadata_auto_fetch = enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            metadata_auto_fetch = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### metadata_ttl_days
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Days before cached game details are fetched again (Nova), from 1 to 365.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            metadata_ttl_days = 30
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            metadata_ttl_days = 7
+            @endcode</td>
+    </tr>
+</table>
+
+### art_source_priority
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Artwork sources for the game library, best first (Nova): `steam` (official store art), `steamgriddb` (needs `steamgriddb_api_key`), `lutris` (art Lutris already downloaded) and `igdb` (needs the IGDB credentials). Sources left out are not used. Images you upload are always kept.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            art_source_priority = steam,steamgriddb,lutris,igdb
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            art_source_priority = steamgriddb,steam,igdb
+            @endcode</td>
+    </tr>
+</table>
+
+### art_prefer_official
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Rank official Steam store artwork first, whatever `art_source_priority` says (Nova).
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            art_prefer_official = enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            art_prefer_official = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### art_steamgriddb_poster_style
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Only offer SteamGridDB posters in this style (Nova): `alternate`, `blurred`, `white_logo`, `material` or `no_logo`. Empty offers any style.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            art_steamgriddb_poster_style =
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            art_steamgriddb_poster_style = material
+            @endcode</td>
+    </tr>
+</table>
+
+### art_steamgriddb_hero_style
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Only offer SteamGridDB heroes (banners) in this style (Nova): `alternate`, `blurred` or `material`. Empty offers any style.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            art_steamgriddb_hero_style =
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            art_steamgriddb_hero_style = blurred
+            @endcode</td>
+    </tr>
+</table>
+
+### art_allow_animated
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Also offer animated SteamGridDB images (Nova). Most clients only show the first frame.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            art_allow_animated = disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            art_allow_animated = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### art_nsfw
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Also offer SteamGridDB images that are marked NSFW (Nova).
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            art_nsfw = disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            art_nsfw = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### art_humor
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Also offer SteamGridDB images that are marked as humor (Nova).
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            art_humor = disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            art_humor = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### igdb_client_id
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Client id of a [Twitch developer application](https://dev.twitch.tv/console/apps) (Nova). Together with `igdb_client_secret` it enables [IGDB](https://api-docs.igdb.com/) details and artwork for games that are not on Steam.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            igdb_client_id =
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            igdb_client_id = abcdefghijklmnopqrstuvwxyz0123
+            @endcode</td>
+    </tr>
+</table>
+
+### igdb_client_secret
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Client secret of the Twitch application used for IGDB (Nova). The Web UI never shows the stored secret; it shows `********` instead.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            igdb_client_secret =
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            igdb_client_secret = 0123456789abcdefghijklmnopqrst
+            @endcode</td>
+    </tr>
+</table>
+
+### rawg_api_key
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Optional [RAWG](https://rawg.io/apidocs) API key (Nova), a fallback source of game details when Steam and IGDB have none. The Web UI never shows the stored key; it shows `********` instead.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            rawg_api_key =
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            rawg_api_key = 0123456789abcdef0123456789abcdef
+            @endcode</td>
+    </tr>
+</table>
+
 ### windows_exe_launcher
 
 <table>
