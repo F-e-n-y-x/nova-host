@@ -1463,6 +1463,7 @@ namespace confighttp {
         return;
       }
 
+      BOOST_LOG(info) << "Ended the stream from device ["sv << nvhttp::get_client_name_by_uuid(uuid) << "] ("sv << uuid << ')';
       rtsp_stream::terminate_sessions_by_cert(cert);
 
       nlohmann::json output_tree;
