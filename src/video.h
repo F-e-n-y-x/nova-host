@@ -728,6 +728,30 @@ namespace video {
   int probe_encoders();
 
   /**
+   * @brief Snapshot of the encoder chosen by the most recent successful probe.
+   */
+  struct encoder_summary_t {
+    bool probed = false;  ///< Whether a probe has selected an encoder.
+    std::string name;  ///< Encoder family name, e.g. `nvenc` or `software`.
+    std::string h264_codec;  ///< Backend codec name for H.264, empty when unsupported.
+    std::string hevc_codec;  ///< Backend codec name for HEVC, empty when unsupported.
+    std::string av1_codec;  ///< Backend codec name for AV1, empty when unsupported.
+    bool hevc_main10 = false;  ///< Whether HEVC Main10 (10-bit/HDR) passed the probe.
+    bool av1_main10 = false;  ///< Whether AV1 10-bit (HDR) passed the probe.
+    std::array<bool, 3> yuv444 = {};  ///< YUV 4:4:4 support for H.264, HEVC and AV1.
+    platf::mem_type_e mem_type = platf::mem_type_e::unknown;  ///< Memory type the encoder consumes.
+  };
+
+  /**
+   * @brief Return the encoder selected by the most recent probe.
+   *
+   * Safe to call from any thread.
+   *
+   * @return Copy of the summary; `probed` is false before the first successful probe.
+   */
+  encoder_summary_t get_encoder_summary();
+
+  /**
    * @brief Whether the last probe rejected an encoder only for want of a display.
    *
    * Distinguishes "this GPU cannot encode" from "we asked before anything existed

@@ -8,6 +8,7 @@
 
 // standard includes
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <filesystem>
 #include <format>
@@ -44,6 +45,7 @@
 #include "display_device.h"
 #include "file_handler.h"
 #include "globals.h"
+#include "host_info.h"
 #include "httpcommon.h"
 #include "input.h"
 #include "logging.h"
@@ -2595,6 +2597,142 @@ namespace confighttp {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Nova host facts: /api/host/info, /api/displays, /api/audio/sinks, /api/preview,
+  // /api/health. Kept together so the sessions/telemetry routes can live apart.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * @brief Describe the host: name, versions, GPUs, encoder and capture method.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/host/info|:| GET|:| null}
+   */
+  void getHostInfo(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    send_response(response, host_info::host_info_json());
+  }
+
+  /**
+   * @brief List the display outputs Nova can capture.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Each entry has `name`, `index` (legacy numeric `output_name`), `connected`, `primary`,
+   * `x`/`y`, `width`/`height` (current scanout), `mode_width`/`mode_height`, `refresh_hz`
+   * and `configured`.
+   *
+   * @api_examples{/api/displays|:| GET|:| null}
+   */
+  void getDisplays(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    nlohmann::json output_tree;
+    output_tree["displays"] = host_info::displays_json(host_info::cached_outputs());
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief List the sound server's output devices.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Nova's own per-stream sinks are marked `virtual`; `configured` echoes `audio_sink`.
+   *
+   * @api_examples{/api/audio/sinks|:| GET|:| null}
+   */
+  void getAudioSinks(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    std::vector<platf::sink_desc_t> sinks;
+    if (auto control = platf::audio_control()) {
+      sinks = control->list_sinks();
+    }
+    auto output_tree = host_info::audio_sinks_json(sinks, config::audio.sink);
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Return a JPEG snapshot of a display.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Query: `display` (output name, optional) and `w` (width, 160–1280, default 640).
+   * Replies 429 when more than two captures are requested per second and 503 when the
+   * desktop can't be captured without prompting. Never cached by the browser.
+   *
+   * @api_examples{/api/preview?display=HDMI-0&w=640|:| GET|:| null}
+   */
+  void getPreview(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    std::string display;
+    int width = 640;
+    for (const auto &[name, value] : request->parse_query_string()) {
+      if (name == "display") {
+        display = value;
+      } else if (name == "w") {
+        std::from_chars(value.data(), value.data() + value.size(), width);
+      }
+    }
+    if (display.size() > 64 || !std::ranges::all_of(display, [](char c) {
+          return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.' || c == ':';
+        })) {
+      bad_request(response, request, "Invalid display name");
+      return;
+    }
+
+    const auto result = host_info::preview_jpeg(display, width);
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("X-Frame-Options", "DENY");
+    headers.emplace("Content-Security-Policy", "frame-ancestors 'none';");
+    headers.emplace("Cache-Control", "no-store");
+    if (result.jpeg.empty()) {
+      nlohmann::json tree;
+      tree["status"] = false;
+      tree["status_code"] = result.http_status;
+      tree["error"] = result.error;
+      headers.emplace("Content-Type", "application/json");
+      response->write(static_cast<SimpleWeb::StatusCode>(result.http_status), tree.dump(), headers);
+      return;
+    }
+    headers.emplace("Content-Type", "image/jpeg");
+    response->write(SimpleWeb::StatusCode::success_ok, result.jpeg, headers);
+  }
+
+  /**
+   * @brief Run the setup-doctor checks.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Each check is `{id, status: ok|warn|error, title, detail, fix: null|{kind, value}}`
+   * with `kind` one of `command`, `setting` or `doc`. Results are cached for ten seconds.
+   *
+   * @api_examples{/api/health|:| GET|:| null}
+   */
+  void getHealth(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    nlohmann::json output_tree;
+    output_tree["checks"] = host_info::health_to_json(host_info::cached_health());
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
   /**
    * @brief Start the HTTPS configuration server.
    */
@@ -2661,6 +2799,12 @@ namespace confighttp {
     server.resource["^/api/virtual-input/license$"]["GET"] = getVirtualInputLicense;
     server.resource["^/api/virtual-input/license$"]["POST"] = updateVirtualInputLicense;
     server.resource["^/api/virtual-input/status$"]["GET"] = getVirtualInputStatus;
+    // Nova host facts
+    server.resource["^/api/host/info$"]["GET"] = getHostInfo;
+    server.resource["^/api/displays$"]["GET"] = getDisplays;
+    server.resource["^/api/audio/sinks$"]["GET"] = getAudioSinks;
+    server.resource["^/api/preview$"]["GET"] = getPreview;
+    server.resource["^/api/health$"]["GET"] = getHealth;
 
     // static/dynamic resources
     server.resource["^/images/sunshine.ico$"]["GET"] = getFaviconImage;

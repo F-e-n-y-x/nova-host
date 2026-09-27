@@ -527,6 +527,40 @@ namespace platf {
        *
        * @return PulseAudio name of the current default sink, or an empty string.
        */
+      /**
+       * @brief List PulseAudio/PipeWire sinks without creating virtual ones.
+       *
+       * @return Sinks with Nova's own `sink-sunshine-*` sinks marked virtual.
+       */
+      std::vector<sink_desc_t> list_sinks() override {
+        std::vector<sink_desc_t> sinks;
+        auto alarm = safe::make_alarm<int>();
+
+        cb_t<pa_sink_info *> f = [&](ctx_t::pointer ctx, const pa_sink_info *info, int eol) {
+          if (!info) {
+            alarm->ring(eol ? 0 : -1);
+            return;
+          }
+
+          sink_desc_t sink;
+          sink.name = info->name ? info->name : "";
+          sink.description = info->description ? info->description : sink.name;
+          sink.is_virtual = sink.name.starts_with("sink-sunshine-");
+          sinks.emplace_back(std::move(sink));
+        };
+
+        op_t op {pa_context_get_sink_info_list(ctx.get(), cb<pa_sink_info *>, &f)};
+        if (!op) {
+          return {};
+        }
+
+        alarm->wait();
+        if (*alarm->status()) {
+          return {};
+        }
+        return sinks;
+      }
+
       std::string get_default_sink_name() {
         std::string sink_name;
         auto alarm = safe::make_alarm<int>();
