@@ -1,0 +1,212 @@
+/**
+ * @file src/library/library.h
+ * @brief Declarations for game library scan jobs, artwork candidates and importing games as apps.
+ */
+#pragma once
+
+// standard includes
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+// lib includes
+#include <nlohmann/json.hpp>
+
+// local includes
+#include "library_types.h"
+
+namespace library {
+
+  /**
+   * @brief Paths and settings a scan or import needs.
+   */
+  struct settings_t {
+    std::filesystem::path home;  ///< Home directory of the user Nova runs as.
+    std::filesystem::path apps_file;  ///< apps.json.
+    std::filesystem::path covers_dir;  ///< Folder for cached artwork (".../covers/library").
+    std::string steamgriddb_api_key;  ///< Optional SteamGridDB key; enables SteamGridDB artwork.
+    std::string windows_launcher;  ///< Resolved command template for Windows executables.
+    bool online = true;  ///< Whether to call Steam/SteamGridDB (false in tests).
+  };
+
+  /**
+   * @brief Build settings from Nova's configuration.
+   *
+   * @return Settings for the current host.
+   */
+  settings_t current_settings();
+
+  /**
+   * @brief Pick the command template used to start Windows games.
+   *
+   * @param configured Value of the `windows_exe_launcher` option; used when not empty.
+   * @return The configured template, else "/usr/local/bin/run-windows-exe {exe}" when that wrapper
+   *         exists, else "umu-run {exe}" when umu-run is installed, else "wine {exe}". On Windows hosts,
+   *         an empty template (run the executable directly).
+   */
+  std::string resolve_windows_launcher(const std::string &configured);
+
+  /**
+   * @brief Parse a source name.
+   *
+   * @param name "folder", "lutris", "steam" or "heroic".
+   * @return The source, or nullopt for anything else.
+   */
+  std::optional<source_e> parse_source(std::string_view name);
+
+  /**
+   * @brief Whether a folder may be scanned.
+   *
+   * @param path Folder chosen by the user.
+   * @return True for existing absolute directories outside /proc, /sys, /dev and /run.
+   */
+  bool safe_scan_root(const std::filesystem::path &path);
+
+  /**
+   * @brief Start a background scan.
+   *
+   * @param source What to scan.
+   * @param path Folder for @ref source_e::folder, ignored otherwise.
+   * @param settings Paths and settings.
+   * @return Job id, or nullopt when too many jobs are running.
+   */
+  std::optional<std::string> start_scan(source_e source, const std::filesystem::path &path, const settings_t &settings);
+
+  /**
+   * @brief Start a background import of games found by a scan.
+   *
+   * @param items Import request items (see the /api/library/import documentation).
+   * @param settings Paths and settings.
+   * @return Job id, or nullopt when too many jobs are running.
+   */
+  std::optional<std::string> start_import(const nlohmann::json &items, const settings_t &settings);
+
+  /**
+   * @brief Current state of a job.
+   *
+   * @param id Job id.
+   * @return Status JSON, or nullopt for unknown ids.
+   */
+  std::optional<nlohmann::json> job_status(const std::string &id);
+
+  /**
+   * @brief Look up a registered artwork candidate.
+   *
+   * @param id Candidate id from a scan or artwork search.
+   * @return The candidate, or nullopt.
+   */
+  std::optional<art_ref_t> candidate(const std::string &id);
+
+  /**
+   * @brief Register an artwork candidate so clients can refer to it by id.
+   *
+   * @param ref Candidate.
+   * @return Its id.
+   */
+  std::string register_candidate(const art_ref_t &ref);
+
+  /**
+   * @brief Describe a game for the API, registering its artwork candidates.
+   *
+   * @param game Game.
+   * @param temp_id Id the client uses to import it.
+   * @return JSON object.
+   */
+  nlohmann::json game_to_json(const detected_game_t &game, const std::string &temp_id);
+
+  /**
+   * @brief Match unmatched games to Steam and add online artwork candidates.
+   *
+   * @param games Games to update in place.
+   * @param settings Settings (online access, SteamGridDB key).
+   * @param progress Called after each game with (done, total).
+   */
+  void enrich(std::vector<detected_game_t> &games, const settings_t &settings, const std::function<void(std::size_t, std::size_t)> &progress);
+
+  /**
+   * @brief Search artwork for "Change match" / "Choose artwork".
+   *
+   * @param query Title to search for (used when @p appid is 0).
+   * @param appid Steam app id.
+   * @param settings Settings.
+   * @return {"matches":[{appid,name}], "artwork":{poster:[...],hero:[...],logo:[...],icon:[...]}}.
+   */
+  nlohmann::json artwork_search(const std::string &query, std::uint32_t appid, const settings_t &settings);
+
+  /**
+   * @brief A game ready to be written to apps.json.
+   */
+  struct app_entry_t {
+    std::string name;  ///< App name.
+    std::string cmd;  ///< Launch command.
+    std::string working_dir;  ///< Working directory.
+    std::string source;  ///< Source name.
+    std::string source_id;  ///< Id within the source.
+    std::filesystem::path poster;  ///< Stored poster (PNG) or empty.
+    std::filesystem::path hero;  ///< Stored hero or empty.
+    std::filesystem::path logo;  ///< Stored logo or empty.
+    std::filesystem::path icon;  ///< Stored icon or empty.
+  };
+
+  /**
+   * @brief Whether apps.json already has this game (same source id, or same command).
+   *
+   * @param apps The "apps" array.
+   * @param entry Game to check.
+   * @return True when already present.
+   */
+  bool is_duplicate(const nlohmann::json &apps, const app_entry_t &entry);
+
+  /**
+   * @brief Add games to the apps.json tree, skipping duplicates, and sort by name.
+   *
+   * @param tree Parsed apps.json (must have an "apps" array; one is created otherwise).
+   * @param entries Games to add.
+   * @return Per entry: true when added, false when it was a duplicate.
+   */
+  std::vector<bool> merge_into_apps(nlohmann::json &tree, const std::vector<app_entry_t> &entries);
+
+  /**
+   * @brief Folder used to cache one game's artwork.
+   *
+   * @param covers_dir Artwork root.
+   * @param source Source name.
+   * @param source_id Id within the source.
+   * @return Folder path (not created).
+   */
+  std::filesystem::path art_dir(const std::filesystem::path &covers_dir, std::string_view source, std::string_view source_id);
+
+  /**
+   * @brief Resolve a stored artwork file of an app for serving.
+   *
+   * Only files inside @p covers_dir are returned for hero/logo/icon; posters also accept the
+   * app's regular image-path when it is a PNG.
+   *
+   * @param app App object from apps.json.
+   * @param kind Artwork kind.
+   * @param covers_dir Artwork root.
+   * @return File to serve, or nullopt.
+   */
+  std::optional<std::filesystem::path> app_art(const nlohmann::json &app, art_kind_e kind, const std::filesystem::path &covers_dir);
+
+  /**
+   * @brief Parse an artwork kind name.
+   *
+   * @param name "poster", "hero", "logo" or "icon".
+   * @return The kind, or nullopt.
+   */
+  std::optional<art_kind_e> parse_kind(std::string_view name);
+
+  /**
+   * @brief Mutex that serialises every read-modify-write of apps.json.
+   *
+   * @return The mutex.
+   */
+  std::mutex &apps_file_mutex();
+
+}  // namespace library
