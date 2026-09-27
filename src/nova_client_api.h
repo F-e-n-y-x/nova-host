@@ -170,14 +170,64 @@ namespace nova_api {
   std::uint32_t steam_appid_for(const nlohmann::json &app);
 
   /**
-   * @brief Store details for an app: from the cache, else fetched from Steam (resolving the app id by
-   *        title when needed) and cached for DETAILS_TTL_S.
+   * @brief Details for an app from the cache, else fetched and cached for `metadata_ttl_days`.
+   *
+   * Sources, in order: the Steam store (when `metadata_steam` is on; the app id comes from
+   * `nova-steam-appid` or a title search), IGDB (when credentials are set; `nova-igdb-id` or a
+   * title search), then RAWG (when a key is set). Stale data is returned when offline.
    *
    * @param app App object from apps.json.
    * @param allow_network Whether a cache miss may go online.
+   * @param force Fetch again even when the cache is fresh.
    * @return Sanitized store details, or nullopt when none are available.
    */
-  std::optional<nlohmann::json> store_details(const nlohmann::json &app, bool allow_network);
+  std::optional<nlohmann::json> store_details(const nlohmann::json &app, bool allow_network, bool force = false);
+
+  /**
+   * @brief IGDB id stored for an app (`nova-igdb-id`), set when the user picks an IGDB match.
+   *
+   * @param app App object from apps.json.
+   * @return IGDB id, or 0.
+   */
+  std::uint64_t igdb_id_for(const nlohmann::json &app);
+
+  /**
+   * @brief Current metadata match of an app, for the web UI (never goes online).
+   *
+   * @param app App object from apps.json.
+   * @return {name, override:{steam_appid, igdb_id}, match:{source, id, name, confidence}|null, details:{source, fetched_at, has_description}|null}.
+   */
+  nlohmann::json metadata_status(const nlohmann::json &app);
+
+  /**
+   * @brief Drop cached matches and details of one app so the next lookup starts fresh.
+   *
+   * @param app App object from apps.json.
+   */
+  void forget_app_metadata(const nlohmann::json &app);
+
+  /**
+   * @brief Delete all cached details, matches and screenshots (play statistics are kept).
+   *
+   * @return Number of entries removed.
+   */
+  std::size_t clear_metadata_cache();
+
+  /**
+   * @brief Remember when a full metadata refresh finished.
+   *
+   * @param matched Apps with details.
+   * @param total Apps considered.
+   */
+  void record_refresh(std::size_t matched, std::size_t total);
+
+  /**
+   * @brief Metadata summary for the settings page (cache only).
+   *
+   * @param apps The "apps" array from apps.json.
+   * @return {total, matched, last_refresh_at}.
+   */
+  nlohmann::json metadata_summary(const nlohmann::json &apps);
 
   /**
    * @brief Build the `/nova/v1/apps/<id>/details` reply.

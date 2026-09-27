@@ -324,13 +324,20 @@ function openAdd() {
 
     <ul v-else :class="['nv-lib-grid', { 'nv-lib--large': rows.length > LARGE_LIST }]" :aria-label="t('nova.library.title')">
       <li v-for="row in rows" :key="row.index" class="nv-lib-card">
-        <button :id="`nv-app-${row.index}`" type="button" class="nv-lib-card__art" :aria-label="t('nova.library.edit_name', { name: row.name })"
+        <button :id="`nv-app-${row.index}`" type="button" class="nv-lib-card__tile" :aria-label="t('nova.library.edit_name', { name: row.name })"
                 @click="openEditor(row.index)">
-          <NvArt :title="row.name" :src="art(row.app, row.index, 'poster')" kind="poster" decorative />
-          <span v-if="row.running" class="nv-lib-card__live">{{ t('nova.library.running') }}</span>
+          <span class="nv-lib-card__art">
+            <NvArt :title="row.name" :src="art(row.app, row.index, 'poster')" kind="poster" decorative />
+            <span v-if="row.running" class="nv-lib-card__live">{{ t('nova.library.running') }}</span>
+          </span>
+          <span class="nv-lib-card__text">
+            <span class="nv-lib-card__name" :title="row.name">{{ row.name }}</span>
+            <span class="nv-lib-card__sub">
+              {{ sourceLabel(row.source) }}<template v-if="row.running"> · <span class="nv-lib-running">{{ t('nova.library.running') }}</span></template>
+            </span>
+          </span>
         </button>
-        <div class="nv-lib-card__meta">
-          <NvBadge :variant="row.source === 'manual' ? 'neutral' : 'accent'">{{ sourceLabel(row.source) }}</NvBadge>
+        <div class="nv-lib-card__menu">
           <NvActionMenu size="sm" :label="t('nova.library.row_menu', { name: row.name })" :items="rowMenu(row)" />
         </div>
       </li>
@@ -470,26 +477,82 @@ function openAdd() {
   }
 
   .nv-lib-card {
+    position: relative;
+    align-self: start;
+    min-width: 0;
+  }
+
+  /* The whole tile (poster + name) is one button, so the focus ring wraps both. */
+  .nv-lib-card__tile {
     display: flex;
     flex-direction: column;
     gap: var(--nv-space-2);
-    min-width: 0;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: var(--nv-radius-lg);
+    background: transparent;
+    color: var(--nv-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .nv-lib-card__tile:focus-visible {
+    outline: var(--nv-focus-width) solid var(--nv-focus);
+    outline-offset: 4px;
   }
 
   .nv-lib-card__art {
     position: relative;
     display: block;
-    padding: 0;
-    border: 0;
     border-radius: var(--nv-radius-lg);
-    background: transparent;
-    cursor: pointer;
     overflow: hidden;
     transition: transform 120ms var(--nv-ease);
   }
 
-  .nv-lib-card__art:hover {
+  .nv-lib-card__tile:hover .nv-lib-card__art {
     transform: translateY(-2px);
+  }
+
+  .nv-lib-card__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    /* room for the ⋯ menu on the right */
+    padding-right: 36px;
+  }
+
+  .nv-lib-card__name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    color: var(--nv-text);
+    font-size: var(--nv-text-md);
+    font-weight: 500;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+
+  .nv-lib-card__sub {
+    overflow: hidden;
+    color: var(--nv-text-secondary);
+    font-size: var(--nv-text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nv-lib-card__sub .nv-lib-running {
+    font-size: inherit;
+  }
+
+  .nv-lib-card__menu {
+    position: absolute;
+    right: 0;
+    bottom: 0;
   }
 
   .nv-lib-card__live {
@@ -504,17 +567,10 @@ function openAdd() {
     font-weight: 600;
   }
 
-  .nv-lib-card__meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--nv-space-2);
-  }
-
   .nv-lib--large > li,
   .nv-lib--large tbody tr {
     content-visibility: auto;
-    contain-intrinsic-size: auto 260px;
+    contain-intrinsic-size: auto 310px;
   }
 
   .nv-lib--large tbody tr {
@@ -523,7 +579,7 @@ function openAdd() {
 
   @media (prefers-reduced-motion: reduce) {
     .nv-lib-card__art { transition: none; }
-    .nv-lib-card__art:hover { transform: none; }
+    .nv-lib-card__tile:hover .nv-lib-card__art { transform: none; }
   }
 
   @media (max-width: 1023px) {
@@ -540,7 +596,9 @@ function openAdd() {
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: var(--nv-space-3) var(--nv-space-2);
     }
-    .nv-lib-card__meta { display: none; }
+    .nv-lib-card__menu { display: none; }
+    .nv-lib-card__text { padding-right: 0; }
+    .nv-lib-card__name { font-size: var(--nv-text-sm); }
     .nv-lib-add { min-height: 44px; }
   }
 }

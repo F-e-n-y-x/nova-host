@@ -891,6 +891,21 @@ namespace config {
     {},  // windows_exe_launcher
     "proton",  // windows_launcher
     true,  // proton_auto_update
+    true,  // metadata_steam
+    "english",  // metadata_language
+    true,  // metadata_auto_fetch
+    30,  // metadata_ttl_days
+    "steam,steamgriddb,lutris,igdb",  // art_source_priority
+    true,  // art_prefer_official
+    {},  // art_steamgriddb_poster_style
+    {},  // art_steamgriddb_hero_style
+    false,  // art_allow_animated
+    false,  // art_nsfw
+    false,  // art_humor
+    {},  // igdb_client_id
+    {},  // igdb_client_secret
+    {},  // steam_web_api_key
+    {},  // rawg_api_key
   };
 
   sunshine_t sunshine {
@@ -1881,6 +1896,21 @@ namespace config {
     string_f(vars, "windows_exe_launcher", library.windows_exe_launcher);
     string_restricted_f(vars, "windows_launcher", library.windows_launcher, {"proton"sv, "wine"sv, "custom"sv});
     bool_f(vars, "proton_auto_update", library.proton_auto_update);
+    bool_f(vars, "metadata_steam", library.metadata_steam);
+    string_f(vars, "metadata_language", library.metadata_language);
+    bool_f(vars, "metadata_auto_fetch", library.metadata_auto_fetch);
+    int_between_f(vars, "metadata_ttl_days", library.metadata_ttl_days, {1, 365});
+    string_f(vars, "art_source_priority", library.art_source_priority);
+    bool_f(vars, "art_prefer_official", library.art_prefer_official);
+    string_restricted_f(vars, "art_steamgriddb_poster_style", library.art_steamgriddb_poster_style, {""sv, "alternate"sv, "blurred"sv, "white_logo"sv, "material"sv, "no_logo"sv});
+    string_restricted_f(vars, "art_steamgriddb_hero_style", library.art_steamgriddb_hero_style, {""sv, "alternate"sv, "blurred"sv, "material"sv});
+    bool_f(vars, "art_allow_animated", library.art_allow_animated);
+    bool_f(vars, "art_nsfw", library.art_nsfw);
+    bool_f(vars, "art_humor", library.art_humor);
+    string_f(vars, "igdb_client_id", library.igdb_client_id);
+    string_f(vars, "igdb_client_secret", library.igdb_client_secret);
+    string_f(vars, "steam_web_api_key", library.steam_web_api_key);
+    string_f(vars, "rawg_api_key", library.rawg_api_key);
 
     bool_f(vars, "notify_pre_releases", sunshine.notify_pre_releases);
     bool_f(vars, "system_tray", sunshine.system_tray);

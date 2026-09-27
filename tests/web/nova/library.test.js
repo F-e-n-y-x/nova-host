@@ -188,6 +188,28 @@ describe('Library page', () => {
     expect(router.currentRoute.value.query.q).toBeUndefined()
   })
 
+  it('shows every name under its poster in the grid, with the source and running state', async () => {
+    await mountAt('/library?view=grid', { running: 1 })
+    const cards = [...document.querySelectorAll('.nv-lib-card')]
+    expect(cards.length).toBeGreaterThan(1)
+    for (const card of cards) {
+      const name = card.querySelector('.nv-lib-card__name')
+      expect(name.textContent.trim()).not.toBe('')
+      expect(name.getAttribute('title')).toBe(name.textContent.trim())
+      // name and poster are one focusable tile
+      expect(name.closest('button.nv-lib-card__tile')).toBe(card.querySelector('.nv-lib-card__art').closest('button'))
+    }
+    expect(cards[1].querySelector('.nv-lib-card__sub').textContent).toContain('Running')
+    expect(cards[0].querySelector('.nv-lib-card__sub').textContent).not.toContain('Running')
+  })
+
+  it('keeps the big title inside placeholder art when there is no poster', async () => {
+    await mountAt('/library?view=grid', { apps: [{ name: 'No Poster Game', cmd: 'x' }] })
+    const card = document.querySelector('.nv-lib-card')
+    expect(card.querySelector('.nv-art__title').textContent).toBe('No Poster Game')
+    expect(card.querySelector('.nv-lib-card__name').textContent.trim()).toBe('No Poster Game')
+  })
+
   it('marks the running app from running_index', async () => {
     await mountAt('/library?view=list', { running: 1 })
     const rows = [...document.querySelectorAll('tbody tr')]

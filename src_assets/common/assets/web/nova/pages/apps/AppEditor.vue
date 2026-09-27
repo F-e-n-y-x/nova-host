@@ -8,6 +8,8 @@
  * Layout (Library design): hero banner with the poster overlapping it, name + source line and
  * "Change artwork", then Name / Command / Working folder, before-and-after commands, and an
  * "Advanced" disclosure (detached commands, behaviour, exit timeout, output log, variables).
+ * Saved games in a host with the library API also get "Artwork" (every kind: upload, URL, search, reset)
+ * and "Metadata" tabs (see AppArtworkPanel, AppMetadataPanel).
  *
  * Props: open, app (the app to edit, or null to add one), index (-1 to add),
  *        platform (host platform from /api/config), libraryApi (host has library artwork search),
@@ -29,7 +31,10 @@ import NvSwitch from '../../components/NvSwitch.vue'
 import NvSettingRow from '../../components/NvSettingRow.vue'
 import NvAlert from '../../components/NvAlert.vue'
 import NvSelect from '../../components/NvSelect.vue'
+import NvSegmentedControl from '../../components/NvSegmentedControl.vue'
 import ArtworkPicker from '../library/ArtworkPicker.vue'
+import AppMetadataPanel from './AppMetadataPanel.vue'
+import AppArtworkPanel from './AppArtworkPanel.vue'
 import PathField from './PathField.vue'
 import PrepCommandList from './PrepCommandList.vue'
 import DetachedCommandList from './DetachedCommandList.vue'
@@ -65,6 +70,8 @@ const discard = reactive({ open: false, then: null })
 const coversOpen = shallowRef(false)
 const artwork = reactive({ open: false, loading: false, error: '', busy: false, candidates: {}, choice: { poster: 'none' } })
 const browser = ref({ open: false, type: 'any', title: '', start: '', apply: null })
+/** Editor tab: 'details' (the form), 'artwork' or 'metadata'. */
+const tab = shallowRef('details')
 
 const isWindows = computed(() => props.platform === 'windows')
 /** Proton FSR choices: off, then 1 (sharpest) to 5. */
@@ -73,6 +80,12 @@ const fsrOptions = computed(() => [
   ...[1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: t('nova.apps.compat_fsr_level', { n }) })),
 ])
 const isNew = computed(() => props.index === -1)
+const showTabs = computed(() => !isNew.value && props.libraryApi)
+const tabs = computed(() => [
+  { value: 'details', label: t('nova.library.tab_details') },
+  { value: 'artwork', label: t('nova.library.art_tab') },
+  { value: 'metadata', label: t('nova.library.tab_metadata') },
+])
 const title = computed(() => (isNew.value ? t('nova.apps.add_title') : t('nova.apps.edit_title', { name: props.app?.name || t('nova.apps.unnamed') })))
 const isDirty = computed(() => formsDiffer(form.value, JSON.parse(initial.value || '{}')))
 const allErrors = computed(() => validateForm(form.value))
@@ -109,6 +122,7 @@ watch(() => [props.open, props.app, props.index], ([isOpen]) => {
   submitted.value = false
   saveError.value = ''
   discard.open = false
+  tab.value = 'details'
 }, { immediate: true })
 
 function onFocusOut(event) {
@@ -153,7 +167,47 @@ async function openArtwork() {
   }
 }
 
-const ART_FIELDS = ['image-path', 'nova-hero', 'nova-logo', 'nova-icon']
+const ART_FIELDS = ['image-path', 'nova-hero', 'nova-logo', 'nova-icon', 'nova-background']
+/** Match fields the Metadata tab changes on the host. */
+const MATCH_FIELDS = ['nova-steam-appid', 'nova-igdb-id']
+
+/**
+ * Copy fields the host changed for this app into the form (and its saved snapshot) so a later
+ * Save keeps them. Other unsaved edits are left alone.
+ *
+ * @param {string[]} keys Fields to copy; ones the host no longer has are removed.
+ * @param {boolean} [keepMissing] Leave fields the host doesn't report as they are.
+ */
+async function syncFromHost(keys, keepMissing = false) {
+  const saved = (await fetchJson('./api/apps')).apps?.[props.index]
+  if (!saved) return
+  const before = JSON.parse(initial.value)
+  for (const key of keys) {
+    if (saved[key] === undefined) {
+      if (keepMissing) continue
+      delete form.value[key]
+      delete before[key]
+    } else {
+      form.value[key] = saved[key]
+      before[key] = saved[key]
+    }
+  }
+  initial.value = JSON.stringify(before)
+}
+
+/** The Metadata tab changed the app on the host: pick up the new fields (best effort). */
+async function onMetaChanged(keys, keepMissing) {
+  try {
+    await syncFromHost(keys, keepMissing)
+  } catch {
+    // The next open of the editor reads the app again.
+  }
+}
+
+async function onMetaArtwork() {
+  await onMetaChanged(ART_FIELDS, true)
+  emit('artwork-applied')
+}
 
 /**
  * Apply full-quality library artwork to this (already saved) app on the host, then copy the new
@@ -170,14 +224,7 @@ async function applyOnHost() {
     throw error
   }
   await pollJob(job)
-  const saved = (await fetchJson('./api/apps')).apps?.[props.index]
-  const before = JSON.parse(initial.value)
-  for (const key of ART_FIELDS) {
-    if (saved?.[key] === undefined) continue
-    form.value[key] = saved[key]
-    before[key] = saved[key]
-  }
-  initial.value = JSON.stringify(before)
+  await syncFromHost(ART_FIELDS, true)
   emit('artwork-applied')
   return true
 }
@@ -275,6 +322,7 @@ async function save() {
   submitted.value = true
   const invalid = Object.keys(FIELD_IDS).find((key) => allErrors.value[key])
   if (invalid) {
+    tab.value = 'details'
     await nextTick()
     document.getElementById(FIELD_IDS[invalid])?.focus()
     return
@@ -312,7 +360,15 @@ defineExpose({ isDirty, askDiscard, openArtwork })
       <NvButton size="sm" class="nv-editor__change-art" @click="openArtwork"><ImagePlus :size="16" aria-hidden="true" />{{ t('nova.library.change_artwork') }}</NvButton>
     </div>
 
-    <form id="nv-app-editor" class="nv-editor" novalidate @submit.prevent="save" @focusout="onFocusOut">
+    <div v-if="showTabs" class="nv-editor__tabs">
+      <NvSegmentedControl v-model="tab" :label="t('nova.library.tabs_label')" :options="tabs" size="sm" />
+    </div>
+    <AppMetadataPanel v-if="showTabs && tab === 'metadata'" :index="index" :name="app?.name || ''" :draft-name="form.name"
+                      @match-changed="onMetaChanged(MATCH_FIELDS)" @artwork-applied="onMetaArtwork" />
+    <AppArtworkPanel v-if="showTabs && tab === 'artwork'" :index="index" :app="app" :name="app?.name || ''"
+                     :cover-version="coverVersion" @artwork-applied="onMetaArtwork" />
+
+    <form v-show="tab === 'details'" id="nv-app-editor" class="nv-editor" novalidate @submit.prevent="save" @focusout="onFocusOut">
       <NvAlert v-if="saveError" variant="danger" live :title="t('nova.apps.save_failed_title')">{{ saveError }}</NvAlert>
 
       <section class="nv-editor__section" :aria-label="t('nova.apps.section_basics')">
@@ -506,6 +562,11 @@ defineExpose({ isDirty, askDiscard, openArtwork })
 
   .nv-editor__change-art {
     flex-shrink: 0;
+  }
+
+  .nv-editor__tabs {
+    flex-shrink: 0;
+    margin-bottom: var(--nv-space-5);
   }
 
   .nv-editor {

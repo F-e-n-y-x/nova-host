@@ -8,6 +8,7 @@
  * Emits: update(key, value), reset(key), touch(key) (focus left the setting; its error may show).
  */
 import { computed, toRef } from 'vue'
+import ArtSourcesEditor from './ArtSourcesEditor.vue'
 import KeybindingsEditor from './KeybindingsEditor.vue'
 import ModeRemappingEditor from './ModeRemappingEditor.vue'
 import PrepCommandsEditor from './PrepCommandsEditor.vue'
@@ -27,7 +28,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update', 'reset', 'touch'])
 
-const EDITORS = { PrepCommandsEditor, KeybindingsEditor, ModeRemappingEditor }
+const EDITORS = { PrepCommandsEditor, KeybindingsEditor, ModeRemappingEditor, ArtSourcesEditor }
 
 const text = useOptionText(toRef(props, 'platform'))
 const option = computed(() => OPTIONS[props.optionKey] || {})
@@ -35,7 +36,7 @@ const editor = computed(() => EDITORS[option.value.type] || null)
 /** Only the props each editor declares. */
 const editorProps = computed(() => {
   if (option.value.type === 'PrepCommandsEditor') return { platform: props.platform }
-  if (option.value.type === 'ModeRemappingEditor') return { config: props.config }
+  if (option.value.type === 'ModeRemappingEditor' || option.value.type === 'ArtSourcesEditor') return { config: props.config }
   return {}
 })
 const label = computed(() => text.label(props.optionKey))

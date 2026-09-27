@@ -66,6 +66,38 @@ const keyboardOn = (c) => on(c.keyboard)
 const mouseOn = (c) => on(c.mouse)
 const ddOn = (c) => c.dd_configuration_option !== 'disabled'
 
+/** Artwork sources in `art_source_priority` (the host's known_art_sources). */
+export const ART_SOURCES = ['steam', 'steamgriddb', 'lutris', 'igdb']
+/**
+ * Sources listed in `art_source_priority`, in order (unknown names and repeats dropped).
+ *
+ * @param {string} value Comma-separated list.
+ * @returns {string[]} Known sources, best first.
+ */
+export function parseArtSources(value) {
+  const out = []
+  for (const name of String(value ?? '').split(',')) {
+    const source = name.trim().toLowerCase()
+    if (ART_SOURCES.includes(source) && !out.includes(source)) out.push(source)
+  }
+  return out
+}
+const artSourceOn = (c, source) => parseArtSources(c.art_source_priority).includes(source)
+const sgdbOn = (c) => artSourceOn(c, 'steamgriddb')
+const steamDetailsOn = (c) => on(c.metadata_steam)
+const SGDB_POSTER_STYLES = ['alternate', 'blurred', 'white_logo', 'material', 'no_logo']
+const SGDB_HERO_STYLES = ['alternate', 'blurred', 'material']
+/** Steam store languages (`l=` values) with their English names. */
+const STEAM_LANGUAGES = [
+  ['english', 'English'], ['arabic', 'Arabic'], ['bulgarian', 'Bulgarian'], ['schinese', 'Chinese (Simplified)'],
+  ['tchinese', 'Chinese (Traditional)'], ['czech', 'Czech'], ['danish', 'Danish'], ['dutch', 'Dutch'],
+  ['finnish', 'Finnish'], ['french', 'French'], ['german', 'German'], ['greek', 'Greek'], ['hungarian', 'Hungarian'],
+  ['indonesian', 'Indonesian'], ['italian', 'Italian'], ['japanese', 'Japanese'], ['koreana', 'Korean'],
+  ['norwegian', 'Norwegian'], ['polish', 'Polish'], ['portuguese', 'Portuguese'], ['brazilian', 'Portuguese (Brazil)'],
+  ['romanian', 'Romanian'], ['russian', 'Russian'], ['spanish', 'Spanish (Spain)'], ['latam', 'Spanish (Latin America)'],
+  ['swedish', 'Swedish'], ['thai', 'Thai'], ['turkish', 'Turkish'], ['ukrainian', 'Ukrainian'], ['vietnamese', 'Vietnamese'],
+]
+
 /** Options, keyed by config name. */
 export const OPTIONS = {
   // General
@@ -75,7 +107,6 @@ export const OPTIONS = {
   notify_pre_releases: { type: 'bool' },
   system_tray: { type: 'bool' },
   global_prep_cmd: { type: 'PrepCommandsEditor' },
-  steamgriddb_api_key: { type: 'secret', mono: true, placeholder: 'Paste your API key', help: 'steamgriddb' },
 
   // Windows games (Linux)
   windows_launcher: { type: 'choice', hideOn: ['windows', 'macos'], choices: named('windows_launcher', ['proton', 'wine', 'custom']) },
@@ -83,6 +114,30 @@ export const OPTIONS = {
   windows_exe_launcher: {
     type: 'text', mono: true, hideOn: ['windows', 'macos'], placeholder: 'umu-run {exe}', when: (c) => c.windows_launcher === 'custom',
   },
+
+  // Library & artwork
+  metadata_steam: { type: 'bool', group: 'metadata_details' },
+  metadata_language: { type: 'choice', group: 'metadata_details', when: steamDetailsOn, choices: literal(STEAM_LANGUAGES) },
+  metadata_auto_fetch: { type: 'bool', group: 'metadata_details' },
+  metadata_ttl_days: { type: 'number', group: 'metadata_details', unit: 'days', min: 1, max: 365, integer: true },
+  art_source_priority: { type: 'ArtSourcesEditor', group: 'metadata_artwork' },
+  art_prefer_official: { type: 'bool', group: 'metadata_artwork', when: (c) => artSourceOn(c, 'steam') },
+  art_steamgriddb_poster_style: {
+    type: 'choice', group: 'metadata_artwork', when: sgdbOn,
+    choices: [{ value: '', label: '_common.auto' }, ...named('art_steamgriddb_style', SGDB_POSTER_STYLES)],
+  },
+  art_steamgriddb_hero_style: {
+    type: 'choice', group: 'metadata_artwork', when: sgdbOn,
+    choices: [{ value: '', label: '_common.auto' }, ...named('art_steamgriddb_style', SGDB_HERO_STYLES)],
+  },
+  art_allow_animated: { type: 'bool', group: 'metadata_artwork', when: sgdbOn },
+  art_nsfw: { type: 'bool', group: 'metadata_artwork', when: sgdbOn },
+  art_humor: { type: 'bool', group: 'metadata_artwork', when: sgdbOn },
+  steamgriddb_api_key: { type: 'secret', mono: true, group: 'metadata_keys', placeholder: 'Paste your API key', help: 'steamgriddb', helpOpen: true },
+  igdb_client_id: { type: 'text', mono: true, group: 'metadata_keys', placeholder: 'Twitch client ID', help: 'igdb', helpOpen: true },
+  igdb_client_secret: { type: 'secret', mono: true, group: 'metadata_keys', placeholder: 'Twitch client secret' },
+  steam_web_api_key: { type: 'secret', mono: true, group: 'metadata_keys', placeholder: 'Paste your API key', help: 'steam_web', helpOpen: true },
+  rawg_api_key: { type: 'secret', mono: true, group: 'metadata_keys', placeholder: 'Paste your API key', help: 'rawg', helpOpen: true },
 
   // Display & capture
   capture: {
@@ -355,7 +410,14 @@ export const OPTIONS = {
  * encoder groups shown inside the Encoder section.
  */
 export const SECTIONS = [
-  { id: 'general', options: ['sunshine_name', 'locale', 'min_log_level', 'notify_pre_releases', 'system_tray', 'global_prep_cmd', 'steamgriddb_api_key'] },
+  { id: 'general', options: ['sunshine_name', 'locale', 'min_log_level', 'notify_pre_releases', 'system_tray', 'global_prep_cmd'] },
+  {
+    id: 'library',
+    options: ['metadata_steam', 'metadata_language', 'metadata_auto_fetch', 'metadata_ttl_days', 'art_source_priority',
+      'art_prefer_official', 'art_steamgriddb_poster_style', 'art_steamgriddb_hero_style', 'art_allow_animated', 'art_nsfw',
+      'art_humor', 'steamgriddb_api_key', 'igdb_client_id', 'igdb_client_secret', 'steam_web_api_key', 'rawg_api_key'],
+    panel: 'LibraryMetadataPanel',
+  },
   { id: 'compat', options: ['windows_launcher', 'proton_auto_update', 'windows_exe_launcher'] },
   {
     id: 'display',
@@ -398,6 +460,9 @@ export const ENCODER_GROUPS = [
 /** Sub-headings inside a section, keyed by an option's `group`. */
 export const GROUPS = {
   display_device: 'config.dd_options_header',
+  metadata_details: 'nova.settings.library_group_details',
+  metadata_artwork: 'nova.settings.library_group_artwork',
+  metadata_keys: 'nova.settings.library_group_keys',
 }
 
 /**

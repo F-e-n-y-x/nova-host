@@ -5,6 +5,7 @@
 #pragma once
 
 // standard includes
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -21,7 +22,13 @@ namespace library {
     hero,  ///< Wide banner shown behind the title.
     logo,  ///< Transparent title logo.
     icon,  ///< Small square icon for lists and cards.
+    background,  ///< Full-screen background behind a game's details page (clients fall back to the hero).
   };
+
+  /**
+   * @brief Every artwork kind, in the order the UI lists them.
+   */
+  inline constexpr std::array<art_kind_e, 5> all_art_kinds {art_kind_e::poster, art_kind_e::hero, art_kind_e::logo, art_kind_e::icon, art_kind_e::background};
 
   /**
    * @brief Where a detected game came from.
@@ -37,7 +44,7 @@ namespace library {
    * @brief Convert an artwork kind to its API name.
    *
    * @param kind Artwork kind.
-   * @return "poster", "hero", "logo" or "icon".
+   * @return "poster", "hero", "logo", "icon" or "background".
    */
   const char *to_string(art_kind_e kind);
 

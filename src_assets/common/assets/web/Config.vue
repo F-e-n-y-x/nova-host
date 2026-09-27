@@ -190,7 +190,7 @@ onBeforeUnmount(() => {
 
         <SettingsSection v-for="section in sections" :key="section.id" :section="section" :config="form.config.value"
                          :platform="form.platform.value" :errors="form.visibleErrors.value"
-                         :other-open="section.otherMatches" @update="form.setValue" @reset="form.resetValue"
+                         :other-open="section.otherMatches" :dirty-keys="form.dirtyKeys.value" @update="form.setValue" @reset="form.resetValue"
                          @touch="form.touch" />
 
         <SettingsSaveBar :count="dirtyCount" :error-count="errorCount" :saving="form.saving.value"

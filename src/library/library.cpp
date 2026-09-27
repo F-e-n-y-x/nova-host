@@ -22,6 +22,7 @@
 #include "heroic.h"
 #include "library.h"
 #include "lutris.h"
+#include "match.h"
 #include "src/boost_process_compat.h"
 #include "src/config.h"
 #include "src/logging.h"
@@ -31,6 +32,7 @@
 #include "src/process.h"
 #include "steam.h"
 #include "title.h"
+#include "url_fetch.h"
 
 namespace fs = std::filesystem;
 using namespace std::literals;
@@ -46,6 +48,8 @@ namespace library {
         return "logo";
       case art_kind_e::icon:
         return "icon";
+      case art_kind_e::background:
+        return "background";
     }
     return "poster";
   }
@@ -483,6 +487,8 @@ namespace library {
                   case art_kind_e::icon:
                     entry.icon = *stored;
                     break;
+                  case art_kind_e::background:
+                    break;  // imports don't pick a background; clients use the hero
                 }
                 break;
               }
@@ -523,8 +529,12 @@ namespace library {
         std::vector<nlohmann::json> fetch_details;
         for (std::size_t i = 0; i < entries.size(); ++i) {
           (added[i] ? imported : duplicates).push_back({{"temp_id", temp_ids[i]}, {"name", entries[i].name}, {"has_poster", !entries[i].poster.empty()}});
-          if (added[i] && entries[i].steam_appid != 0) {
-            fetch_details.push_back({{"name", entries[i].name}, {"nova-steam-appid", entries[i].steam_appid}});
+          if (added[i] && settings.meta.auto_fetch) {
+            nlohmann::json app = {{"name", entries[i].name}, {"cmd", entries[i].cmd}};
+            if (entries[i].steam_appid != 0) {
+              app["nova-steam-appid"] = entries[i].steam_appid;
+            }
+            fetch_details.push_back(std::move(app));
           }
         }
         nova_api::prefetch_details(std::move(fetch_details));
@@ -649,6 +659,69 @@ namespace library {
     return m;
   }
 
+  std::optional<std::string> start_task(const std::string &kind, task_fn_t work) {
+    auto job = create_job(kind, {});
+    if (!job) {
+      return std::nullopt;
+    }
+    std::thread([job, work = std::move(work)]() {
+      const task_progress_t progress = [job](std::size_t done, std::size_t total, const std::string &stage) {
+        std::scoped_lock lock(job->mutex);
+        job->done = done;
+        job->total = total;
+        job->stage = stage;
+      };
+      const std::function<bool()> cancelled = [job]() {
+        return job->cancel_requested.load();
+      };
+      try {
+        auto result = work(progress, cancelled);
+        if (job->cancel_requested.load()) {
+          mark_cancelled(job);
+          return;
+        }
+        std::scoped_lock lock(job->mutex);
+        job->result = std::move(result);
+        job->state = "done";
+        job->stage.clear();
+      } catch (const std::exception &e) {
+        BOOST_LOG(warning) << "Library "sv << job->kind << " job failed: "sv << e.what();
+        std::scoped_lock lock(job->mutex);
+        job->state = "failed";
+        job->error = e.what();
+      }
+    }).detach();
+    return job->id;
+  }
+
+  nlohmann::json load_apps(const fs::path &path) {
+    return read_apps(path);
+  }
+
+  std::optional<nlohmann::json> update_app(const fs::path &path, std::size_t index, const std::function<void(nlohmann::json &)> &edit) {
+    std::scoped_lock lock(apps_file_mutex());
+    auto tree = read_apps(path);
+    if (index >= tree["apps"].size() || !tree["apps"][index].is_object()) {
+      return std::nullopt;
+    }
+    edit(tree["apps"][index]);
+    const auto tmp = path.string() + ".tmp";
+    {
+      std::ofstream out(tmp, std::ios::trunc);
+      out << tree.dump(4);
+      if (!out) {
+        return std::nullopt;
+      }
+    }
+    std::error_code ec;
+    fs::rename(tmp, path, ec);
+    if (ec) {
+      return std::nullopt;
+    }
+    proc::refresh(path.string());
+    return tree["apps"][index];
+  }
+
   std::string resolve_windows_launcher(const std::string &configured) {
 #ifdef _WIN32
     return configured;
@@ -690,6 +763,7 @@ namespace library {
     s.covers_dir = platf::appdata() / "covers" / "library";
     s.steamgriddb_api_key = config::library.steamgriddb_api_key;
     s.windows_launcher = resolve_windows_launcher(config::library.windows_launcher, config::library.windows_exe_launcher, nova_compat::wrapper_path());
+    s.meta = metadata::from_config();
     return s;
   }
 
@@ -710,7 +784,7 @@ namespace library {
   }
 
   std::optional<art_kind_e> parse_kind(std::string_view name) {
-    for (const auto kind : {art_kind_e::poster, art_kind_e::hero, art_kind_e::logo, art_kind_e::icon}) {
+    for (const auto kind : all_art_kinds) {
       if (name == to_string(kind)) {
         return kind;
       }
@@ -751,7 +825,7 @@ namespace library {
   }
 
   nlohmann::json game_to_json(const detected_game_t &game, const std::string &temp_id) {
-    nlohmann::json art = {{"poster", nlohmann::json::array()}, {"hero", nlohmann::json::array()}, {"logo", nlohmann::json::array()}, {"icon", nlohmann::json::array()}};
+    nlohmann::json art = {{"poster", nlohmann::json::array()}, {"hero", nlohmann::json::array()}, {"logo", nlohmann::json::array()}, {"icon", nlohmann::json::array()}, {"background", nlohmann::json::array()}};
     for (const auto &ref : game.artwork) {
       nlohmann::json c = {{"id", register_candidate(ref)}, {"label", ref.label}};
       if (!ref.url.empty()) {
@@ -772,6 +846,162 @@ namespace library {
     return out;
   }
 
+  namespace {
+    /**
+     * @brief Best Steam game for a detected title (store search variants and the local catalogue).
+     *
+     * @param query Cleaned title.
+     * @param settings Settings.
+     * @return Candidate when one is confident enough.
+     */
+    std::optional<match::candidate_t> best_steam_match(const std::string &query, const settings_t &settings) {
+      auto sources = match::live_sources(settings.meta);
+      sources.sgdb_search = nullptr;
+      sources.igdb_search = nullptr;
+      for (auto &c : match::search(query, sources, 5)) {
+        const bool game = c.type == match::steam_type_e::game || c.type == match::steam_type_e::unknown;
+        if (c.steam_appid && game && c.confidence >= match_threshold) {
+          return c;
+        }
+      }
+      return std::nullopt;
+    }
+
+    /**
+     * @brief Run a "custom artwork for one kind" job.
+     *
+     * @param job Job.
+     * @param app_index App index.
+     * @param kind Kind.
+     * @param source Image source.
+     * @param settings Settings.
+     */
+    void run_custom_artwork(const std::shared_ptr<job_t> &job, std::size_t app_index, art_kind_e kind, const custom_art_t &source, const settings_t &settings) {
+      try {
+        nlohmann::json before;
+        {
+          std::scoped_lock lock(apps_file_mutex());
+          const auto tree = read_apps(settings.apps_file);
+          if (app_index >= tree["apps"].size()) {
+            throw std::runtime_error("That app no longer exists. Reload the library and try again.");
+          }
+          before = tree["apps"][app_index];
+        }
+        const auto name = before.value("name", std::string {});
+        const auto source_name = before.value("nova-source", std::string {"app"});
+        const auto source_id = before.value("nova-source-id", before.value("uuid", name));
+        const auto dir = art_dir(settings.covers_dir, source_name, source_id);
+        {
+          std::scoped_lock lock(job->mutex);
+          job->stage = source.url ? "Downloading image" : source.reset ? "Finding artwork" : "Saving image";
+          job->total = 1;
+        }
+
+        std::optional<fs::path> stored;
+        if (source.bytes) {
+          stored = artwork::store_bytes(kind, *source.bytes, dir);
+          if (!stored) {
+            throw std::runtime_error("That file isn't a PNG or JPEG image Nova can read.");
+          }
+        } else if (source.url) {
+          const auto fetched = url_fetch::fetch_image(*source.url);
+          if (!fetched.body) {
+            throw std::runtime_error(fetched.error);
+          }
+          throw_if_cancelled(job);
+          stored = artwork::store_bytes(kind, *fetched.body, dir);
+          if (!stored) {
+            throw std::runtime_error("Nova can only use PNG and JPEG images.");
+          }
+        } else {
+          std::uint32_t appid = 0;
+          if (before.contains("nova-steam-appid") && before["nova-steam-appid"].is_number_unsigned()) {
+            appid = before["nova-steam-appid"].get<std::uint32_t>();
+          }
+          const auto found = artwork_search(title::clean(name), appid, settings);
+          for (const auto &c : found["artwork"].value(to_string(kind), nlohmann::json::array())) {
+            throw_if_cancelled(job);
+            if (const auto ref = candidate(c.value("id", std::string {}))) {
+              if ((stored = artwork::store(*ref, dir))) {
+                break;
+              }
+            }
+          }
+        }
+        throw_if_cancelled(job);
+
+        bool cleared = false;
+        {
+          std::scoped_lock lock(apps_file_mutex());
+          auto tree = read_apps(settings.apps_file);
+          if (app_index >= tree["apps"].size() || tree["apps"][app_index].value("name", std::string {}) != name) {
+            throw std::runtime_error("The app list changed meanwhile. Reload the library and try again.");
+          }
+          auto &app = tree["apps"][app_index];
+          if (stored) {
+            set_app_art(app, kind, *stored);
+          } else {
+            // Nothing automatic found: drop the custom image so clients use their fallback.
+            app.erase(kind == art_kind_e::poster ? "image-path" : "nova-" + std::string(to_string(kind)));
+            cleared = true;
+          }
+          const auto tmp = settings.apps_file.string() + ".tmp";
+          {
+            std::ofstream out(tmp, std::ios::trunc);
+            out << tree.dump(4);
+          }
+          fs::rename(tmp, settings.apps_file);
+          proc::refresh(settings.apps_file.string());
+        }
+        std::scoped_lock lock(job->mutex);
+        job->done = 1;
+        job->result = {{"app_index", app_index}, {"kind", to_string(kind)}, {"applied", stored.has_value()}, {"cleared", cleared}};
+        job->state = "done";
+        job->stage.clear();
+      } catch (const job_cancelled_t &) {
+        mark_cancelled(job);
+      } catch (const std::exception &e) {
+        std::scoped_lock lock(job->mutex);
+        job->state = "failed";
+        job->error = e.what();
+      }
+    }
+  }  // namespace
+
+  nlohmann::json match_json(const match::candidate_t &c) {
+    nlohmann::json out = {
+      {"source", c.source},
+      {"appid", c.steam_appid ? nlohmann::json(c.steam_appid) : nlohmann::json(nullptr)},
+      {"igdb_id", c.igdb_id ? nlohmann::json(c.igdb_id) : nlohmann::json(nullptr)},
+      {"sgdb_id", c.sgdb_id ? nlohmann::json(c.sgdb_id) : nlohmann::json(nullptr)},
+      {"name", c.name},
+      {"year", c.year},
+      {"edition", c.edition},
+      {"type", match::to_string(c.type)},
+      {"unlisted", c.unlisted},
+      {"confidence", c.confidence},
+      {"poster", nullptr},
+    };
+    if (!c.poster_url.empty() && artwork::allowed_host([&c] {
+          const auto rest = std::string_view(c.poster_url).substr(8);
+          return std::string(rest.substr(0, rest.find('/')));
+        }())) {
+      out["poster"] = register_candidate({art_kind_e::poster, c.poster_url, {}, c.source});
+    }
+    return out;
+  }
+
+  std::optional<std::string> start_custom_artwork(std::size_t app_index, art_kind_e kind, custom_art_t source, const settings_t &settings) {
+    auto job = create_job("artwork", {});
+    if (!job) {
+      return std::nullopt;
+    }
+    std::thread([job, app_index, kind, source = std::move(source), settings]() {
+      run_custom_artwork(job, app_index, kind, source, settings);
+    }).detach();
+    return job->id;
+  }
+
   void enrich(std::vector<detected_game_t> &games, const settings_t &settings, const std::function<void(std::size_t, std::size_t)> &progress) {
     const auto total = games.size();
     for (std::size_t i = 0; i < total; ++i) {
@@ -782,30 +1012,33 @@ namespace library {
             return r.url == url;
           });
         };
-        if (game.steam_appid == 0) {
-          const auto query = title::clean(game.title);
-          const auto hits = artwork::store_search(query);
-          double best = 0.0;
-          for (const auto &hit : hits) {
-            if (const double s = title::similarity(query, hit.name); s > best) {
-              best = s;
-              if (s >= match_threshold) {
-                game.steam_appid = hit.appid;
-                game.matched_name = hit.name;
-                game.match_confidence = s;
-              }
-            }
+        if (game.steam_appid == 0 && (settings.meta.steam || settings.meta.art_source_enabled("steam"))) {
+          if (const auto best = best_steam_match(title::clean(game.title), settings)) {
+            game.steam_appid = best->steam_appid;
+            game.matched_name = best->name;
+            game.match_confidence = best->confidence;
           }
           std::this_thread::sleep_for(250ms);
         }
-        if (game.steam_appid) {
+        if (game.steam_appid && settings.meta.art_source_enabled("steam")) {
           for (auto &ref : steam::cdn_artwork(game.steam_appid)) {
             if (!has_url(ref.url)) {
               game.artwork.push_back(std::move(ref));
             }
           }
         }
-        if (!settings.steamgriddb_api_key.empty()) {
+        if (settings.meta.igdb_enabled() && settings.meta.art_source_enabled("igdb")) {
+          const auto query = title::clean(game.title);
+          for (const auto &hit : metadata::igdb_search(settings.meta, query)) {
+            if (title::similarity(query, hit.name) >= match_threshold) {
+              for (auto &ref : metadata::igdb_artwork(hit)) {
+                game.artwork.push_back(std::move(ref));
+              }
+              break;
+            }
+          }
+        }
+        if (!settings.steamgriddb_api_key.empty() && settings.meta.art_source_enabled("steamgriddb")) {
           std::uint64_t sgdb_id = 0;
           if (game.steam_appid == 0) {
             const auto query = title::clean(game.title);
@@ -816,11 +1049,12 @@ namespace library {
               }
             }
           }
-          for (auto &ref : artwork::sgdb_artwork(settings.steamgriddb_api_key, sgdb_id, game.steam_appid)) {
+          for (auto &ref : artwork::sgdb_artwork(settings.steamgriddb_api_key, sgdb_id, game.steam_appid, settings.meta.sgdb)) {
             game.artwork.push_back(std::move(ref));
           }
         }
       }
+      metadata::rank_artwork(game.artwork, settings.meta);
       if (progress) {
         progress(i + 1, total);
       }
@@ -831,12 +1065,11 @@ namespace library {
     nlohmann::json matches = nlohmann::json::array();
     detected_game_t probe;
     probe.title = query;
-    if (settings.online && appid == 0 && !query.empty()) {
-      for (const auto &hit : artwork::store_search(query)) {
-        if (matches.size() >= 8) {
-          break;
+    if (settings.online && appid == 0 && !query.empty() && (settings.meta.steam || settings.meta.art_source_enabled("steam"))) {
+      for (const auto &c : match::search(query, match::live_sources(settings.meta))) {
+        if (c.steam_appid && matches.size() < 60) {
+          matches.push_back(match_json(c));
         }
-        matches.push_back({{"appid", hit.appid}, {"name", hit.name}, {"confidence", title::similarity(query, hit.name)}});
       }
     }
     // A confident title match gets its artwork right away, so "Choose artwork" works from a title alone.
@@ -845,9 +1078,18 @@ namespace library {
     }
     if (appid) {
       probe.steam_appid = appid;
-      probe.artwork = steam::cdn_artwork(appid);
+      if (settings.meta.art_source_enabled("steam")) {
+        probe.artwork = steam::cdn_artwork(appid);
+      }
     }
-    if (settings.online && !settings.steamgriddb_api_key.empty()) {
+    if (settings.online && settings.meta.igdb_enabled() && settings.meta.art_source_enabled("igdb") && !query.empty()) {
+      const auto hits = metadata::igdb_search(settings.meta, query);
+      if (!hits.empty()) {
+        auto refs = metadata::igdb_artwork(hits.front());
+        probe.artwork.insert(probe.artwork.end(), refs.begin(), refs.end());
+      }
+    }
+    if (settings.online && !settings.steamgriddb_api_key.empty() && settings.meta.art_source_enabled("steamgriddb")) {
       std::uint64_t sgdb_id = 0;
       if (appid == 0 && !query.empty()) {
         const auto hits = artwork::sgdb_search(settings.steamgriddb_api_key, query);
@@ -855,8 +1097,17 @@ namespace library {
           sgdb_id = hits.front().id;
         }
       }
-      auto refs = artwork::sgdb_artwork(settings.steamgriddb_api_key, sgdb_id, appid);
+      auto refs = artwork::sgdb_artwork(settings.steamgriddb_api_key, sgdb_id, appid, settings.meta.sgdb);
       probe.artwork.insert(probe.artwork.end(), refs.begin(), refs.end());
+    }
+    metadata::rank_artwork(probe.artwork, settings.meta);
+    // Backgrounds: the wide artwork, offered as its own kind so it can differ from the banner.
+    for (std::size_t i = 0, n = probe.artwork.size(); i < n; ++i) {
+      if (probe.artwork[i].kind == art_kind_e::hero) {
+        auto bg = probe.artwork[i];
+        bg.kind = art_kind_e::background;
+        probe.artwork.push_back(std::move(bg));
+      }
     }
     auto described = game_to_json(probe, "search");
     return {{"matches", std::move(matches)}, {"artwork", std::move(described["artwork"])}};
@@ -902,7 +1153,7 @@ namespace library {
       throw std::invalid_argument("Artwork choices must be an object");
     }
     std::vector<art_ref_t> refs;
-    for (const auto kind : {art_kind_e::poster, art_kind_e::hero, art_kind_e::logo, art_kind_e::icon}) {
+    for (const auto kind : all_art_kinds) {
       const auto key = to_string(kind);
       if (!choices.contains(key)) {
         continue;
@@ -917,7 +1168,7 @@ namespace library {
       refs.push_back(*ref);
     }
     if (refs.empty()) {
-      throw std::invalid_argument("Choose at least one of poster, hero, logo or icon");
+      throw std::invalid_argument("Choose at least one of poster, hero, logo, icon or background");
     }
     return refs;
   }
@@ -935,6 +1186,9 @@ namespace library {
         break;
       case art_kind_e::icon:
         app["nova-icon"] = file.string();
+        break;
+      case art_kind_e::background:
+        app["nova-background"] = file.string();
         break;
     }
   }

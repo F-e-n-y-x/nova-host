@@ -259,10 +259,15 @@ namespace library::artwork {
     return out;
   }
 
+  std::string url_escape(const std::string &s) {
+    return escape(s);
+  }
+
   bool allowed_host(std::string_view host) {
-    static constexpr std::array<std::string_view, 7> exact {
+    static constexpr std::array<std::string_view, 14> exact {
       "store.steampowered.com", "steamcdn-a.akamaihd.net", "www.steamgriddb.com", "images.gog.com", "m.media-amazon.com",
-      "images-na.ssl-images-amazon.com", "cdn2.unrealengine.com"
+      "images-na.ssl-images-amazon.com", "cdn2.unrealengine.com", "id.twitch.tv", "api.igdb.com", "images.igdb.com",
+      "api.rawg.io", "media.rawg.io", "api.steampowered.com", "steamspy.com"
     };
     static constexpr std::array<std::string_view, 4> suffixes {".steamstatic.com", ".steamgriddb.com", ".epicgames.com", ".gog-statics.com"};
     if (std::ranges::find(exact, host) != exact.end()) {
@@ -273,7 +278,7 @@ namespace library::artwork {
     });
   }
 
-  std::optional<std::string> http_get(const std::string &url, std::size_t max_bytes, const std::string &bearer) {
+  std::optional<std::string> http_request(const std::string &url, std::size_t max_bytes, const std::vector<std::string> &headers, const std::optional<std::string> &post_body) {
     if (!allowed_host(https_host(url))) {
       return std::nullopt;
     }
@@ -282,9 +287,9 @@ namespace library::artwork {
       return std::nullopt;
     }
     sink_t sink {{}, max_bytes};
-    curl_slist *headers = nullptr;
-    if (!bearer.empty()) {
-      headers = curl_slist_append(headers, ("Authorization: Bearer " + bearer).c_str());
+    curl_slist *header_list = nullptr;
+    for (const auto &h : headers) {
+      header_list = curl_slist_append(header_list, h.c_str());
     }
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 #if LIBCURL_VERSION_NUM >= 0x075500
@@ -299,18 +304,46 @@ namespace library::artwork {
     curl_easy_setopt(curl, CURLOPT_USERAGENT, user_agent);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_body);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
-    if (headers) {
-      curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    if (post_body) {
+      curl_easy_setopt(curl, CURLOPT_POST, 1L);
+      curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_body->c_str());
+      curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(post_body->size()));
+    }
+    if (header_list) {
+      curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
     }
     const auto code = curl_easy_perform(curl);
     long status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-    curl_slist_free_all(headers);
+    curl_slist_free_all(header_list);
     curl_easy_cleanup(curl);
     if (code != CURLE_OK || status != 200) {
       return std::nullopt;
     }
     return std::move(sink.body);
+  }
+
+  std::optional<std::string> http_get(const std::string &url, std::size_t max_bytes, const std::string &bearer) {
+    std::vector<std::string> headers;
+    if (!bearer.empty()) {
+      headers.push_back("Authorization: Bearer " + bearer);
+    }
+    return http_request(url, max_bytes, headers);
+  }
+
+  std::string sgdb_query(const sgdb_options_t &opts, art_kind_e kind) {
+    std::string q = std::string("types=") + (opts.animated ? "static,animated" : "static");
+    q += std::string("&nsfw=") + (opts.nsfw ? "any" : "false");
+    q += std::string("&humor=") + (opts.humor ? "any" : "false");
+    if (kind == art_kind_e::poster) {
+      q += "&dimensions=600x900";
+      if (!opts.poster_style.empty()) {
+        q += "&styles=" + opts.poster_style;
+      }
+    } else if (kind == art_kind_e::hero && !opts.hero_style.empty()) {
+      q += "&styles=" + opts.hero_style;
+    }
+    return q;
   }
 
   std::vector<store_hit_t> parse_store_search(std::string_view json) {
@@ -341,7 +374,7 @@ namespace library::artwork {
     }
     for (const auto &item : doc["data"]) {
       if (item.is_object() && item.contains("id") && item["id"].is_number_unsigned()) {
-        out.push_back({item["id"].get<std::uint64_t>(), item.value("name", std::string {})});
+        out.push_back({item["id"].get<std::uint64_t>(), item.value("name", std::string {}), item.contains("release_date") && item["release_date"].is_number_integer() ? item["release_date"].get<std::int64_t>() : 0});
       }
     }
     return out;
@@ -377,7 +410,7 @@ namespace library::artwork {
     return body ? parse_sgdb_search(*body) : std::vector<sgdb_game_t> {};
   }
 
-  std::vector<art_ref_t> sgdb_artwork(const std::string &api_key, std::uint64_t game_id, std::uint32_t steam_appid) {
+  std::vector<art_ref_t> sgdb_artwork(const std::string &api_key, std::uint64_t game_id, std::uint32_t steam_appid, const sgdb_options_t &opts) {
     std::vector<art_ref_t> out;
     if (api_key.empty() || (game_id == 0 && steam_appid == 0)) {
       return out;
@@ -390,10 +423,7 @@ namespace library::artwork {
       {"icons", art_kind_e::icon},
     }};
     for (const auto &[endpoint, kind] : endpoints) {
-      std::string url = "https://www.steamgriddb.com/api/v2/" + std::string(endpoint) + "/" + target + "?types=static&nsfw=false";
-      if (kind == art_kind_e::poster) {
-        url += "&dimensions=600x900";
-      }
+      const std::string url = "https://www.steamgriddb.com/api/v2/" + std::string(endpoint) + "/" + target + "?" + sgdb_query(opts, kind);
       if (const auto body = http_get(url, 1024 * 1024, api_key)) {
         auto refs = parse_sgdb_images(*body, kind, 6);
         out.insert(out.end(), refs.begin(), refs.end());
@@ -407,13 +437,17 @@ namespace library::artwork {
     if (!bytes) {
       return std::nullopt;
     }
-    const auto img = decode(*bytes);
+    return store_bytes(ref.kind, *bytes, dir);
+  }
+
+  std::optional<fs::path> store_bytes(art_kind_e kind, std::string_view bytes, const fs::path &dir) {
+    const auto img = decode(bytes);
     if (!img) {
       return std::nullopt;
     }
     fs::path target;
     std::string encoded;
-    switch (ref.kind) {
+    switch (kind) {
       case art_kind_e::poster:
         target = dir / "poster.png";
         encoded = encode_png(fit(*img, 600, 900));
@@ -429,6 +463,10 @@ namespace library::artwork {
       case art_kind_e::icon:
         target = dir / "icon.png";
         encoded = encode_png(square(*img, 256));
+        break;
+      case art_kind_e::background:
+        target = dir / "background.jpg";
+        encoded = encode_jpeg(fit(*img, 2560, 1440), 85);
         break;
     }
     if (encoded.empty() || !write_atomic(target, encoded)) {

@@ -8,7 +8,9 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <array>
 #include <string>
+#include <unordered_map>
 #include <string_view>
 
 // lib includes
@@ -35,6 +37,26 @@ namespace confighttp {
 
   // Main server start function
   void start();
+
+  /**
+   * @brief Config keys whose values are write-only secrets in the admin API.
+   */
+  inline constexpr std::array<std::string_view, 4> secret_config_keys {"steamgriddb_api_key", "igdb_client_secret", "steam_web_api_key", "rawg_api_key"};
+
+  /**
+   * @brief Replace stored secret values with a placeholder before sending config to the web UI.
+   *
+   * @param tree Config object; empty secrets are left empty so the UI can tell "not set".
+   */
+  void mask_secret_config(nlohmann::json &tree);
+
+  /**
+   * @brief Put the stored secret back when the web UI returns the unchanged placeholder.
+   *
+   * @param input Config object being saved.
+   * @param current Config currently on disk.
+   */
+  void restore_secret_config(nlohmann::json &input, const std::unordered_map<std::string, std::string> &current);
 
   void print_req(const req_https_t &request);
   void send_response(const resp_https_t &response, const nlohmann::json &output_tree);
