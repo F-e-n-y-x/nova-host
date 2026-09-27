@@ -347,6 +347,14 @@ namespace nvhttp {
   std::string get_cert_by_uuid(std::string_view uuid);
 
   /**
+   * @brief Get a paired client's display name by UUID (for log messages).
+   *
+   * @param uuid Client UUID.
+   * @return The client's name, or an empty string when unknown.
+   */
+  std::string get_client_name_by_uuid(std::string_view uuid);
+
+  /**
    * @brief Check a user-supplied device name.
    * @param name Candidate name.
    * @return `true` when it has 1-64 characters, no leading/trailing spaces and no control characters.

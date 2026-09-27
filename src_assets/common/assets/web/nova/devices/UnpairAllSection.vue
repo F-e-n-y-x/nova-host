@@ -1,12 +1,12 @@
 <script setup>
 /**
- * Danger zone: unpair every device, behind a confirmation that needs an explicit checkbox.
+ * Danger zone at the bottom of Devices: unpair every device, behind a confirmation that needs an
+ * explicit checkbox. The parent performs the action and calls `close()` when it succeeds.
  */
-import { shallowRef, watch } from 'vue'
+import { shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import NvCard from '../components/NvCard.vue'
 import NvButton from '../components/NvButton.vue'
-import NvDialog from '../components/NvDialog.vue'
+import NvConfirmDialog from '../components/NvConfirmDialog.vue'
 
 const props = defineProps({
   count: { type: Number, required: true },
@@ -16,15 +16,8 @@ const emit = defineEmits(['confirm'])
 
 const { t } = useI18n()
 const open = shallowRef(false)
-const understood = shallowRef(false)
 
-watch(open, (isOpen) => {
-  if (isOpen) understood.value = false
-})
-
-/**
- * Close the dialog; the parent calls this after unpairing finishes.
- */
+/** Close the dialog; the parent calls this after unpairing finishes. */
 function close() {
   open.value = false
 }
@@ -33,67 +26,51 @@ defineExpose({ close })
 </script>
 
 <template>
-  <NvCard :title="t('nova.devices.danger_title')">
-    <div class="nv-danger">
-      <div class="nv-grow">
-        <p class="nv-danger__title">{{ t('nova.devices.unpair_all') }}</p>
-        <p class="nv-danger__desc">{{ t('nova.devices.unpair_all_desc') }}</p>
-      </div>
-      <NvButton variant="danger" @click="open = true">{{ t('nova.devices.unpair_all_button') }}</NvButton>
+  <section class="nv-danger-zone" aria-labelledby="nv-danger-zone-title">
+    <div class="nv-danger-zone__text">
+      <h2 id="nv-danger-zone-title" class="nv-danger-zone__title">{{ t('nova.devices.unpair_all_button') }}</h2>
+      <p class="nv-danger-zone__desc">{{ t('nova.devices.unpair_all_desc') }}</p>
     </div>
-  </NvCard>
-
-  <NvDialog v-model:open="open" :title="t('nova.devices.unpair_all_confirm_title')"
-            :description="t('nova.devices.unpair_all_confirm_desc', { n: props.count }, props.count)">
-    <label class="nv-danger__check">
-      <input v-model="understood" type="checkbox">
-      <span>{{ t('nova.devices.unpair_all_check', { n: props.count }, props.count) }}</span>
-    </label>
-    <template #footer>
-      <NvButton variant="secondary" @click="open = false">{{ t('nova.common.cancel') }}</NvButton>
-      <NvButton variant="danger" :disabled="!understood" :loading="busy" @click="emit('confirm')">
-        {{ t('nova.devices.unpair_all_button') }}
-      </NvButton>
-    </template>
-  </NvDialog>
+    <NvButton variant="danger" @click="open = true">{{ t('nova.devices.unpair_all_ellipsis') }}</NvButton>
+  </section>
+  <NvConfirmDialog v-model:open="open" :title="t('nova.devices.unpair_all_confirm_title')"
+                   :description="t('nova.devices.unpair_all_confirm_desc', { n: props.count }, props.count)"
+                   :confirm-label="t('nova.devices.unpair_all_button')"
+                   :require-check="t('nova.devices.unpair_all_check', { n: props.count }, props.count)"
+                   :loading="busy" @confirm="emit('confirm')" />
 </template>
 
 <style scoped>
 @layer components {
-  .nv-danger {
+  .nv-danger-zone {
     display: flex;
     align-items: center;
     gap: var(--nv-space-4);
+    padding: var(--nv-space-4) var(--nv-space-5);
+    border: 1px solid var(--nv-danger-zone-border);
+    border-radius: var(--nv-radius-xl);
+    background: var(--nv-danger-zone);
   }
 
-  .nv-danger__title {
-    margin: 0;
-    font-weight: 500;
+  .nv-danger-zone__text {
+    flex-grow: 1;
+    min-width: 0;
   }
 
-  .nv-danger__desc {
+  .nv-danger-zone__title {
     margin: 0;
+    font-size: var(--nv-text-md);
+    font-weight: 600;
+  }
+
+  .nv-danger-zone__desc {
+    margin: 2px 0 0;
     font-size: var(--nv-text-sm);
     color: var(--nv-text-secondary);
   }
 
-  .nv-danger__check {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--nv-space-3);
-    min-height: 44px;
-    cursor: pointer;
-  }
-
-  .nv-danger__check input {
-    width: 20px;
-    height: 20px;
-    margin: 2px 0 0;
-    accent-color: var(--nv-danger-fill);
-  }
-
   @media (max-width: 599px) {
-    .nv-danger {
+    .nv-danger-zone {
       flex-direction: column;
       align-items: stretch;
     }

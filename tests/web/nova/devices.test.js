@@ -89,24 +89,30 @@ describe('device formatting', () => {
 })
 
 describe('PermissionEditor', () => {
-  it('sends a preset or a single flag with the resulting permissions', async () => {
-    const wrapper = mountNova(PermissionEditor, { props: { permissions: FULL, deviceName: 'Phone' } })
-    const buttons = wrapper.findAll('.nv-seg__option')
-    expect(buttons.map((b) => b.text())).toEqual(['Full access', 'Play', 'View only'])
-    expect(buttons[0].attributes('aria-pressed')).toBe('true')
+  it('applies a preset or a single flag and shows which preset the flags match', async () => {
+    const { input_keyboard, input_mouse, input_controller, input_touch_pen, clipboard, launch_apps } = FULL
+    let flags = { input_keyboard, input_mouse, input_controller, input_touch_pen, clipboard, launch_apps }
+    const wrapper = mountNova(PermissionEditor, {
+      props: { modelValue: flags, 'onUpdate:modelValue': (v) => { flags = v; wrapper.setProps({ modelValue: v }) } },
+    })
+    const buttons = () => wrapper.findAll('.nv-seg__option')
+    expect(buttons().map((b) => b.text())).toEqual(['Full access', 'Play only', 'View only'])
+    expect(buttons()[0].attributes('aria-pressed')).toBe('true')
 
-    await buttons[2].trigger('click')
-    const [update, next] = wrapper.emitted('change')[0]
-    expect(update).toEqual({ preset: 'view_only' })
-    expect(next.preset).toBe('view_only')
-    expect(next.input_keyboard).toBe(false)
+    await buttons()[2].trigger('click')
+    await flushPromises()
+    expect(flags.input_keyboard).toBe(false)
+    expect(Object.values(flags).every((v) => v === false)).toBe(true)
+    expect(buttons()[2].attributes('aria-pressed')).toBe('true')
 
+    await buttons()[0].trigger('click')
+    await flushPromises()
     const switches = wrapper.findAll('[role="switch"]')
     expect(switches).toHaveLength(6)
     await switches[4].trigger('click') // clipboard off → matches "play"
-    const [update2, next2] = wrapper.emitted('change')[1]
-    expect(update2).toEqual({ clipboard: false })
-    expect(next2.preset).toBe('play')
+    await flushPromises()
+    expect(flags.clipboard).toBe(false)
+    expect(buttons()[1].attributes('aria-pressed')).toBe('true')
     wrapper.unmount()
   })
 })
@@ -135,25 +141,41 @@ describe('Devices page', () => {
     wrapper.unmount()
   })
 
-  it('blocks a device optimistically and rolls back with a named error', async () => {
+  it('blocks a device from the row menu optimistically and rolls back with a named error', async () => {
     const stub = stubHost({
       'GET /api/clients/list': () => [200, { status: true, named_certs: [device()] }],
       'GET /api/pin': () => [200, { pairings: [] }],
       'POST /api/clients/update': () => [400, { status: false, error: 'nope' }],
     })
     const { wrapper } = await mountDevices()
-    const toggle = wrapper.find('.nv-device-row [role="switch"]')
-    expect(toggle.attributes('aria-checked')).toBe('true')
-    await toggle.trigger('click')
+    expect(wrapper.find('tbody tr').text()).toContain('Full access')
+    await wrapper.find('tbody tr button[aria-haspopup]').trigger('click')
+    await flushPromises()
+    const block = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.trim() === 'Block device')
+    block.click()
     expect(JSON.parse(calls(stub, 'POST /api/clients/update')[0][1].body)).toEqual({ uuid: device().uuid, enabled: false })
     await flushPromises()
-    expect(wrapper.find('.nv-device-row [role="switch"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.find('tbody tr').text()).toContain('Full access')
     expect(toasts.at(-1).variant).toBe('danger')
     expect(toasts.at(-1).message).toContain('Pixel 9 Pro')
     wrapper.unmount()
   })
 
-  it('opens a device at /devices/:uuid, renames it and asks before unpairing', async () => {
+  it('shows the live session on the streaming device', async () => {
+    stubHost({
+      'GET /api/clients/list': () => [200, { status: true, named_certs: [device()] }],
+      'GET /api/pin': () => [200, { pairings: [] }],
+      'GET /api/sessions': () => [200, { sessions: [{ id: 1, client_uuid: device().uuid, app_name: 'Grand Theft Auto V', fps_actual: 60, bitrate_kbps: 30000, latency_ms: { total: 6 } }] }],
+    })
+    const { wrapper } = await mountDevices()
+    await flushPromises()
+    const row = wrapper.find('tbody tr').text()
+    expect(row).toContain('Streaming Grand Theft Auto V')
+    expect(row).toContain('60 fps · 30 Mbps · 6.0 ms')
+    wrapper.unmount()
+  })
+
+  it('opens a device at /devices/:uuid, saves edits together and asks before unpairing', async () => {
     const stub = stubHost({
       'GET /api/clients/list': () => [200, { status: true, named_certs: [device({ connected: true })] }],
       'GET /api/pin': () => [200, { pairings: [] }],
@@ -162,34 +184,40 @@ describe('Devices page', () => {
       'POST /api/clients/disconnect': () => [200, { status: true }],
     })
     const { wrapper, router } = await mountDevices()
-    await wrapper.find('.nv-device-row__name').trigger('click')
+    await wrapper.find('.nv-drow__name').trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.path).toBe(`/devices/${device().uuid}`)
 
-    const dialog = () => document.querySelector('[role="dialog"]')
-    expect(dialog().textContent).toContain('Pixel 9 Pro is streaming')
+    const sheet = () => document.querySelector('.nv-sheet [role="dialog"]')
+    expect(sheet().textContent).toContain('Streaming now')
+    const save = () => [...sheet().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save')
+    expect(save().disabled).toBe(true)
 
-    const nameInput = dialog().querySelector('input[type="text"]')
+    const nameInput = sheet().querySelector('input[type="text"]')
     nameInput.value = 'Living room TV'
     nameInput.dispatchEvent(new Event('input'))
     await flushPromises()
-    dialog().querySelector('form').dispatchEvent(new Event('submit'))
+    const clipboard = [...sheet().querySelectorAll('[role="switch"]')][5]
+    clipboard.click()
     await flushPromises()
-    expect(JSON.parse(calls(stub, 'POST /api/clients/update')[0][1].body)).toEqual({ uuid: device().uuid, name: 'Living room TV' })
+    save().click()
+    await flushPromises()
+    expect(JSON.parse(calls(stub, 'POST /api/clients/update')[0][1].body)).toEqual({ uuid: device().uuid, name: 'Living room TV', permissions: { preset: 'play' } })
 
-    const endStream = [...dialog().querySelectorAll('button')].find((b) => b.textContent.trim() === 'End stream')
+    const endStream = [...sheet().querySelectorAll('button')].find((b) => b.textContent.trim() === 'End stream')
     endStream.click()
     await flushPromises()
     expect(calls(stub, 'POST /api/clients/disconnect')).toHaveLength(1)
 
-    const unpairButton = [...dialog().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Unpair Living room TV')
+    const unpairButton = [...sheet().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Unpair…')
     unpairButton.click()
     await flushPromises()
-    expect(dialog().textContent).toContain('Unpair Living room TV?')
+    const confirmDialog = [...document.querySelectorAll('[role="dialog"]')].find((d) => d.textContent.includes('Unpair Living room TV?'))
+    expect(confirmDialog).toBeTruthy()
     expect(document.activeElement.textContent.trim()).toBe('Cancel')
     expect(calls(stub, 'POST /api/clients/unpair')).toHaveLength(0)
 
-    const confirm = [...dialog().querySelectorAll('.nv-panel__confirm button')].find((b) => b.textContent.trim() === 'Unpair Living room TV')
+    const confirm = [...confirmDialog.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Unpair')
     confirm.click()
     await flushPromises()
     expect(calls(stub, 'POST /api/clients/unpair')).toHaveLength(1)
@@ -205,7 +233,7 @@ describe('Devices page', () => {
       'POST /api/clients/unpair-all': () => [200, { status: true }],
     })
     const { wrapper } = await mountDevices()
-    await wrapper.findAll('button').find((b) => b.text() === 'Unpair all devices').trigger('click')
+    await wrapper.findAll('button').find((b) => b.text() === 'Unpair all…').trigger('click')
     await flushPromises()
     const dialog = document.querySelector('[role="dialog"]')
     const confirm = [...dialog.querySelectorAll('footer button')].find((b) => b.textContent.trim() === 'Unpair all devices')
@@ -229,7 +257,7 @@ describe('Devices page', () => {
     await wrapper.findAll('button').find((b) => b.text() === 'Clear search').trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.query.q).toBeUndefined()
-    expect(wrapper.findAll('.nv-device-row')).toHaveLength(9)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(9)
     wrapper.unmount()
   })
 })

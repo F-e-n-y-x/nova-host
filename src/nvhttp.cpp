@@ -2081,6 +2081,7 @@ namespace nvhttp {
 
   void erase_all_clients() {
     std::lock_guard lock {client_auth_mutex()};
+    BOOST_LOG(info) << "Unpaired all devices ("sv << client_root.named_devices.size() << " removed)"sv;
     client_root = {};
     cert_chain.clear();
     save_state();
@@ -2091,6 +2092,7 @@ namespace nvhttp {
     bool removed = false;
     for (auto it = client_root.named_devices.begin(); it != client_root.named_devices.end();) {
       if ((*it).uuid == uuid) {
+        BOOST_LOG(info) << "Unpaired device ["sv << (*it).name << "] ("sv << uuid << ')';
         it = client_root.named_devices.erase(it);
         removed = true;
       } else {
@@ -2107,6 +2109,9 @@ namespace nvhttp {
     std::lock_guard lock {client_auth_mutex()};
     for (auto &named_cert : client_root.named_devices) {
       if (named_cert.uuid == uuid) {
+        if (named_cert.enabled != enabled) {
+          BOOST_LOG(info) << (enabled ? "Allowed device ["sv : "Blocked device ["sv) << named_cert.name << "] ("sv << uuid << ')';
+        }
         named_cert.enabled = enabled;
         rebuild_client_cert_chain();
         save_state();
@@ -2114,6 +2119,16 @@ namespace nvhttp {
       }
     }
     return false;
+  }
+
+  std::string get_client_name_by_uuid(const std::string_view uuid) {
+    std::lock_guard lock {client_auth_mutex()};
+    for (const auto &named_cert : client_root.named_devices) {
+      if (named_cert.uuid == uuid) {
+        return named_cert.name;
+      }
+    }
+    return {};
   }
 
   /**
@@ -2154,6 +2169,9 @@ namespace nvhttp {
     std::lock_guard lock {client_auth_mutex()};
     for (auto &named_cert : client_root.named_devices) {
       if (named_cert.uuid == uuid) {
+        if (named_cert.name != name) {
+          BOOST_LOG(info) << "Renamed device ["sv << named_cert.name << "] to ["sv << name << "] ("sv << uuid << ')';
+        }
         named_cert.name = std::string {name};
         save_state();
         return true;
@@ -2169,6 +2187,10 @@ namespace nvhttp {
       std::lock_guard lock {client_auth_mutex()};
       for (auto &named_cert : client_root.named_devices) {
         if (named_cert.uuid == uuid) {
+          if (named_cert.permissions != mask) {
+            BOOST_LOG(info) << "Changed permissions of device ["sv << named_cert.name << "] ("sv << uuid << ") to "sv
+                            << client_permissions::preset_name(mask) << " (mask 0x"sv << std::hex << static_cast<unsigned>(mask) << std::dec << ')';
+          }
           named_cert.permissions = mask;
           cert = named_cert.cert;
           save_state();

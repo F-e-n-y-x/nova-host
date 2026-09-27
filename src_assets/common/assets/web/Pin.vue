@@ -1,13 +1,11 @@
 <script setup>
 /**
- * Pair a device page: how-to steps next to the approval form. Pairing requests are
+ * Pair a device page (A+C design): the PIN card next to "How it works". Pairing requests are
  * polled every 2 seconds while the page is visible.
  */
 import { onMounted, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import NvPage from './nova/components/NvPage.vue'
-import NvCard from './nova/components/NvCard.vue'
-import NvButton from './nova/components/NvButton.vue'
 import PairSteps from './nova/pair/PairSteps.vue'
 import PairForm from './nova/pair/PairForm.vue'
 import { getConfig } from './nova/api'
@@ -28,14 +26,10 @@ onMounted(async () => {
 
 <template>
   <NvPage :title="t('nova.pair.title')">
-    <template #subtitle><span>{{ t('nova.pair.intro') }}</span></template>
-    <template #actions><NvButton variant="secondary" to="/devices">{{ t('nova.pair.view_devices') }}</NvButton></template>
-
     <div class="nv-pair">
+      <PairForm :requests="requests" :loaded="loaded" :failed="failed" :host-name="hostName"
+                @changed="refresh" @retry="refresh" />
       <PairSteps :host-name="hostName" />
-      <NvCard :title="t('nova.pair.form_title')">
-        <PairForm :requests="requests" :loaded="loaded" :failed="failed" @changed="refresh" @retry="refresh" />
-      </NvCard>
     </div>
   </NvPage>
 </template>
@@ -44,14 +38,18 @@ onMounted(async () => {
 @layer components {
   .nv-pair {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--nv-space-5);
+    grid-template-columns: minmax(0, 536px) minmax(0, 320px);
+    gap: var(--nv-space-6);
     align-items: start;
+    justify-content: center;
+    padding-top: var(--nv-space-4);
   }
 
-  @media (max-width: 899px) {
+  @media (max-width: 1023px) {
     .nv-pair {
       grid-template-columns: minmax(0, 1fr);
+      justify-content: stretch;
+      padding-top: 0;
     }
   }
 }
