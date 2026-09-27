@@ -1,0 +1,126 @@
+#!/bin/bash
+# Nova: run a Windows game with GE-Proton through umu-launcher.
+#
+# Usage: nova-proton-run <game.exe> [game args...]
+#
+# Nova passes per-game settings as environment variables (see docs/configuration.md):
+#   NOVA_GAME_SLUG          prefix/cache name (default: exe name)
+#   NOVA_STEAM_APPID        Steam app id -> GAMEID=umu-<id> so protonfixes for that game apply
+#   NOVA_COMPAT_PREFIX      Wine prefix (default: ~/Games/nova/<slug>)
+#   NOVA_COMPAT_PROTON      GE-Proton release name to pin (default: latest)
+#   NOVA_PROTON_AUTO_UPDATE 1 = let umu fetch/update the latest GE-Proton, 0 = newest installed
+#   NOVA_COMPAT_FSR         1-5 enables Proton fullscreen FSR (1 = sharpest)
+#   NOVA_COMPAT_FPS         frame rate cap (DXVK)
+#   NOVA_COMPAT_MANGOHUD    1 = MangoHud overlay
+#   NOVA_COMPAT_ENV         extra KEY=VALUE lines
+set -u
+
+EXE="${1:-}"
+[ "$#" -gt 0 ] && shift
+if [ -z "$EXE" ]; then
+    echo "nova-proton-run: no game executable given" >&2
+    exit 2
+fi
+if [ ! -f "$EXE" ]; then
+    echo "nova-proton-run: game file not found: $EXE" >&2
+    exit 2
+fi
+if ! command -v umu-run >/dev/null 2>&1; then
+    echo "nova-proton-run: umu-run is not installed (package umu-launcher)" >&2
+    exit 2
+fi
+
+SLUG="${NOVA_GAME_SLUG:-$(basename "$EXE" | sed 's/\.[Ee][Xx][Ee]$//' | tr -cs 'A-Za-z0-9' '-' | tr 'A-Z' 'a-z' | sed 's/^-*//; s/-*$//')}"
+SLUG="${SLUG:-game}"
+
+WINEPREFIX="${NOVA_COMPAT_PREFIX:-$HOME/Games/nova/$SLUG}"
+# apps.json may store "~/..." literally; expand it here.
+# shellcheck disable=SC2088
+case "$WINEPREFIX" in
+    "~") WINEPREFIX="$HOME" ;;
+    "~/"*) WINEPREFIX="$HOME/${WINEPREFIX#"~/"}" ;;
+esac
+export WINEPREFIX
+mkdir -p "$WINEPREFIX"
+
+# Locally installed GE-Proton builds as "<release>\t<dir>" (release from the build's version file,
+# since folder names vary: GE-Proton11-7, GE-Proton11-7-x86_64, Lutris' plain "ge-proton").
+ge_builds() {
+    local dir p name
+    for dir in "$HOME/.local/share/Steam/compatibilitytools.d" "$HOME/.local/share/umu/compatibilitytools" \
+        "$HOME/.local/share/lutris/runners/proton" "$HOME/.local/share/lutris/runners/wine"; do
+        [ -d "$dir" ] || continue
+        for p in "$dir"/*/; do
+            p="${p%/}"
+            [ -x "$p/proton" ] || continue
+            name="$(awk '{print $2; exit}' "$p/version" 2>/dev/null)"
+            name="${name:-$(basename "$p")}"
+            case "$name" in GE-Proton*|ge-proton*) printf '%s\t%s\n' "$name" "$p" ;; esac
+        done
+    done
+}
+
+# local_ge [release]: that release if installed, else (no argument) the newest installed one.
+local_ge() {
+    if [ -n "${1:-}" ]; then
+        ge_builds | awk -F'\t' -v w="$1" '$1 == w || $2 ~ ("/" w "$") {print $2; exit}'
+    else
+        ge_builds | sort -V -k1,1 | tail -n1 | cut -f2
+    fi
+}
+
+if [ -n "${NOVA_COMPAT_PROTON:-}" ]; then
+    PROTONPATH="$(local_ge "$NOVA_COMPAT_PROTON")"
+    PROTONPATH="${PROTONPATH:-$NOVA_COMPAT_PROTON}"
+elif [ "${NOVA_PROTON_AUTO_UPDATE:-1}" = "1" ] && getent hosts github.com >/dev/null 2>&1; then
+    PROTONPATH="GE-Proton"  # umu downloads and keeps the latest GE-Proton
+else
+    PROTONPATH="$(local_ge)"
+    PROTONPATH="${PROTONPATH:-GE-Proton}"
+fi
+export PROTONPATH
+
+if [ -n "${NOVA_STEAM_APPID:-}" ]; then
+    export GAMEID="umu-${NOVA_STEAM_APPID}"
+else
+    export GAMEID="${GAMEID:-umu-default}"
+fi
+export STORE="${STORE:-none}"
+
+# NVIDIA: DXVK-NVAPI (DLSS/Reflex where the GPU supports them). GE-Proton uses NTSYNC by itself
+# when /dev/ntsync exists, so nothing is needed for that.
+if [ -e /proc/driver/nvidia/version ]; then
+    export PROTON_ENABLE_NVAPI=1
+fi
+
+# Keep shader caches per game so they survive prefix resets and don't get evicted.
+CACHE="$HOME/.cache/nova/shaders/$SLUG"
+mkdir -p "$CACHE"
+export DXVK_STATE_CACHE_PATH="$CACHE"
+export VKD3D_SHADER_CACHE_PATH="$CACHE"
+export __GL_SHADER_DISK_CACHE_PATH="$CACHE"
+export __GL_SHADER_DISK_CACHE_SIZE=10737418240
+export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1
+
+if [ -n "${NOVA_COMPAT_FSR:-}" ]; then
+    export WINE_FULLSCREEN_FSR=1
+    export WINE_FULLSCREEN_FSR_STRENGTH=$((NOVA_COMPAT_FSR - 1))
+fi
+if [ -n "${NOVA_COMPAT_FPS:-}" ]; then
+    export DXVK_FRAME_RATE="$NOVA_COMPAT_FPS"
+fi
+if [ "${NOVA_COMPAT_MANGOHUD:-0}" = "1" ]; then
+    export MANGOHUD=1
+fi
+while IFS= read -r kv; do
+    [ -n "$kv" ] && export "${kv?}"
+done <<< "${NOVA_COMPAT_ENV:-}"
+
+cd "$(dirname "$EXE")" || exit 2
+
+LAUNCH=(umu-run "$EXE" "$@")
+if command -v gamemoderun >/dev/null 2>&1; then
+    LAUNCH=(gamemoderun "${LAUNCH[@]}")
+fi
+# exec keeps the game in Nova's process group, so the stream lasts exactly as long as the game.
+exec "${LAUNCH[@]}"
