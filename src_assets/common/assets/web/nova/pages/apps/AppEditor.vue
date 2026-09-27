@@ -8,7 +8,8 @@
  * Layout (Library design): hero banner with the poster overlapping it, name + source line and
  * "Change artwork", then Name / Command / Working folder, before-and-after commands, and an
  * "Advanced" disclosure (detached commands, behaviour, exit timeout, output log, variables).
- * Saved games in a host with the library API also get a "Metadata" tab (see AppMetadataPanel).
+ * Saved games in a host with the library API also get "Artwork" (every kind: upload, URL, search, reset)
+ * and "Metadata" tabs (see AppArtworkPanel, AppMetadataPanel).
  *
  * Props: open, app (the app to edit, or null to add one), index (-1 to add),
  *        platform (host platform from /api/config), libraryApi (host has library artwork search),
@@ -32,6 +33,7 @@ import NvAlert from '../../components/NvAlert.vue'
 import NvSegmentedControl from '../../components/NvSegmentedControl.vue'
 import ArtworkPicker from '../library/ArtworkPicker.vue'
 import AppMetadataPanel from './AppMetadataPanel.vue'
+import AppArtworkPanel from './AppArtworkPanel.vue'
 import PathField from './PathField.vue'
 import PrepCommandList from './PrepCommandList.vue'
 import DetachedCommandList from './DetachedCommandList.vue'
@@ -67,7 +69,7 @@ const discard = reactive({ open: false, then: null })
 const coversOpen = shallowRef(false)
 const artwork = reactive({ open: false, loading: false, error: '', busy: false, candidates: {}, choice: { poster: 'none' } })
 const browser = ref({ open: false, type: 'any', title: '', start: '', apply: null })
-/** Editor tab: 'details' (the form) or 'metadata'. */
+/** Editor tab: 'details' (the form), 'artwork' or 'metadata'. */
 const tab = shallowRef('details')
 
 const isWindows = computed(() => props.platform === 'windows')
@@ -75,6 +77,7 @@ const isNew = computed(() => props.index === -1)
 const showTabs = computed(() => !isNew.value && props.libraryApi)
 const tabs = computed(() => [
   { value: 'details', label: t('nova.library.tab_details') },
+  { value: 'artwork', label: t('nova.library.art_tab') },
   { value: 'metadata', label: t('nova.library.tab_metadata') },
 ])
 const title = computed(() => (isNew.value ? t('nova.apps.add_title') : t('nova.apps.edit_title', { name: props.app?.name || t('nova.apps.unnamed') })))
@@ -158,7 +161,7 @@ async function openArtwork() {
   }
 }
 
-const ART_FIELDS = ['image-path', 'nova-hero', 'nova-logo', 'nova-icon']
+const ART_FIELDS = ['image-path', 'nova-hero', 'nova-logo', 'nova-icon', 'nova-background']
 /** Match fields the Metadata tab changes on the host. */
 const MATCH_FIELDS = ['nova-steam-appid', 'nova-igdb-id']
 
@@ -351,6 +354,8 @@ defineExpose({ isDirty, askDiscard, openArtwork })
     </div>
     <AppMetadataPanel v-if="showTabs && tab === 'metadata'" :index="index" :name="app?.name || ''" :draft-name="form.name"
                       @match-changed="onMetaChanged(MATCH_FIELDS)" @artwork-applied="onMetaArtwork" />
+    <AppArtworkPanel v-if="showTabs && tab === 'artwork'" :index="index" :app="app" :name="app?.name || ''"
+                     :cover-version="coverVersion" @artwork-applied="onMetaArtwork" />
 
     <form v-show="tab === 'details'" id="nv-app-editor" class="nv-editor" novalidate @submit.prevent="save" @focusout="onFocusOut">
       <NvAlert v-if="saveError" variant="danger" live :title="t('nova.apps.save_failed_title')">{{ saveError }}</NvAlert>

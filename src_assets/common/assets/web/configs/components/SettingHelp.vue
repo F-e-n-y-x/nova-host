@@ -83,6 +83,12 @@ const DISPLAY_LOG = {
          rel="noopener noreferrer">{{ t('nova.settings.igdb_get_key') }}</a>
     </template>
 
+    <template v-else-if="topic === 'steam_web'">
+      <p>{{ t('nova.settings.steam_web_help') }}</p>
+      <a class="nv-cfg-help__link" href="https://steamcommunity.com/dev/apikey" target="_blank"
+         rel="noopener noreferrer">{{ t('nova.settings.steam_web_get_key') }}</a>
+    </template>
+
     <template v-else-if="topic === 'rawg'">
       <p>{{ t('nova.settings.rawg_help') }}</p>
       <a class="nv-cfg-help__link" href="https://rawg.io/apidocs" target="_blank"

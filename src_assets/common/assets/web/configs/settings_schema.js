@@ -130,6 +130,7 @@ export const OPTIONS = {
   steamgriddb_api_key: { type: 'secret', mono: true, group: 'metadata_keys', placeholder: 'Paste your API key', help: 'steamgriddb', helpOpen: true },
   igdb_client_id: { type: 'text', mono: true, group: 'metadata_keys', placeholder: 'Twitch client ID', help: 'igdb', helpOpen: true },
   igdb_client_secret: { type: 'secret', mono: true, group: 'metadata_keys', placeholder: 'Twitch client secret' },
+  steam_web_api_key: { type: 'secret', mono: true, group: 'metadata_keys', placeholder: 'Paste your API key', help: 'steam_web', helpOpen: true },
   rawg_api_key: { type: 'secret', mono: true, group: 'metadata_keys', placeholder: 'Paste your API key', help: 'rawg', helpOpen: true },
 
   // Display & capture
@@ -400,7 +401,7 @@ export const SECTIONS = [
     id: 'library',
     options: ['metadata_steam', 'metadata_language', 'metadata_auto_fetch', 'metadata_ttl_days', 'art_source_priority',
       'art_prefer_official', 'art_steamgriddb_poster_style', 'art_steamgriddb_hero_style', 'art_allow_animated', 'art_nsfw',
-      'art_humor', 'steamgriddb_api_key', 'igdb_client_id', 'igdb_client_secret', 'rawg_api_key'],
+      'art_humor', 'steamgriddb_api_key', 'igdb_client_id', 'igdb_client_secret', 'steam_web_api_key', 'rawg_api_key'],
     panel: 'LibraryMetadataPanel',
   },
   {

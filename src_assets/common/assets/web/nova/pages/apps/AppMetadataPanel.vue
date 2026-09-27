@@ -18,6 +18,7 @@ import NvButton from '../../components/NvButton.vue'
 import NvSkeleton from '../../components/NvSkeleton.vue'
 import NvTextField from '../../components/NvTextField.vue'
 import { ART_KINDS, applyArtwork, pollJob, searchArtwork } from '../library/libraryApi'
+import MatchResults from '../library/MatchResults.vue'
 import {
   getAppMetadata, hasOverride, matchCandidates, matchChange, relativeTime, searchMetadata, setAppMetadata,
 } from '../library/metadataApi'
@@ -36,7 +37,7 @@ const loadError = shallowRef(false)
 /** Which action is running ('match' | 'refetch' | 'reset' | 'artwork'), or ''. */
 const busy = shallowRef('')
 const message = reactive({ variant: 'success', text: '' })
-const search = reactive({ open: false, q: '', loading: false, error: '', searched: '', results: [], igdb: true })
+const search = reactive({ open: false, q: '', loading: false, error: '', searched: '', results: [], allSources: true })
 let controller = new AbortController()
 
 const match = computed(() => status.value?.match || null)
@@ -119,7 +120,7 @@ async function runSearch() {
   try {
     const results = await searchMetadata(q)
     search.results = matchCandidates(results)
-    search.igdb = results.igdb.length > 0
+    search.allSources = results.igdb && results.steamgriddb
     search.searched = q
   } catch {
     search.error = t('nova.library.meta_search_failed')
@@ -212,19 +213,8 @@ function resetArtwork() {
       <p v-else-if="search.searched && !search.loading && search.results.length === 0" class="nv-meta__empty">
         {{ t('nova.library.meta_search_empty', { q: search.searched }) }}
       </p>
-      <ul v-if="search.results.length" class="nv-meta__results">
-        <li v-for="candidate in search.results" :key="candidate.key" class="nv-meta__result">
-          <div class="nv-meta__match">
-            <span class="nv-meta__name">{{ candidate.name }}<template v-if="candidate.year"> ({{ candidate.year }})</template></span>
-            <span class="nv-meta__id">
-              {{ t(`nova.library.meta_source_${candidate.source}`) }} · {{ candidate.id }} ·
-              {{ t('nova.library.meta_confidence', { percent: Math.round(candidate.confidence * 100) }) }}
-            </span>
-          </div>
-          <NvButton size="sm" :disabled="!!busy" @click="choose(candidate)">{{ t('nova.library.meta_use') }}</NvButton>
-        </li>
-      </ul>
-      <p v-if="search.searched && !search.igdb" class="nv-meta__note">{{ t('nova.library.meta_igdb_hint') }}</p>
+      <MatchResults v-if="search.results.length" :candidates="search.results" :busy="!!busy" @choose="choose" />
+      <p v-if="search.searched && !search.allSources" class="nv-meta__note">{{ t('nova.library.meta_sources_hint') }}</p>
     </section>
   </div>
 </template>
@@ -307,26 +297,5 @@ function resetArtwork() {
     min-width: 0;
   }
 
-  .nv-meta__results {
-    display: flex;
-    flex-direction: column;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    border: 1px solid var(--nv-border);
-    border-radius: var(--nv-radius-lg);
-    background: var(--nv-raised);
-  }
-
-  .nv-meta__result {
-    display: flex;
-    align-items: center;
-    gap: var(--nv-space-3);
-    padding: var(--nv-space-3) var(--nv-space-4);
-  }
-
-  .nv-meta__result + .nv-meta__result {
-    border-top: 1px solid var(--nv-border);
-  }
 }
 </style>

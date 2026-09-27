@@ -5,7 +5,7 @@
  *   GET  /api/library/metadata/status           → {total, matched, last_refresh_at}
  *   POST /api/library/metadata/refresh {all:true}|{app_index} → {job_id}; result {refreshed, matched}
  *   POST /api/library/metadata/clear-cache {}    → {removed}
- *   GET  /api/library/metadata/search?q=         → {steam:[{appid,name,confidence}], igdb:[{id,name,year,confidence}]}
+ *   GET  /api/library/metadata/search?q=         → {candidates:[{source,appid,igdb_id,name,year,edition,type,unlisted,poster,confidence}]}
  *   GET  /api/library/metadata/<index>           → {name, match:{source,id,name,confidence}|null,
  *                                                   override:{steam_appid,igdb_id}, details:{source,fetched_at}|null}
  *   POST /api/library/metadata/<index> {steam_appid?, igdb_id?, reset?, refetch?} → same, plus job_id when refetching
@@ -43,14 +43,14 @@ export async function clearMetadataCache() {
 }
 
 /**
- * Search Steam (and IGDB when configured) for a title.
+ * Search every configured source (Steam, the Steam catalogue, SteamGridDB, IGDB) for a title.
  *
- * @param {string} q Title.
- * @returns {Promise<{steam: object[], igdb: object[]}>} Candidates with empty defaults.
+ * @param {string} q Title, Steam app id or store URL.
+ * @returns {Promise<{candidates: object[], igdb: boolean, steamgriddb: boolean}>} Merged candidates, best first.
  */
 export async function searchMetadata(q) {
   const body = await fetchJson(`./api/library/metadata/search?${new URLSearchParams({ q })}`)
-  return { steam: body?.steam || [], igdb: body?.igdb || [] }
+  return { candidates: body?.candidates || [], igdb: !!body?.igdb, steamgriddb: !!body?.steamgriddb }
 }
 
 /**
@@ -75,19 +75,22 @@ export function setAppMetadata(index, change) {
 }
 
 /**
- * Merge search results into one list, best match first.
+ * Candidates for display, with a stable key and the id the match is stored under.
  *
- * @param {{steam: object[], igdb: object[]}} results Search results.
- * @returns {{key: string, source: 'steam'|'igdb', id: number, name: string, year: string, confidence: number}[]} Candidates.
+ * @param {{candidates: object[]}} results Search results.
+ * @returns {{key: string, source: 'steam'|'igdb', id: number, appid: number|null, igdb_id: number|null, name: string,
+ *            year: string, edition: string, type: string, unlisted: boolean, poster: string|null, confidence: number}[]} Candidates.
  */
 export function matchCandidates(results) {
-  const steam = (results?.steam || []).map((m) => ({
-    key: `steam-${m.appid}`, source: 'steam', id: m.appid, name: m.name, year: '', confidence: m.confidence ?? 0,
+  return (results?.candidates || []).filter((c) => c.appid || c.igdb_id).map((c) => ({
+    ...c,
+    key: c.appid ? `steam-${c.appid}` : `igdb-${c.igdb_id}`,
+    source: c.appid ? 'steam' : 'igdb',
+    id: c.appid || c.igdb_id,
+    year: c.year || '',
+    edition: c.edition || '',
+    confidence: c.confidence ?? 0,
   }))
-  const igdb = (results?.igdb || []).map((m) => ({
-    key: `igdb-${m.id}`, source: 'igdb', id: m.id, name: m.name, year: m.year || '', confidence: m.confidence ?? 0,
-  }))
-  return [...steam, ...igdb].sort((a, b) => b.confidence - a.confidence)
 }
 
 /**

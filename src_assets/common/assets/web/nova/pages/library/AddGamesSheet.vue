@@ -26,6 +26,8 @@ import NvTextField from '../../components/NvTextField.vue'
 import NvActionMenu from '../../components/NvActionMenu.vue'
 import NvEmptyState from '../../components/NvEmptyState.vue'
 import ArtworkPicker from './ArtworkPicker.vue'
+import MatchResults from './MatchResults.vue'
+import { matchCandidates } from './metadataApi'
 import {
   cancelJob, candidateUrl, importPayload, initialReview, jobFraction, matchLevel, normalizeArtwork,
   pollJob, searchArtwork, startImport, startScan,
@@ -188,7 +190,7 @@ async function findMatches() {
   matchBusy.value = true
   matchError.value = ''
   try {
-    matchResults.value = (await searchArtwork({ q: matchQuery.value })).matches
+    matchResults.value = matchCandidates({ candidates: (await searchArtwork({ q: matchQuery.value })).matches })
     if (!matchResults.value.length) matchError.value = t('nova.addgames.no_matches', { q: matchQuery.value })
   } catch {
     matchError.value = t('nova.addgames.search_failed')
@@ -207,7 +209,7 @@ async function useMatch(match) {
   try {
     const { artwork } = await searchArtwork({ appid: match.appid })
     items.value = items.value.map((i) => (i.temp_id === artworkFor.value
-      ? { ...i, matched: { ...match, confidence: 1 }, artwork: normalizeArtwork(artwork) }
+      ? { ...i, matched: { appid: match.appid, name: match.name, confidence: 1 }, artwork: normalizeArtwork(artwork) }
       : i))
     review.value[artworkFor.value].title = match.name
     artDraft.value = Object.fromEntries(Object.entries(normalizeArtwork(artwork)).map(([k, list]) => [k, list[0]?.id || 'none']))
@@ -396,14 +398,7 @@ function beforeClose() {
         <NvButton type="submit" :loading="matchBusy">{{ t('nova.addgames.search') }}</NvButton>
       </form>
       <p v-if="matchError" class="nv-addgames__match-error" role="alert">{{ matchError }}</p>
-      <ul v-if="matchResults.length" class="nv-addgames__matches" :aria-label="t('nova.addgames.match_results')">
-        <li v-for="m in matchResults" :key="m.appid">
-          <button type="button" class="nv-addgames__match-item" @click="useMatch(m)">
-            <span>{{ m.name }}</span>
-            <span class="nv-mono nv-addgames__count">{{ Math.round((m.confidence ?? 0) * 100) }}%</span>
-          </button>
-        </li>
-      </ul>
+      <MatchResults v-if="matchResults.length" :candidates="matchResults" :busy="matchBusy" @choose="useMatch" />
       <ArtworkPicker v-model="artDraft" :artwork="artItem.artwork" :title="review[artItem.temp_id].title" :loading="matchBusy">
         <template #footnote>
           <p class="nv-addgames__note">{{ t('nova.addgames.art_note') }}</p>
@@ -449,14 +444,6 @@ function beforeClose() {
 
   .nv-addgames__sources,
   .nv-addgames__list,
-  .nv-addgames__matches {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--nv-space-3);
-  }
 
   .nv-addgames__source {
     display: flex;
@@ -666,24 +653,7 @@ function beforeClose() {
     font-size: var(--nv-text-sm);
   }
 
-  .nv-addgames__match-item {
-    width: 100%;
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--nv-space-3);
-    padding: 0 var(--nv-space-4);
-    border: 1px solid var(--nv-border);
-    border-radius: var(--nv-radius-md);
-    background: var(--nv-surface);
-    color: var(--nv-text);
-    font: inherit;
-    text-align: start;
-    cursor: pointer;
-  }
 
-  .nv-addgames__match-item:hover { background: var(--nv-raised); }
 
   @media (max-width: 767px) {
     .nv-addgames__folder { flex-direction: column; align-items: stretch; }

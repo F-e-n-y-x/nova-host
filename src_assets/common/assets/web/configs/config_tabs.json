@@ -23,6 +23,7 @@
       "art_humor": "disabled",
       "igdb_client_id": "",
       "igdb_client_secret": "",
+      "steam_web_api_key": "",
       "rawg_api_key": "",
       "windows_exe_launcher": ""
     }

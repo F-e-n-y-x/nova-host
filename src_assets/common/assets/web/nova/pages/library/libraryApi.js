@@ -9,7 +9,8 @@
  *                                                         progress:{done,total}, result?, error?}
  *   GET  /api/library/artwork/search?q=|appid=         → {matches:[{appid,name,confidence}], artwork:{poster|hero|logo|icon:[…]}}
  *   GET  /api/library/candidates/<id>                  → preview image
- *   GET  /api/covers/<index>/<poster|hero|logo|icon>   → stored artwork
+ *   GET  /api/covers/<index>/<poster|hero|logo|icon|background> → stored artwork
+ *   POST /api/library/artwork/custom {app_index, kind, data|url|reset} → {job_id}
  */
 import { apiFetch } from '../../../fetch_utils'
 import { fetchJson, postJson } from '../../api'
@@ -18,6 +19,8 @@ import { fetchJson, postJson } from '../../api'
 export const SOURCES = ['folder', 'lutris', 'steam', 'heroic']
 /** Artwork kinds, in picker tab order. */
 export const ART_KINDS = ['poster', 'hero', 'logo', 'icon']
+/** Every kind an app can have, including the details-page background (clients fall back to the hero). */
+export const ALL_ART_KINDS = [...ART_KINDS, 'background']
 /** Confidence at or above which a match needs no review. */
 export const SURE_MATCH = 0.85
 /** How often a running job is polled. */
@@ -118,7 +121,7 @@ export async function searchArtwork({ q, appid }) {
  * @returns {{poster: object[], hero: object[], logo: object[], icon: object[]}} Normalized map.
  */
 export function normalizeArtwork(artwork) {
-  return Object.fromEntries(ART_KINDS.map((k) => [k, Array.isArray(artwork?.[k]) ? artwork[k] : []]))
+  return Object.fromEntries(ALL_ART_KINDS.map((k) => [k, Array.isArray(artwork?.[k]) ? artwork[k] : []]))
 }
 
 /**
@@ -232,7 +235,7 @@ export function appRunner(app) {
  *
  * @param {object} app Application.
  * @param {number} index Its index in the apps list.
- * @param {'poster'|'hero'|'logo'|'icon'} kind Artwork kind.
+ * @param {'poster'|'hero'|'logo'|'icon'|'background'} kind Artwork kind.
  * @param {number} version Cache-busting counter.
  * @returns {string} URL.
  */
@@ -250,11 +253,54 @@ export function artUrl(app, index, kind, version = 0) {
  */
 export async function applyArtwork(appIndex, choices) {
   const body = { app_index: appIndex }
-  for (const kind of ART_KINDS) {
+  for (const kind of ALL_ART_KINDS) {
     if (choices?.[kind] && choices[kind] !== 'none') body[kind] = choices[kind]
   }
   if (Object.keys(body).length === 1) throw new Error('nothing chosen')
   return (await postJson('./api/library/artwork/apply', body)).job_id
+}
+
+/**
+ * Set one kind of an app's artwork from an uploaded image, an image URL, or back to automatic.
+ *
+ * @param {number} appIndex App index.
+ * @param {string} kind Artwork kind.
+ * @param {{data?: string, url?: string, reset?: boolean}} source Base64 image data, an https URL, or reset.
+ * @returns {Promise<string>} Job id; poll it with pollJob.
+ */
+export async function setCustomArtwork(appIndex, kind, source) {
+  return (await postJson('./api/library/artwork/custom', { app_index: appIndex, kind, ...source })).job_id
+}
+
+/**
+ * Sites to look for artwork by hand, with the title already searched.
+ *
+ * @param {string} title Game title.
+ * @returns {{id: string, label: string, url: string}[]} Links.
+ */
+export function artworkSites(title) {
+  const q = encodeURIComponent(String(title || '').trim())
+  return [
+    { id: 'steamgriddb', label: 'SteamGridDB', url: `https://www.steamgriddb.com/search/grids?term=${q}` },
+    { id: 'igdb', label: 'IGDB', url: `https://www.igdb.com/search?q=${q}` },
+    { id: 'thegamesdb', label: 'TheGamesDB', url: `https://thegamesdb.net/search.php?name=${q}` },
+    { id: 'mobygames', label: 'MobyGames', url: `https://www.mobygames.com/search/?q=${q}` },
+  ]
+}
+
+/**
+ * Read a file as base64 (without the data: prefix).
+ *
+ * @param {Blob} file File.
+ * @returns {Promise<string>} Base64 text.
+ */
+export function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
 }
 
 /**
