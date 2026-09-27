@@ -75,6 +75,9 @@ function download() {
   link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+// The page header owns the Download action.
+defineExpose({ download, canDownload: computed(() => Boolean(text.value)) })
 </script>
 
 <template>
@@ -89,7 +92,7 @@ function download() {
 
     <LogToolbar v-model:query="query" :chips="view.chips.value" :problem-count="view.problems.value.length"
                 :problem-position="view.problemPosition.value" :show-refresh="!live" :refreshing="loading"
-                :can-copy="view.filtered.value.length > 0" :can-download="Boolean(text)"
+                :can-copy="view.filtered.value.length > 0" :can-download="Boolean(text)" :show-download="false"
                 @toggle-group="view.toggleGroup" @prev="view.step('prev')" @next="view.step('next')"
                 @refresh="feed.refresh()" @copy="copyShown" @download="download" />
 

@@ -1,8 +1,9 @@
 <script setup>
 /**
- * Approve a pairing request: choose the request, type the PIN the device shows, name it.
- * Emits `paired(name)` after the device finishes the handshake and `changed` whenever the
- * list of requests should be refreshed.
+ * Pair card: approve a waiting pairing request with the PIN the device shows. A single request is
+ * picked automatically (with Decline); several get a chooser. The name defaults to what the
+ * device reported and is optional. Emits `paired(name)` after the device finishes the handshake
+ * and `changed` whenever the list of requests should be refreshed.
  */
 import { computed, shallowRef, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -12,6 +13,7 @@ import NvSelect from '../components/NvSelect.vue'
 import NvTextField from '../components/NvTextField.vue'
 import NvAlert from '../components/NvAlert.vue'
 import NvEmptyState from '../components/NvEmptyState.vue'
+import PinBoxes from './PinBoxes.vue'
 import { approvePairing, declinePairing } from '../devices/deviceApi'
 import { isValidDeviceName } from '../devices/format'
 import { toast } from '../toast'
@@ -20,12 +22,12 @@ const props = defineProps({
   requests: { type: Array, required: true },
   loaded: { type: Boolean, default: false },
   failed: { type: Boolean, default: false },
+  hostName: { type: String, default: '' },
 })
 const emit = defineEmits(['paired', 'changed', 'retry'])
 
 const { t } = useI18n()
 const pinId = `nv-pin-${useId()}`
-
 const selectedId = shallowRef('')
 const pin = shallowRef('')
 const name = shallowRef('')
@@ -35,6 +37,7 @@ const submitting = shallowRef(false)
 const declining = shallowRef(false)
 const result = shallowRef(null)
 
+const host = computed(() => props.hostName || t('nova.pair.this_pc'))
 const options = computed(() => [
   { value: '', label: t('nova.pair.request_placeholder'), disabled: true },
   ...props.requests.map((r) => ({
@@ -57,6 +60,17 @@ watch(selected, (request, previous) => {
   if (request && (!name.value || name.value === (previous?.name || ''))) name.value = request.name || ''
 }, { immediate: true })
 
+/** Check the PIN when the boxes lose focus (only once something was typed). */
+function checkPin() {
+  if (pin.value) pinError.value = /^\d{4}$/.test(pin.value) ? '' : t('nova.pair.pin_invalid')
+}
+
+/** Check the name when the field loses focus (an empty name is fine). */
+function checkName() {
+  const value = name.value.trim()
+  nameError.value = !value || isValidDeviceName(value) ? '' : t('nova.pair.name_invalid')
+}
+
 /**
  * Check the fields, setting their errors.
  *
@@ -64,7 +78,8 @@ watch(selected, (request, previous) => {
  */
 function validate() {
   pinError.value = /^\d{4}$/.test(pin.value) ? '' : t('nova.pair.pin_invalid')
-  nameError.value = isValidDeviceName(name.value.trim()) ? '' : t('nova.pair.name_invalid')
+  checkName()
+  if (pinError.value) document.getElementById(pinId)?.focus()
   return !pinError.value && !nameError.value
 }
 
@@ -73,7 +88,7 @@ async function submit() {
   result.value = null
   if (!selectedId.value || !validate()) return
   submitting.value = true
-  const deviceName = name.value.trim()
+  const deviceName = name.value.trim() || selected.value?.name || t('nova.pair.unknown_device')
   try {
     await approvePairing(selectedId.value, pin.value, deviceName)
     result.value = { variant: 'success', title: t('nova.pair.success_title', { name: deviceName }), text: t('nova.pair.success_desc') }
@@ -108,40 +123,47 @@ async function decline() {
 </script>
 
 <template>
-  <div class="nv-stack">
+  <section class="nv-pairform" aria-labelledby="nv-pairform-title">
+    <header class="nv-pairform__head">
+      <h2 id="nv-pairform-title" class="nv-pairform__title">{{ t('nova.pair.card_title') }}</h2>
+      <p class="nv-pairform__desc">{{ t('nova.pair.card_desc', { host }) }}</p>
+    </header>
+
     <NvAlert v-if="failed" variant="danger" :title="t('nova.pair.load_failed')">
       <template #actions><NvButton size="sm" variant="secondary" @click="emit('retry')">{{ t('nova.common.retry') }}</NvButton></template>
     </NvAlert>
 
-    <template v-if="waiting">
-      <NvEmptyState compact :title="t('nova.pair.waiting_title')" :description="t('nova.pair.waiting_desc')">
-        <template #icon><Radar :size="28" /></template>
-      </NvEmptyState>
-    </template>
+    <NvEmptyState v-if="waiting" compact :title="t('nova.pair.waiting_title')" :description="t('nova.pair.waiting_desc')">
+      <template #icon><Radar :size="28" /></template>
+    </NvEmptyState>
 
-    <form v-else-if="requests.length" class="nv-stack" novalidate @submit.prevent="submit">
-      <div class="nv-pair-form__request">
+    <form v-else-if="requests.length" class="nv-pairform__form" novalidate @submit.prevent="submit">
+      <div v-if="requests.length > 1" class="nv-pairform__request">
         <div class="nv-grow">
           <NvSelect v-model="selectedId" :label="t('nova.pair.request_label')" :options="options" />
         </div>
         <NvButton variant="secondary" :disabled="!selectedId" :loading="declining" @click="decline">{{ t('nova.pair.decline') }}</NvButton>
       </div>
+      <p v-else-if="selected" class="nv-pairform__from">
+        <span>{{ t('nova.pair.request_from', { name: selected.name || t('nova.pair.unknown_device') }) }}</span>
+        <span v-if="selected.address" class="nv-mono nv-pairform__addr">{{ selected.address }}</span>
+        <NvButton size="sm" variant="ghost" :loading="declining" @click="decline">{{ t('nova.pair.decline') }}</NvButton>
+      </p>
 
       <div class="nv-field">
         <label :for="pinId" class="nv-field__label">{{ t('nova.pair.pin_label') }}</label>
-        <input :id="pinId" v-model="pin" class="nv-input nv-mono nv-pair-form__pin" type="text" inputmode="numeric"
-               autocomplete="one-time-code" maxlength="4" pattern="\d{4}" required
-               :aria-invalid="pinError ? 'true' : null" :aria-describedby="pinError ? `${pinId}-error` : `${pinId}-hint`">
-        <p v-if="!pinError" :id="`${pinId}-hint`" class="nv-field__hint">{{ t('nova.pair.pin_hint') }}</p>
-        <p v-else :id="`${pinId}-error`" class="nv-field__error">{{ pinError }}</p>
+        <PinBoxes :id="pinId" v-model="pin" :invalid="!!pinError" :describedby="`${pinId}-msg`" @focusout="checkPin" />
+        <p v-if="!pinError" :id="`${pinId}-msg`" class="nv-field__hint">{{ t('nova.pair.pin_hint') }}</p>
+        <p v-else :id="`${pinId}-msg`" class="nv-field__error">{{ pinError }}</p>
       </div>
 
-      <NvTextField v-model="name" :label="t('nova.pair.name_label')" :hint="t('nova.pair.name_hint')"
-                   :error="nameError" autocomplete="off" required />
+      <NvTextField v-model="name" :label="t('nova.pair.device_name_label')" :hint="t('nova.pair.device_name_hint')"
+                   :placeholder="t('nova.pair.device_name_placeholder')" :error="nameError" autocomplete="off"
+                   spellcheck="false" @blur="checkName" />
 
-      <div class="nv-row">
-        <NvButton type="submit" variant="primary" :loading="submitting" :disabled="!selectedId">{{ t('nova.pair.submit') }}</NvButton>
-        <span v-if="submitting" class="nv-pair-form__wait" role="status">{{ t('nova.pair.submitting') }}</span>
+      <div class="nv-pairform__submit">
+        <NvButton type="submit" variant="primary" :loading="submitting" :disabled="!selectedId">{{ t('nova.pair.submit_device') }}</NvButton>
+        <span class="nv-pairform__expire" role="status">{{ submitting ? t('nova.pair.submitting') : t('nova.pair.expires') }}</span>
       </div>
     </form>
 
@@ -153,31 +175,82 @@ async function decline() {
         <NvButton size="sm" variant="secondary" to="/devices">{{ t('nova.pair.view_devices') }}</NvButton>
       </template>
     </NvAlert>
-  </div>
+  </section>
 </template>
 
 <style scoped>
 @layer components {
-  .nv-pair-form__request {
+  .nv-pairform {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-5);
+    padding: var(--nv-space-7);
+    border: 1px solid var(--nv-border);
+    border-radius: var(--nv-radius-xl);
+    background: var(--nv-surface);
+  }
+
+  .nv-pairform__title {
+    margin: 0;
+    font-size: var(--nv-text-lg);
+    font-weight: 600;
+  }
+
+  .nv-pairform__desc {
+    margin: var(--nv-space-1) 0 0;
+    color: var(--nv-text-secondary);
+  }
+
+  .nv-pairform__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-5);
+  }
+
+  .nv-pairform__request {
     display: flex;
     align-items: flex-end;
     gap: var(--nv-space-3);
   }
 
-  .nv-pair-form__pin {
-    width: 140px;
-    font-size: var(--nv-text-lg);
-    letter-spacing: 0.3em;
-    font-variant-numeric: tabular-nums;
+  .nv-pairform__from {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--nv-space-2) var(--nv-space-3);
+    margin: 0;
+    padding: var(--nv-space-3) var(--nv-space-4);
+    border-radius: var(--nv-radius-md);
+    background: var(--nv-raised);
+    font-size: var(--nv-text-sm);
   }
 
-  .nv-pair-form__wait {
+  .nv-pairform__addr {
+    color: var(--nv-text-secondary);
+  }
+
+  .nv-pairform__from > :last-child {
+    margin-left: auto;
+  }
+
+  .nv-pairform__submit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--nv-space-3);
+  }
+
+  .nv-pairform__expire {
     font-size: var(--nv-text-sm);
     color: var(--nv-text-secondary);
   }
 
   @media (max-width: 599px) {
-    .nv-pair-form__request {
+    .nv-pairform {
+      padding: var(--nv-space-5);
+    }
+
+    .nv-pairform__request {
       flex-direction: column;
       align-items: stretch;
     }

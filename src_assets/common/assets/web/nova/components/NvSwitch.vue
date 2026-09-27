@@ -50,26 +50,26 @@ const { t } = useI18n()
 
   .nv-switch {
     position: relative;
+    width: 40px;
+    height: 24px;
     flex-shrink: 0;
-    width: 44px;
-    height: 26px;
     padding: 0;
-    border-radius: 13px;
+    border-radius: 12px;
     border: 1px solid var(--nv-border-strong);
     background: var(--nv-raised);
     cursor: pointer;
-    transition: background-color 120ms ease, border-color 120ms ease;
+    transition: background-color 150ms ease-out, border-color 150ms ease-out;
   }
 
   .nv-switch__knob {
     position: absolute;
     top: 3px;
     left: 3px;
-    width: 18px;
-    height: 18px;
-    border-radius: 9px;
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
     background: var(--nv-text-secondary);
-    transition: left 120ms ease;
+    transition: transform 150ms ease-out, background-color 150ms ease-out;
   }
 
   .nv-switch--on {
@@ -78,13 +78,21 @@ const { t } = useI18n()
   }
 
   .nv-switch--on .nv-switch__knob {
-    left: 21px;
+    transform: translateX(16px);
     background: #FFFFFF;
   }
 
   .nv-switch:disabled {
-    opacity: 0.55;
     cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  @media (max-width: 767px) {
+    .nv-switch::after {
+      content: "";
+      position: absolute;
+      inset: -10px -4px;
+    }
   }
 }
 </style>

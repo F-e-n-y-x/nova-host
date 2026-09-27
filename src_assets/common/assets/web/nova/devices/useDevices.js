@@ -13,7 +13,7 @@ import { sortDevices } from './format'
  *
  * @returns {object} `devices`, `loading`, `error`, `busy` (uuid → true while saving),
  *   `byUuid(uuid)`, and the actions `reload`, `setEnabled`, `rename`, `setPermissions`,
- *   `disconnect`, `unpair`, `unpairAll`.
+ *   `save`, `disconnect`, `unpair`, `unpairAll`.
  */
 export function useDevices() {
   const list = shallowRef([])
@@ -127,6 +127,19 @@ export function useDevices() {
   }
 
   /**
+   * Save several changes at once (the details panel's Save).
+   *
+   * @param {string} uuid Device ID.
+   * @param {{name?: string, enabled?: boolean, permissions?: object}} patch What to send.
+   * @param {object} next Fields to show while saving (e.g. the full permission object).
+   */
+  async function save(uuid, patch, next) {
+    const shown = { ...patch, ...next }
+    if (patch.enabled === false) shown.connected = false
+    await optimistic(uuid, shown, () => api.updateDevice(uuid, patch))
+  }
+
+  /**
    * End a device's stream.
    *
    * @param {string} uuid Device ID.
@@ -153,5 +166,5 @@ export function useDevices() {
 
   reload()
 
-  return { devices, loading, error, busy, byUuid, reload, setEnabled, rename, setPermissions, disconnect, unpair, unpairAll }
+  return { devices, loading, error, busy, byUuid, reload, setEnabled, rename, setPermissions, save, disconnect, unpair, unpairAll }
 }

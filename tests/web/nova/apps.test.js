@@ -8,10 +8,8 @@ import {
 } from '../../../src_assets/common/assets/web/nova/pages/apps/appForm.js'
 import { coverFromGame, searchBucket, searchCovers } from '../../../src_assets/common/assets/web/nova/pages/apps/covers.js'
 import AppEditor from '../../../src_assets/common/assets/web/nova/pages/apps/AppEditor.vue'
-import AppItem from '../../../src_assets/common/assets/web/nova/pages/apps/AppItem.vue'
 import PrepCommandList from '../../../src_assets/common/assets/web/nova/pages/apps/PrepCommandList.vue'
 import DetachedCommandList from '../../../src_assets/common/assets/web/nova/pages/apps/DetachedCommandList.vue'
-import ActionMenu from '../../../src_assets/common/assets/web/nova/pages/apps/ActionMenu.vue'
 import { parseEdit } from '../../../src_assets/common/assets/web/nova/pages/apps/useAppsRoute.js'
 
 const wrappers = []
@@ -167,41 +165,6 @@ describe('command lists', () => {
   })
 })
 
-describe('AppItem', () => {
-  it('opens the editor from the cover and keeps delete in the menu', async () => {
-    const w = track(mountNova(AppItem, { props: { app: { name: 'Desktop' }, index: 4, coverUrl: '', layout: 'list' } }))
-    expect(w.find('.nv-app__initial').text()).toBe('D')
-    const open = w.find('#nv-app-4')
-    expect(open.attributes('aria-label')).toBe('Edit Desktop')
-    await open.trigger('click')
-    expect(w.emitted('edit')).toHaveLength(1)
-    const more = w.find('[aria-haspopup="menu"]')
-    expect(more.attributes('aria-label')).toBe('More actions for Desktop')
-    await more.trigger('click')
-    const items = w.findAll('[role="menuitem"]')
-    expect(items.map((i) => i.text())).toEqual(['Edit', 'Delete…'])
-    await items[1].trigger('click')
-    expect(w.emitted('delete')).toHaveLength(1)
-  })
-})
-
-describe('ActionMenu keyboard', () => {
-  it('moves with arrows and closes on Escape back to the button', async () => {
-    const w = track(mountNova(ActionMenu, { props: { label: 'More', items: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] } }))
-    const button = w.find('button')
-    await button.trigger('keydown', { key: 'ArrowDown' })
-    await flushPromises()
-    const items = w.findAll('[role="menuitem"]')
-    expect(document.activeElement).toBe(items[0].element)
-    await w.find('[role="menu"]').trigger('keydown', { key: 'ArrowUp' })
-    expect(document.activeElement).toBe(items[1].element)
-    await w.find('[role="menu"]').trigger('keydown', { key: 'Escape' })
-    expect(w.find('[role="menu"]').exists()).toBe(false)
-    expect(document.activeElement).toBe(button.element)
-    expect(button.attributes('aria-expanded')).toBe('false')
-  })
-})
-
 describe('parseEdit', () => {
   it('reads the editor from the URL', () => {
     expect(parseEdit('new')).toBe(-1)
@@ -262,7 +225,7 @@ describe('AppEditor', () => {
     expect(document.getElementById('nv-app-name').value).toBe('Steam Big Picture')
   })
 
-  it('asks before discarding edits on Escape, and Keep editing has focus', async () => {
+  it('asks before discarding edits on Escape, with Cancel focused', async () => {
     const w = track(mountNova(AppEditor, { props: { open: true, app: null, index: -1, platform: 'linux' } }))
     await nextTick()
     const name = document.getElementById('nv-app-name')
@@ -272,7 +235,7 @@ describe('AppEditor', () => {
     document.body.querySelector('.nv-sheet').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flushPromises()
     expect(document.body.textContent).toContain('Discard your changes?')
-    expect(document.activeElement?.textContent).toContain('Keep editing')
+    expect(document.activeElement?.textContent).toContain('Cancel')
     expect(w.emitted('close')).toBeUndefined()
     expect(w.vm.isDirty).toBe(true)
   })

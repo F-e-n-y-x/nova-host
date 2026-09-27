@@ -55,33 +55,30 @@ function onKeydown(event, index) {
 @layer components {
   .nv-seg {
     display: inline-flex;
-    flex-wrap: wrap;
-    gap: 2px;
     padding: 3px;
+    gap: 2px;
     border-radius: 9px;
     border: 1px solid var(--nv-border-strong);
-    background: var(--nv-raised);
+    background: transparent;
   }
 
   .nv-seg__option {
-    min-height: 34px;
-    padding: 0 var(--nv-space-4);
-    border-radius: var(--nv-radius-sm);
+    min-height: 30px;
+    padding: 0 var(--nv-space-3);
     border: 0;
+    border-radius: var(--nv-radius-sm);
     background: transparent;
     color: var(--nv-text-secondary);
     font: inherit;
     font-size: var(--nv-text-sm);
     font-weight: 500;
+    white-space: nowrap;
     cursor: pointer;
-  }
-
-  .nv-seg--sm .nv-seg__option {
-    min-height: 30px;
-    padding: 0 var(--nv-space-3);
+    transition: background-color 150ms ease-out, color 150ms ease-out;
   }
 
   .nv-seg__option:hover:not(:disabled):not(.nv-seg__option--on) {
+    background: var(--nv-raised);
     color: var(--nv-text);
   }
 
@@ -91,8 +88,20 @@ function onKeydown(event, index) {
   }
 
   .nv-seg__option:disabled {
-    opacity: 0.55;
     cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .nv-seg--sm .nv-seg__option {
+    min-height: 26px;
+    padding: 0 10px;
+    font-size: var(--nv-text-xs);
+  }
+
+  @media (max-width: 767px) {
+    .nv-seg__option {
+      min-height: 38px;
+    }
   }
 }
 </style>

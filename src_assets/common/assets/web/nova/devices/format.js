@@ -8,6 +8,46 @@ export const PERMISSION_FLAGS = ['input_keyboard', 'input_mouse', 'input_control
 /** Presets the host understands, in display order. */
 export const PERMISSION_PRESETS = ['full', 'play', 'view_only']
 
+/** Flags each preset turns on; the rest are off. */
+export const PRESET_FLAGS = {
+  full: PERMISSION_FLAGS,
+  play: ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'launch_apps'],
+  view_only: [],
+}
+
+/**
+ * Permission flags as booleans (a missing flag counts as allowed, like the host does).
+ *
+ * @param {object|undefined} permissions Permission object from the host.
+ * @returns {Record<string, boolean>} Flag name → allowed.
+ */
+export function permissionFlags(permissions) {
+  const source = permissions || {}
+  return Object.fromEntries(PERMISSION_FLAGS.map((flag) => [flag, source[flag] !== false]))
+}
+
+/**
+ * The preset a set of flags matches.
+ *
+ * @param {Record<string, boolean>} flags Flag name → allowed.
+ * @returns {'full'|'play'|'view_only'|'custom'} Preset name.
+ */
+export function presetForFlags(flags) {
+  const on = PERMISSION_FLAGS.filter((f) => flags[f])
+  const match = PERMISSION_PRESETS.find((p) => PRESET_FLAGS[p].length === on.length && PRESET_FLAGS[p].every((f) => flags[f]))
+  return match || 'custom'
+}
+
+/**
+ * The flags a preset turns on.
+ *
+ * @param {string} preset Preset name.
+ * @returns {Record<string, boolean>} Flag name → allowed.
+ */
+export function flagsForPreset(preset) {
+  return Object.fromEntries(PERMISSION_FLAGS.map((f) => [f, (PRESET_FLAGS[preset] || []).includes(f)]))
+}
+
 /**
  * First and last characters of a device ID.
  *
@@ -69,6 +109,17 @@ export function permissionPreset(permissions) {
   if (!permissions) return 'full'
   if (PERMISSION_PRESETS.includes(permissions.preset)) return permissions.preset
   return 'custom'
+}
+
+/**
+ * The live session belonging to a device, if it is streaming.
+ *
+ * @param {Array<object>} sessions Sessions from /api/sessions.
+ * @param {string} uuid Device ID.
+ * @returns {object|null} The session, or null.
+ */
+export function sessionFor(sessions, uuid) {
+  return (sessions || []).find((s) => s.client_uuid && s.client_uuid === uuid) || null
 }
 
 /**

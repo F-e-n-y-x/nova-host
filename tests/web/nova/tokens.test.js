@@ -34,7 +34,7 @@ const light = palette(':root,\n  :root[data-nv-theme="light"]')
 const dark = palette(':root[data-nv-theme="dark"]')
 const darkFromOs = palette(':root:not([data-nv-theme="light"])')
 
-const surfaces = ['bg', 'sidebar', 'surface', 'raised']
+const surfaces = ['bg', 'sidebar', 'surface', 'raised', 'panel']
 
 // [foreground, backgrounds, minimum ratio]
 const pairs = [
@@ -45,7 +45,9 @@ const pairs = [
   ['text-secondary', ['accent-tint'], 4.5],
   ['success', ['surface', 'raised', 'success-tint'], 4.5],
   ['warning', ['surface', 'raised', 'warning-tint'], 4.5],
-  ['danger', ['surface', 'raised', 'danger-tint'], 4.5],
+  ['danger', ['surface', 'raised', 'danger-tint', 'danger-zone'], 4.5],
+  ['info', ['surface', 'raised'], 4.5],
+  ['text', ['danger-zone'], 4.5],
   ['text', ['success-tint', 'warning-tint', 'danger-tint', 'accent-tint'], 4.5],
   ['on-accent', ['accent', 'accent-hover'], 4.5],
   ['border-strong', surfaces, 3],
@@ -87,7 +89,8 @@ describe('Nova tokens', () => {
     for (const file of files) {
       const text = readFileSync(file, 'utf8')
       expect(text, file).not.toMatch(/!important/)
-      expect(text, file).not.toMatch(/gradient\(/)
+      // Gradients are allowed only for game-art placeholders (SPEC §1).
+      if (!file.endsWith('NvArt.vue')) expect(text, file).not.toMatch(/gradient\(/)
     }
   })
 })

@@ -32,13 +32,14 @@ defineProps({
 
   .nv-skeleton {
     display: block;
+    max-width: 100%;
     background: var(--nv-raised);
-    animation: nv-pulse 1.4s ease-in-out infinite;
+    animation: nv-skeleton-pulse 1.4s ease-in-out infinite;
   }
 
-  @keyframes nv-pulse {
+  @keyframes nv-skeleton-pulse {
     50% {
-      opacity: 0.45;
+      opacity: 0.55;
     }
   }
 }

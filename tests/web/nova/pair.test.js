@@ -28,7 +28,8 @@ describe('PairForm', () => {
     const stub = stubPin({ status: 200, body: { status: true } })
     const wrapper = mountNova(PairForm, { props: { requests: [REQUEST], loaded: true } })
     await flushPromises()
-    expect(wrapper.find('select').element.value).toBe(REQUEST.id)
+    expect(wrapper.find('select').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Pairing request from Pixel 9 Pro')
     expect(wrapper.find('input[autocomplete="off"]').element.value).toBe('Pixel 9 Pro')
 
     await wrapper.find('input[inputmode="numeric"]').setValue('12')

@@ -1,66 +1,95 @@
 <script setup>
 /**
- * One setting: label + description on the left, the control on the right.
- * Shows a "Changed" marker and a Reset button when `modified` is true, and an
- * optional warning under the description.
+ * One setting row (SPEC §5 Settings): label + description left, control right from 720px
+ * (control column ≥ 240px), stacked below. Rows sit inside a flush NvCard and are separated by
+ * the divider — never wrap them in another bordered box.
  *
- * Props: label (required), description, modified, warning, controlId (id of the control,
- *        so the label becomes a <label for>), resetLabel.
+ * Props: label (required), description (≤ 2 lines), more (long help, behind a "More" toggle; the
+ *        `more` slot works too), modified (shows "● Changed" + Reset), warning, error (inline,
+ *        replaces nothing), controlId (makes the label a <label for>), resetLabel, full (control
+ *        spans the full width under the text — list editors, tables).
  * Emits: reset.
- * Slot: default — the control; receives { labelId, descriptionId } to wire aria-labelledby /
- *       aria-describedby on controls that are not native form fields (NvSwitch, NvSegmentedControl).
+ * Slot: default — the control; receives { labelId, descriptionId } for aria-labelledby /
+ *       aria-describedby on non-native controls (NvSwitch, NvSegmentedControl).
  */
-import { useId } from 'vue'
+import { computed, ref, useId, useSlots } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { TriangleAlert } from '@lucide/vue'
+import { ChevronDown, CircleAlert, TriangleAlert } from '@lucide/vue'
 
-defineProps({
+const props = defineProps({
   label: { type: String, required: true },
   description: { type: String, default: '' },
+  more: { type: String, default: '' },
   modified: { type: Boolean, default: false },
   warning: { type: String, default: '' },
+  error: { type: String, default: '' },
   controlId: { type: String, default: null },
   resetLabel: { type: String, default: '' },
+  full: { type: Boolean, default: false },
 })
 defineEmits(['reset'])
 
 const { t } = useI18n()
+const slots = useSlots()
 const baseId = useId()
 const labelId = `${baseId}-label`
 const descriptionId = `${baseId}-desc`
+const moreId = `${baseId}-more`
+const showMore = ref(false)
+const hasMore = computed(() => Boolean(props.more || slots.more))
+const describedBy = computed(() => (props.description || props.error ? descriptionId : null))
 </script>
 
 <template>
-  <div class="nv-setting">
+  <div :class="['nv-setting', { 'nv-setting--full': full, 'nv-setting--invalid': error }]">
+    <div class="nv-setting__grid">
     <div class="nv-setting__text">
       <div class="nv-setting__label-row">
         <label v-if="controlId" :id="labelId" :for="controlId" class="nv-setting__label">{{ label }}</label>
         <span v-else :id="labelId" class="nv-setting__label">{{ label }}</span>
         <span v-if="modified" class="nv-setting__changed"><span class="nv-setting__changed-dot" aria-hidden="true"></span>{{ t('nova.common.changed') }}</span>
+        <button v-if="modified" type="button" class="nv-setting__reset" @click="$emit('reset')">
+          {{ t('nova.common.reset') }}<span class="nv-visually-hidden"> {{ resetLabel || label }}</span>
+        </button>
       </div>
-      <p v-if="description" :id="descriptionId" class="nv-setting__desc">{{ description }}</p>
+      <p v-if="description || error" :id="descriptionId" class="nv-setting__desc">
+        <span v-if="description" class="nv-clamp-2">{{ description }}</span>
+        <span v-if="error" class="nv-setting__error"><CircleAlert :size="14" aria-hidden="true" />{{ error }}</span>
+      </p>
+      <button v-if="hasMore" type="button" class="nv-setting__more-toggle" :aria-expanded="showMore ? 'true' : 'false'"
+              :aria-controls="moreId" @click="showMore = !showMore">
+        {{ showMore ? t('nova.common.less') : t('nova.common.more') }}
+        <ChevronDown :size="14" aria-hidden="true" :class="{ 'nv-setting__chev--open': showMore }" />
+      </button>
+      <div v-if="hasMore" v-show="showMore" :id="moreId" class="nv-setting__more">
+        <slot name="more">{{ more }}</slot>
+      </div>
       <div v-if="warning" class="nv-setting__warning" role="note">
-        <TriangleAlert :size="18" aria-hidden="true" class="nv-setting__warning-icon" />
+        <TriangleAlert :size="16" aria-hidden="true" class="nv-setting__warning-icon" />
         <span>{{ warning }}</span>
       </div>
     </div>
     <div class="nv-setting__control">
-      <button v-if="modified" type="button" class="nv-setting__reset" @click="$emit('reset')">
-        {{ t('nova.common.reset') }}<span class="nv-visually-hidden"> {{ resetLabel || label }}</span>
-      </button>
-      <slot :label-id="labelId" :description-id="description ? descriptionId : null" />
+      <slot :label-id="labelId" :description-id="describedBy" />
+    </div>
     </div>
   </div>
 </template>
 
 <style>
 @layer components {
+  /* The row is a size container so its layout follows the space it actually gets (a settings
+     card, a 440px side panel, a phone), not the viewport. */
   .nv-setting {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--nv-space-6);
-    padding: 18px var(--nv-space-5);
-    border-bottom: 1px solid var(--nv-border);
+    container-type: inline-size;
+    padding: var(--nv-space-4) var(--nv-space-5);
+    border-bottom: 1px solid var(--nv-divider);
+  }
+
+  .nv-setting__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--nv-space-3);
   }
 
   .nv-setting:last-child {
@@ -71,7 +100,6 @@ const descriptionId = `${baseId}-desc`
     display: flex;
     flex-direction: column;
     gap: var(--nv-space-1);
-    flex-grow: 1;
     min-width: 0;
   }
 
@@ -79,12 +107,13 @@ const descriptionId = `${baseId}-desc`
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--nv-space-2);
+    gap: var(--nv-space-2) var(--nv-space-3);
   }
 
   .nv-setting__label {
+    font-size: var(--nv-text-md);
     font-weight: 500;
-    margin: 0;
+    color: var(--nv-text);
   }
 
   .nv-setting__changed {
@@ -103,19 +132,65 @@ const descriptionId = `${baseId}-desc`
     background: var(--nv-accent-text);
   }
 
-  .nv-setting__desc {
-    font-size: var(--nv-text-sm);
+  .nv-setting__reset,
+  .nv-setting__more-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    min-height: 24px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--nv-accent-text);
+    font: inherit;
+    font-size: var(--nv-text-xs);
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .nv-setting__more-toggle {
+    align-self: flex-start;
     color: var(--nv-text-secondary);
+  }
+
+  .nv-setting__reset:hover,
+  .nv-setting__more-toggle:hover {
+    text-decoration: underline;
+  }
+
+  .nv-setting__chev--open {
+    transform: rotate(180deg);
+  }
+
+  .nv-setting__desc {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-1);
+    font-size: var(--nv-text-sm);
+    line-height: 18px;
+    color: var(--nv-text-secondary);
+  }
+
+  .nv-setting__error {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--nv-space-1);
+    color: var(--nv-danger);
+  }
+
+  .nv-setting__more {
+    font-size: var(--nv-text-sm);
+    line-height: 18px;
+    color: var(--nv-text-secondary);
+    white-space: pre-line;
   }
 
   .nv-setting__warning {
     display: flex;
-    gap: 10px;
-    margin-top: 6px;
-    padding: 10px var(--nv-space-3);
-    border-radius: var(--nv-radius-md);
-    background: var(--nv-warning-tint);
+    gap: var(--nv-space-2);
+    margin-top: var(--nv-space-1);
     font-size: var(--nv-text-sm);
+    line-height: 18px;
     color: var(--nv-text);
   }
 
@@ -128,35 +203,32 @@ const descriptionId = `${baseId}-desc`
   .nv-setting__control {
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
+    gap: var(--nv-space-3);
+    min-width: 0;
   }
 
-  .nv-setting__reset {
-    min-height: var(--nv-control-height-sm);
-    padding: 0 var(--nv-space-2);
-    border: 0;
-    border-radius: var(--nv-radius-md);
-    background: transparent;
-    color: var(--nv-accent-text);
-    font: inherit;
-    font-size: var(--nv-text-sm);
-    font-weight: 500;
-    cursor: pointer;
-  }
-
-  .nv-setting__reset:hover {
-    background: var(--nv-accent-tint);
-  }
-
-  @media (max-width: 699px) {
-    .nv-setting {
-      flex-direction: column;
-      gap: var(--nv-space-3);
+  @container (min-width: 360px) {
+    .nv-setting:not(.nv-setting--full) > .nv-setting__grid {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      gap: var(--nv-space-4);
     }
 
-    .nv-setting__control {
-      flex-wrap: wrap;
+    .nv-setting:not(.nv-setting--full) .nv-setting__control {
+      justify-content: flex-end;
+    }
+  }
+
+  @container (min-width: 560px) {
+    .nv-setting:not(.nv-setting--full) > .nv-setting__grid {
+      grid-template-columns: minmax(0, 1fr) minmax(240px, auto);
+      gap: var(--nv-space-6);
+    }
+  }
+
+  @media (max-width: 767px) {
+    .nv-setting {
+      padding: var(--nv-space-4);
     }
   }
 }

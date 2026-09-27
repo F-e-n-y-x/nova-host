@@ -7,7 +7,6 @@
  */
 import { computed, nextTick, shallowRef, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MonitorCog, Power, RotateCcw, SquareX } from '@lucide/vue'
 import NvCard from '../../components/NvCard.vue'
 import NvButton from '../../components/NvButton.vue'
 import NvDialog from '../../components/NvDialog.vue'
@@ -34,16 +33,16 @@ async function restartHost() {
 
 const ACTIONS = [
   {
-    id: 'close_app', icon: SquareX, platforms: null,
+    id: 'close_app', platforms: null,
     async run() {
       const result = await postJson('./api/apps/close')
       if (result?.status) toast.success(t('nova.logs.close_app_done'))
       else toast.warning(t('nova.logs.close_app_none'))
     },
   },
-  { id: 'restart', icon: Power, platforms: null, run: restartHost },
+  { id: 'restart', platforms: null, run: restartHost },
   {
-    id: 'portal_reset', icon: RotateCcw, platforms: ['linux', 'freebsd'],
+    id: 'portal_reset', platforms: ['linux', 'freebsd'],
     async run() {
       const result = await postJson('./api/reset-portal-token')
       if (!result?.status) {
@@ -55,7 +54,7 @@ const ACTIONS = [
     },
   },
   {
-    id: 'dd_reset', icon: MonitorCog, platforms: ['windows'],
+    id: 'dd_reset', platforms: ['windows'],
     async run() {
       const result = await postJson('./api/reset-display-device-persistence')
       if (result?.status) toast.success(t('nova.logs.dd_reset_done'))
@@ -103,25 +102,22 @@ async function confirm() {
 </script>
 
 <template>
-  <section class="nv-diag" aria-labelledby="nv-diag-title">
-    <div class="nv-diag__head">
-      <h2 id="nv-diag-title" class="nv-diag__title">{{ t('nova.logs.diagnostics') }}</h2>
-      <p class="nv-secondary nv-diag__desc">{{ t('nova.logs.diagnostics_desc') }}</p>
-    </div>
-    <div class="nv-diag__grid">
-      <NvCard v-for="action in actions" :key="action.id" :title="action.title" :level="3" class="nv-diag__card">
-        <p class="nv-secondary nv-diag__desc">{{ action.description }}</p>
-        <template #footer>
-          <NvButton variant="danger" @click="ask(action)">
-            <component :is="action.icon" :size="16" aria-hidden="true" />{{ action.button }}
-          </NvButton>
-        </template>
-      </NvCard>
-      <NvCard v-if="loading" :level="3" class="nv-diag__card" aria-busy="true">
+  <NvCard :title="t('nova.logs.actions_title')" class="nv-diag" flush>
+    <ul class="nv-diag__list">
+      <li v-for="action in actions" :key="action.id" class="nv-diag__row">
+        <div class="nv-diag__text">
+          <span class="nv-diag__name">{{ action.title }}</span>
+          <span class="nv-diag__desc">{{ action.description }}</span>
+        </div>
+        <NvButton size="sm" :variant="action.id === 'restart' ? 'danger' : 'secondary'" @click="ask(action)">
+          {{ action.button }}
+        </NvButton>
+      </li>
+      <li v-if="loading" class="nv-diag__row" aria-busy="true">
         <span class="nv-visually-hidden">{{ t('nova.common.loading') }}</span>
-        <NvSkeleton :lines="3" />
-      </NvCard>
-    </div>
+        <NvSkeleton :lines="2" />
+      </li>
+    </ul>
 
     <NvDialog v-model:open="open" :title="pending?.confirmTitle || ''" :description="pending?.confirmDescription || ''" :persistent="busy">
       <template #footer>
@@ -129,42 +125,45 @@ async function confirm() {
         <NvButton variant="danger-solid" :loading="busy" @click="confirm">{{ pending?.button || t('nova.logs.confirm') }}</NvButton>
       </template>
     </NvDialog>
-  </section>
+  </NvCard>
 </template>
 
 <style>
 @layer components {
-  .nv-diag {
+  .nv-diag__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .nv-diag__row {
+    display: flex;
+    align-items: center;
+    gap: var(--nv-space-4);
+    min-height: 60px;
+    padding: var(--nv-space-3) var(--nv-space-5);
+    border-top: 1px solid var(--nv-divider);
+  }
+
+  .nv-diag__row:first-child {
+    border-top: 0;
+  }
+
+  .nv-diag__text {
     display: flex;
     flex-direction: column;
-    gap: var(--nv-space-3);
+    flex-grow: 1;
+    min-width: 0;
+    line-height: 1.35;
   }
 
-  .nv-diag__head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--nv-space-1) var(--nv-space-4);
-  }
-
-  .nv-diag__title {
-    margin: 0;
-    font-size: var(--nv-text-lg);
-    font-weight: 600;
+  .nv-diag__name {
+    font-weight: 500;
   }
 
   .nv-diag__desc {
-    margin: 0;
-  }
-
-  .nv-diag__grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: var(--nv-space-4);
-  }
-
-  .nv-diag__card {
-    padding: var(--nv-space-5);
+    font-size: var(--nv-text-sm);
+    color: var(--nv-text-secondary);
   }
 }
 </style>

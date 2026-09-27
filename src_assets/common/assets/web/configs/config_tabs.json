@@ -8,7 +8,9 @@
       "min_log_level": 2,
       "global_prep_cmd": [],
       "notify_pre_releases": "disabled",
-      "system_tray": "enabled"
+      "system_tray": "enabled",
+      "steamgriddb_api_key": "",
+      "windows_exe_launcher": ""
     }
   },
   {
@@ -44,6 +46,8 @@
       "stream_audio": "enabled",
       "mic_enabled": "enabled",
       "capture_pacing": "auto",
+      "display_follow": "virtual",
+      "display_follow_cmd": "/usr/local/bin/sunshine-resolution.sh",
       "install_steam_audio_drivers": "enabled",
       "adapter_name": "",
       "output_name": "",

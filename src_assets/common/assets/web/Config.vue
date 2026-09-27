@@ -152,8 +152,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <NvPage :title="t('nova.nav.settings')">
-    <template #subtitle>{{ t('nova.settings.subtitle') }}</template>
+  <NvPage :title="t('nova.nav.settings')" hide-search>
     <template #actions>
       <div class="nv-settings-search" role="search">
         <NvTextField :id="SEARCH_ID" v-model="query" type="search" :label="t('nova.settings.search')" hide-label

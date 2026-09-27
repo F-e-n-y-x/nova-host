@@ -78,6 +78,7 @@ namespace platf {
       _FN(FreeScreenResources, void, (XRRScreenResources * resources));
       _FN(FreeOutputInfo, void, (XRROutputInfo * outputInfo));
       _FN(FreeCrtcInfo, void, (XRRCrtcInfo * crtcInfo));
+      _FN(GetOutputPrimary, RROutput, (Display * dpy, Window window));
 
       static int init() {
         static void *handle {nullptr};
@@ -101,6 +102,7 @@ namespace platf {
           {(dyn::apiproc *) &FreeScreenResources, "XRRFreeScreenResources"},
           {(dyn::apiproc *) &FreeOutputInfo, "XRRFreeOutputInfo"},
           {(dyn::apiproc *) &FreeCrtcInfo, "XRRFreeCrtcInfo"},
+          {(dyn::apiproc *) &GetOutputPrimary, "XRRGetOutputPrimary"},
         };
 
         if (dyn::load(handle, funcs)) {
@@ -955,6 +957,73 @@ namespace platf {
     }
 
     return names;
+  }
+
+  /**
+   * @brief Describe every XRandR output with its current and mode geometry.
+   *
+   * `index` counts outputs in XRandR order, the same numbering x11 capture accepts
+   * as a legacy monitor index. `width`/`height` come from the CRTC (the scanout
+   * area, which an NVIDIA ViewPortIn shrinks) and `mode_width`/`mode_height` from
+   * the active mode, so a mismatch reveals a viewport left behind by a script.
+   *
+   * @return Outputs, or an empty list when X11 or XRandR is unavailable.
+   */
+  std::vector<capture_output_t> x11_outputs() {
+    if (load_x11()) {
+      return {};
+    }
+
+    x11::xdisplay_t xdisplay {x11::OpenDisplay(nullptr)};
+    if (!xdisplay) {
+      return {};
+    }
+
+    auto xwindow = DefaultRootWindow(xdisplay.get());
+    screen_res_t screenr {x11::rr::GetScreenResources(xdisplay.get(), xwindow)};
+    if (!screenr) {
+      return {};
+    }
+    const RROutput primary = x11::rr::GetOutputPrimary(xdisplay.get(), xwindow);
+
+    std::vector<capture_output_t> outputs;
+    for (int x = 0; x < screenr->noutput; ++x) {
+      output_info_t out_info {x11::rr::GetOutputInfo(xdisplay.get(), screenr.get(), screenr->outputs[x])};
+      if (!out_info) {
+        continue;
+      }
+
+      capture_output_t output;
+      output.name = out_info->name;
+      output.index = static_cast<int>(outputs.size());
+      output.connected = out_info->connection == RR_Connected;
+      output.primary = screenr->outputs[x] == primary;
+
+      if (out_info->crtc) {
+        crtc_info_t crtc {x11::rr::GetCrtcInfo(xdisplay.get(), screenr.get(), out_info->crtc)};
+        if (crtc) {
+          output.x = crtc->x;
+          output.y = crtc->y;
+          output.width = static_cast<int>(crtc->width);
+          output.height = static_cast<int>(crtc->height);
+          for (int m = 0; m < screenr->nmode; ++m) {
+            const auto &mode = screenr->modes[m];
+            if (mode.id != crtc->mode) {
+              continue;
+            }
+            output.mode_width = static_cast<int>(mode.width);
+            output.mode_height = static_cast<int>(mode.height);
+            if (mode.hTotal && mode.vTotal) {
+              output.refresh_hz = static_cast<double>(mode.dotClock) / (static_cast<double>(mode.hTotal) * static_cast<double>(mode.vTotal));
+            }
+            break;
+          }
+        }
+      }
+      outputs.emplace_back(std::move(output));
+    }
+
+    return outputs;
   }
 
   /**

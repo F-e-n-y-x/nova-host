@@ -8,6 +8,7 @@
 
 // standard includes
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <filesystem>
 #include <format>
@@ -44,14 +45,18 @@
 #include "display_device.h"
 #include "file_handler.h"
 #include "globals.h"
+#include "host_info.h"
 #include "httpcommon.h"
 #include "input.h"
+#include "library/artwork.h"
+#include "library/library.h"
 #include "logging.h"
 #include "network.h"
 #include "nvhttp.h"
 #include "platform/common.h"
 #include "process.h"
 #include "rtsp.h"
+#include "stream_stats.h"
 #include "system_tray.h"
 #include "utility.h"
 #include "uuid.h"
@@ -192,6 +197,8 @@ namespace confighttp {
   /**
    * @brief CSRF token value and its expiration deadline.
    */
+  constexpr std::string_view secret_placeholder = "********";  ///< Shown instead of stored secrets such as the SteamGridDB key.
+
   struct csrf_token_t {
     std::string token;  ///< Random token value that must be echoed by the client.
     std::chrono::steady_clock::time_point expiration;  ///< Monotonic deadline after which the token is rejected.
@@ -1053,6 +1060,8 @@ namespace confighttp {
    * @brief Get the list of available applications.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
+   * Besides the `apps` array, the reply carries `running_index` (position in `apps` of the running
+   * application, or null) and `running_name` (its name, or null).
    *
    * @api_examples{/api/apps|:| GET|:| null}
    */
@@ -1100,6 +1109,20 @@ namespace confighttp {
             }
           }
         }
+      }
+
+      // Which entry (if any) is running now, so the UI can show it and offer "Close".
+      file_tree["running_index"] = nullptr;
+      file_tree["running_name"] = nullptr;
+      if (const auto running_id = proc::proc.running(); running_id > 0) {
+        const auto &apps = proc::proc.get_apps();
+        for (std::size_t i = 0; i < apps.size(); ++i) {
+          if (apps[i].id == std::to_string(running_id)) {
+            file_tree["running_index"] = i;
+            break;
+          }
+        }
+        file_tree["running_name"] = proc::proc.get_last_run_app_name();
       }
 
       send_response(response, file_tree);
@@ -1162,6 +1185,7 @@ namespace confighttp {
       // TODO: Input Validation
       nlohmann::json output_tree;
       nlohmann::json input_tree = nlohmann::json::parse(ss);
+      std::scoped_lock apps_lock(library::apps_file_mutex());
       std::string file = file_handler::read_file(config::stream.file_apps.c_str());
       BOOST_LOG(info) << file;
       nlohmann::json file_tree = nlohmann::json::parse(file);
@@ -1263,6 +1287,7 @@ namespace confighttp {
         return;
       }
 
+      std::scoped_lock apps_lock(library::apps_file_mutex());
       std::string file = file_handler::read_file(config::stream.file_apps.c_str());
       nlohmann::json file_tree = nlohmann::json::parse(file);
       auto &apps = file_tree["apps"];
@@ -1307,6 +1332,84 @@ namespace confighttp {
     output_tree["status"] = true;
     send_response(response, output_tree);
   }
+
+  // ---- Nova: live stream sessions and session history (/api/sessions*) ----
+
+  /**
+   * @brief Resolve a session's client certificate to its current UUID and name.
+   * @param cert_pem PEM certificate recorded for the session.
+   * @return Identity; empty strings when the client is no longer paired.
+   */
+  stream_stats::client_identity_t session_client_identity(const std::string &cert_pem) {
+    stream_stats::client_identity_t who;
+    if (auto id = nvhttp::get_client_identity(cert_pem)) {
+      who.uuid = std::move(id->first);
+      who.name = std::move(id->second);
+    }
+    return who;
+  }
+
+  /**
+   * @brief Get live statistics for every active stream.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * Add `?samples=1` to include the last 120 one-second samples per session (for sparklines).
+   * Latencies are host-side milliseconds: `capture` is capture timestamp to encoder pickup, `encode` is
+   * colour conversion plus encoding, `send` is packetizing, FEC, encryption and pacing until the last
+   * packet leaves the socket. `loss_pct` is null until the client reports loss.
+   *
+   * @api_examples{/api/sessions|:| GET|:| null}
+   */
+  void getSessions(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    const auto query = request->parse_query_string();
+    const auto samples_it = query.find("samples");
+    const bool with_samples = samples_it != query.end() && (samples_it->second == "1" || samples_it->second == "true");
+
+    nlohmann::json sessions = nlohmann::json::array();
+    for (const auto &snap : stream_stats::active_sessions(with_samples)) {
+      sessions.push_back(stream_stats::snapshot_to_api_json(snap, session_client_identity(snap.info.client_cert), with_samples));
+    }
+
+    nlohmann::json output_tree;
+    output_tree["sessions"] = std::move(sessions);
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Get the most recent ended streams (up to 50), newest first.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * `end_reason` is "client" (the device disconnected), "host" (stopped from Nova or the app exited),
+   * "timeout" (the device stopped responding) or "ended".
+   *
+   * @api_examples{/api/sessions/history|:| GET|:| null}
+   */
+  void getSessionHistory(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    nlohmann::json sessions = nlohmann::json::array();
+    for (const auto &entry : stream_stats::history()) {
+      sessions.push_back(stream_stats::history_to_api_json(entry, session_client_identity(entry.client_cert)));
+    }
+
+    nlohmann::json output_tree;
+    output_tree["sessions"] = std::move(sessions);
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+  // ---- end Nova sessions ----
 
   /**
    * @brief Update a paired client: enable or disable it, rename it, or change its permissions.
@@ -1463,6 +1566,7 @@ namespace confighttp {
         return;
       }
 
+      BOOST_LOG(info) << "Ended the stream from device ["sv << nvhttp::get_client_name_by_uuid(uuid) << "] ("sv << uuid << ')';
       rtsp_stream::terminate_sessions_by_cert(cert);
 
       nlohmann::json output_tree;
@@ -1578,6 +1682,10 @@ namespace confighttp {
     for (auto &[name, value] : vars) {
       output_tree[name] = std::move(value);
     }
+    // Secrets are write-only: report that one is stored without revealing it.
+    if (output_tree.contains("steamgriddb_api_key")) {
+      output_tree["steamgriddb_api_key"] = std::string(secret_placeholder);
+    }
 
     send_response(response, output_tree);
   }
@@ -1637,6 +1745,12 @@ namespace confighttp {
       std::stringstream config_stream;
       nlohmann::json output_tree;
       nlohmann::json input_tree = nlohmann::json::parse(ss);
+      // The Web UI sends the placeholder back unchanged when the user didn't edit a secret.
+      if (input_tree.contains("steamgriddb_api_key") && input_tree["steamgriddb_api_key"] == std::string(secret_placeholder)) {
+        const auto current = config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str()));
+        const auto it = current.find("steamgriddb_api_key");
+        input_tree["steamgriddb_api_key"] = it == current.end() ? std::string {} : it->second;
+      }
       for (const auto &[k, v] : input_tree.items()) {
         if (v.is_null() || (v.is_string() && v.get<std::string>().empty())) {
           continue;
@@ -2499,6 +2613,450 @@ namespace confighttp {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Nova host facts: /api/host/info, /api/displays, /api/audio/sinks, /api/preview,
+  // /api/health. Kept together so the sessions/telemetry routes can live apart.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * @brief Describe the host: name, versions, GPUs, encoder and capture method.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/host/info|:| GET|:| null}
+   */
+  void getHostInfo(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    send_response(response, host_info::host_info_json());
+  }
+
+  /**
+   * @brief List the display outputs Nova can capture.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Each entry has `name`, `index` (legacy numeric `output_name`), `connected`, `primary`,
+   * `x`/`y`, `width`/`height` (current scanout), `mode_width`/`mode_height`, `refresh_hz`
+   * and `configured`.
+   *
+   * @api_examples{/api/displays|:| GET|:| null}
+   */
+  void getDisplays(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    nlohmann::json output_tree;
+    output_tree["displays"] = host_info::displays_json(host_info::cached_outputs());
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief List the sound server's output devices.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Nova's own per-stream sinks are marked `virtual`; `configured` echoes `audio_sink`.
+   *
+   * @api_examples{/api/audio/sinks|:| GET|:| null}
+   */
+  void getAudioSinks(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    std::vector<platf::sink_desc_t> sinks;
+    if (auto control = platf::audio_control()) {
+      sinks = control->list_sinks();
+    }
+    auto output_tree = host_info::audio_sinks_json(sinks, config::audio.sink);
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Return a JPEG snapshot of a display.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Query: `display` (output name, optional) and `w` (width, 160–1280, default 640).
+   * Replies 429 when more than two captures are requested per second and 503 when the
+   * desktop can't be captured without prompting. Never cached by the browser.
+   *
+   * @api_examples{/api/preview?display=HDMI-0&w=640|:| GET|:| null}
+   */
+  void getPreview(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    std::string display;
+    int width = 640;
+    for (const auto &[name, value] : request->parse_query_string()) {
+      if (name == "display") {
+        display = value;
+      } else if (name == "w") {
+        std::from_chars(value.data(), value.data() + value.size(), width);
+      }
+    }
+    if (display.size() > 64 || !std::ranges::all_of(display, [](char c) {
+          return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.' || c == ':';
+        })) {
+      bad_request(response, request, "Invalid display name");
+      return;
+    }
+
+    const auto result = host_info::preview_jpeg(display, width);
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("X-Frame-Options", "DENY");
+    headers.emplace("Content-Security-Policy", "frame-ancestors 'none';");
+    headers.emplace("Cache-Control", "no-store");
+    if (result.jpeg.empty()) {
+      nlohmann::json tree;
+      tree["status"] = false;
+      tree["status_code"] = result.http_status;
+      tree["error"] = result.error;
+      headers.emplace("Content-Type", "application/json");
+      response->write(static_cast<SimpleWeb::StatusCode>(result.http_status), tree.dump(), headers);
+      return;
+    }
+    headers.emplace("Content-Type", "image/jpeg");
+    response->write(SimpleWeb::StatusCode::success_ok, result.jpeg, headers);
+  }
+
+  /**
+   * @brief Run the setup-doctor checks.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Each check is `{id, status: ok|warn|error, title, detail, fix: null|{kind, value}}`
+   * with `kind` one of `command`, `setting` or `doc`. Results are cached for ten seconds.
+   *
+   * @api_examples{/api/health|:| GET|:| null}
+   */
+  void getHealth(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    nlohmann::json output_tree;
+    output_tree["checks"] = host_info::health_to_json(host_info::cached_health());
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // Nova game library: scan folders and launchers, match titles, import with artwork.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * @brief Send an image file with the right content type.
+   *
+   * @param response The HTTP response object.
+   * @param path Image file (PNG or JPEG).
+   */
+  void send_image_file(const resp_https_t &response, const fs::path &path) {
+    std::ifstream in(path, std::ios::binary);
+    auto ext = path.extension().string();
+    boost::to_lower(ext);
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Content-Type", ext == ".png" ? "image/png" : "image/jpeg");
+    headers.emplace("Cache-Control", "private, max-age=300");
+    headers.emplace("X-Content-Type-Options", "nosniff");
+    headers.emplace("X-Frame-Options", "DENY");
+    headers.emplace("Content-Security-Policy", "frame-ancestors 'none';");
+    response->write(SimpleWeb::StatusCode::success_ok, in, headers);
+  }
+
+  /**
+   * @brief Start scanning for games.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * The body is JSON: `{"source": "folder"|"lutris"|"steam"|"heroic", "path": "/abs/folder"}` (path only for folder).
+   * The response is `{"status": true, "job_id": "<id>"}`; poll `/api/library/jobs/<id>`.
+   *
+   * @api_examples{/api/library/scan|:| POST|:| {"source":"folder","path":"/home/user/Games"}}
+   */
+  void postLibraryScan(const resp_https_t &response, const req_https_t &request) {
+    if (!check_content_type(response, request, "application/json")) {
+      return;
+    }
+    if (!authenticate(response, request)) {
+      return;
+    }
+    if (!validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    print_req(request);
+
+    std::stringstream ss;
+    ss << request->content.rdbuf();
+    try {
+      const auto input = nlohmann::json::parse(ss);
+      const auto source = library::parse_source(input.value("source", std::string {}));
+      if (!source) {
+        bad_request(response, request, "'source' must be folder, lutris, steam or heroic");
+        return;
+      }
+      fs::path path;
+      if (*source == library::source_e::folder) {
+        path = input.value("path", std::string {});
+        if (!library::safe_scan_root(path)) {
+          bad_request(response, request, "'path' must be an existing folder (absolute path)");
+          return;
+        }
+      }
+      const auto job = library::start_scan(*source, path, library::current_settings());
+      if (!job) {
+        bad_request(response, request, "Another scan or import is already running. Try again when it finishes.");
+        return;
+      }
+      send_response(response, {{"status", true}, {"job_id", *job}});
+    } catch (const std::exception &e) {
+      bad_request(response, request, e.what());
+    }
+  }
+
+  /**
+   * @brief Get the progress and result of a scan or import job.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * Scan results: `result.items[]` = {temp_id, title, source, source_id, launch_cmd, working_dir,
+   * matched: {appid, name, confidence} | null, artwork: {poster|hero|logo|icon: [{id, label, url?}]},
+   * already_in_library} and `result.skipped[]` = {path, reason}. Import results: `result.imported[]`,
+   * `result.duplicates[]` and `result.failed[]`.
+   *
+   * @api_examples{/api/library/jobs/0123456789abcdef|:| GET|:| null}
+   */
+  void getLibraryJob(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    const auto status = library::job_status(request->path_match[1].str());
+    if (!status) {
+      not_found(response, request, "Job not found");
+      return;
+    }
+    send_response(response, *status);
+  }
+
+  /**
+   * @brief Import games found by a scan as apps, downloading their artwork.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * The body is JSON: `{"items": [{"temp_id": "...", "title"?: "...", "poster"?: "<candidate id>"|"none",
+   * "hero"?: ..., "logo"?: ..., "icon"?: ..., "launch_cmd"?: "...", "working_dir"?: "..."}]}`. Omitted artwork uses
+   * the best candidate. The response is `{"status": true, "job_id": "<id>"}`.
+   *
+   * @api_examples{/api/library/import|:| POST|:| {"items":[{"temp_id":"0123456789abcdef:0"}]}}
+   */
+  void postLibraryImport(const resp_https_t &response, const req_https_t &request) {
+    if (!check_content_type(response, request, "application/json")) {
+      return;
+    }
+    if (!authenticate(response, request)) {
+      return;
+    }
+    if (!validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    print_req(request);
+
+    std::stringstream ss;
+    ss << request->content.rdbuf();
+    try {
+      const auto input = nlohmann::json::parse(ss);
+      if (!input.contains("items") || !input["items"].is_array() || input["items"].empty() || input["items"].size() > 500) {
+        bad_request(response, request, "'items' must be a list of 1 to 500 games");
+        return;
+      }
+      const auto job = library::start_import(input["items"], library::current_settings());
+      if (!job) {
+        bad_request(response, request, "Another scan or import is already running. Try again when it finishes.");
+        return;
+      }
+      send_response(response, {{"status", true}, {"job_id", *job}});
+    } catch (const std::exception &e) {
+      bad_request(response, request, e.what());
+    }
+  }
+
+  /**
+   * @brief Ask a running library scan, import or artwork job to stop.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * Cancellation is cooperative: the job stops at its next checkpoint and its state becomes
+   * `cancelled`. Responds 404 for unknown ids and 400 when the job already finished.
+   *
+   * @api_examples{/api/library/jobs/0123456789abcdef/cancel|:| POST|:| null}
+   */
+  void postLibraryJobCancel(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    if (!validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    print_req(request);
+    const auto id = request->path_match[1].str();
+    if (!library::job_status(id)) {
+      not_found(response, request, "Job not found");
+      return;
+    }
+    if (!library::cancel_job(id)) {
+      bad_request(response, request, "The job already finished");
+      return;
+    }
+    send_response(response, {{"status", true}});
+  }
+
+  /**
+   * @brief Download chosen artwork for an app already in the library and save it.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * The body is JSON: `{"app_index": 3, "poster"?: "<candidate id>", "hero"?: ..., "logo"?: ..., "icon"?: ...}`
+   * with candidate ids from `/api/library/artwork/search`. Runs as a background job; the response is
+   * `{"status": true, "job_id": "<id>"}` and the job result lists the `applied` kinds.
+   *
+   * @api_examples{/api/library/artwork/apply|:| POST|:| {"app_index":0,"poster":"c1a2b3c4"}}
+   */
+  void postLibraryArtworkApply(const resp_https_t &response, const req_https_t &request) {
+    if (!check_content_type(response, request, "application/json")) {
+      return;
+    }
+    if (!authenticate(response, request)) {
+      return;
+    }
+    if (!validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    print_req(request);
+
+    std::stringstream ss;
+    ss << request->content.rdbuf();
+    try {
+      const auto input = nlohmann::json::parse(ss);
+      if (!input.contains("app_index") || !input["app_index"].is_number_unsigned()) {
+        bad_request(response, request, "'app_index' must be a non-negative integer");
+        return;
+      }
+      const auto job = library::start_apply_artwork(input["app_index"].get<std::size_t>(), input, library::current_settings());
+      if (!job) {
+        bad_request(response, request, "Another scan or import is already running. Try again when it finishes.");
+        return;
+      }
+      send_response(response, {{"status", true}, {"job_id", *job}});
+    } catch (const std::exception &e) {
+      bad_request(response, request, e.what());
+    }
+  }
+
+  /**
+   * @brief Search store matches and artwork for a game ("Change match" / "Choose artwork").
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * Query: `q=<title>` or `appid=<steam app id>`.
+   *
+   * @api_examples{/api/library/artwork/search?q=Far%20Cry%205|:| GET|:| null}
+   */
+  void getLibraryArtworkSearch(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    const auto query = request->parse_query_string();
+    std::string q;
+    std::uint32_t appid = 0;
+    if (const auto it = query.find("q"); it != query.end()) {
+      q = it->second.substr(0, 128);
+    }
+    if (const auto it = query.find("appid"); it != query.end()) {
+      std::from_chars(it->second.data(), it->second.data() + it->second.size(), appid);
+    }
+    if (q.empty() && appid == 0) {
+      bad_request(response, request, "Give 'q' or 'appid'");
+      return;
+    }
+    auto result = library::artwork_search(q, appid, library::current_settings());
+    result["status"] = true;
+    send_response(response, result);
+  }
+
+  /**
+   * @brief Preview an artwork candidate (re-encoded as a small PNG).
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/library/candidates/c1a2b3c4|:| GET|:| null}
+   */
+  void getLibraryCandidate(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    const auto ref = library::candidate(request->path_match[1].str());
+    if (!ref) {
+      not_found(response, request, "Artwork not found");
+      return;
+    }
+    // Previews are throwaway: keep them in the temp folder, one per candidate.
+    std::error_code ec;
+    const auto preview_dir = fs::temp_directory_path(ec) / "nova-host-previews" / request->path_match[1].str();
+    auto preview_ref = *ref;
+    preview_ref.kind = ref->kind == library::art_kind_e::hero ? library::art_kind_e::hero : library::art_kind_e::poster;
+    const auto cached = preview_dir / (preview_ref.kind == library::art_kind_e::hero ? "hero.jpg" : "poster.png");
+    const auto stored = fs::is_regular_file(cached, ec) ? std::optional<fs::path> {cached} : library::artwork::store(preview_ref, preview_dir);
+    if (!stored) {
+      not_found(response, request, "Couldn't load that image");
+      return;
+    }
+    send_image_file(response, *stored);
+  }
+
+  /**
+   * @brief Get one piece of an app's artwork.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * Path: `/api/covers/<app index>/<poster|hero|logo|icon>`.
+   *
+   * @api_examples{/api/covers/0/hero|:| GET|:| null}
+   */
+  void getAppArt(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    try {
+      const auto index = std::stoul(request->path_match[1].str());
+      const auto kind = library::parse_kind(request->path_match[2].str());
+      nlohmann::json app;
+      {
+        std::scoped_lock lock(library::apps_file_mutex());
+        const auto tree = nlohmann::json::parse(file_handler::read_file(config::stream.file_apps.c_str()));
+        if (!tree.contains("apps") || index >= tree["apps"].size()) {
+          not_found(response, request, "Application not found");
+          return;
+        }
+        app = tree["apps"][index];
+      }
+      const auto file = kind ? library::app_art(app, *kind, platf::appdata() / "covers" / "library") : std::nullopt;
+      if (!file) {
+        not_found(response, request, "Artwork not found");
+        return;
+      }
+      send_image_file(response, *file);
+    } catch (const std::exception &e) {
+      bad_request(response, request, e.what());
+    }
+  }
+
   /**
    * @brief Start the HTTPS configuration server.
    */
@@ -2545,11 +3103,24 @@ namespace confighttp {
     server.resource["^/api/clients/unpair-all$"]["POST"] = unpairAll;
     server.resource["^/api/clients/update$"]["POST"] = updateClient;
     server.resource["^/api/clients/disconnect$"]["POST"] = disconnectClient;
+    // Nova: live sessions and history
+    server.resource["^/api/sessions$"]["GET"] = getSessions;
+    server.resource["^/api/sessions/history$"]["GET"] = getSessionHistory;
     server.resource["^/api/config$"]["GET"] = getConfig;
     server.resource["^/api/config$"]["POST"] = saveConfig;
     server.resource["^/api/configLocale$"]["GET"] = getLocale;
     server.resource["^/api/covers/([0-9]+)$"]["GET"] = getCover;
     server.resource["^/api/covers/upload$"]["POST"] = uploadCover;
+    // Nova game library
+    server.resource["^/api/covers/([0-9]+)/(poster|hero|logo|icon)$"]["GET"] = getAppArt;
+    server.resource["^/api/library/scan$"]["POST"] = postLibraryScan;
+    server.resource["^/api/library/jobs/([0-9a-f]{16})$"]["GET"] = getLibraryJob;
+    server.resource["^/api/library/scan/([0-9a-f]{16})$"]["GET"] = getLibraryJob;
+    server.resource["^/api/library/import$"]["POST"] = postLibraryImport;
+    server.resource["^/api/library/jobs/([0-9a-f]{16})/cancel$"]["POST"] = postLibraryJobCancel;
+    server.resource["^/api/library/artwork/apply$"]["POST"] = postLibraryArtworkApply;
+    server.resource["^/api/library/artwork/search$"]["GET"] = getLibraryArtworkSearch;
+    server.resource["^/api/library/candidates/(c[0-9]+[0-9a-f]{6})$"]["GET"] = getLibraryCandidate;
     server.resource["^/api/csrf-token$"]["GET"] = getCSRFToken;
     server.resource["^/api/password$"]["POST"] = savePassword;
     server.resource["^/api/pin$"]["DELETE"] = cancelPairing;
@@ -2562,6 +3133,12 @@ namespace confighttp {
     server.resource["^/api/virtual-input/license$"]["GET"] = getVirtualInputLicense;
     server.resource["^/api/virtual-input/license$"]["POST"] = updateVirtualInputLicense;
     server.resource["^/api/virtual-input/status$"]["GET"] = getVirtualInputStatus;
+    // Nova host facts
+    server.resource["^/api/host/info$"]["GET"] = getHostInfo;
+    server.resource["^/api/displays$"]["GET"] = getDisplays;
+    server.resource["^/api/audio/sinks$"]["GET"] = getAudioSinks;
+    server.resource["^/api/preview$"]["GET"] = getPreview;
+    server.resource["^/api/health$"]["GET"] = getHealth;
 
     // static/dynamic resources
     server.resource["^/images/sunshine.ico$"]["GET"] = getFaviconImage;

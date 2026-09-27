@@ -110,5 +110,12 @@ namespace stream {
      * @param permissions New permission mask.
      */
     void set_permissions(session_t &session, client_permissions::mask_t permissions);
+    /**
+     * @brief Ask the session's encoder to change bitrate; applied on the next encoded frame.
+     *
+     * @param session Active streaming session.
+     * @param bitrate_kbps New bitrate in kilobits per second.
+     */
+    void request_bitrate(session_t &session, int bitrate_kbps);
   }  // namespace session
 }  // namespace stream

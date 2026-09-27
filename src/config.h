@@ -135,6 +135,8 @@ namespace config {
 
     std::string capture;  ///< Capture backend name selected by configuration.
     std::string capture_pacing;  ///< Nova: "timer" (default) or "vblank" (present-paced KMS capture).
+    std::string display_follow;  ///< Nova: "virtual" (default) follows the client mode on every connect; "off" disables it.
+    std::string display_follow_cmd;  ///< Nova: command run with "set"/"restore" to switch the display to the client mode.
     std::string encoder;  ///< Encoder backend name selected by configuration.
     std::string adapter_name;  ///< Display adapter name selected in configuration.
     std::string output_name;  ///< Display output name selected in configuration.
@@ -397,12 +399,21 @@ namespace config {
     std::vector<std::string> csrf_allowed_origins;  ///< Additional origins allowed by CSRF validation.
   };
 
+  /**
+   * @brief Game library scanning and artwork settings.
+   */
+  struct library_t {
+    std::string steamgriddb_api_key;  ///< Nova: optional SteamGridDB API key for extra artwork; never returned in plain text by /api/config.
+    std::string windows_exe_launcher;  ///< Nova: command template for detected Windows games; "{exe}" is replaced by the quoted path. Empty picks a default.
+  };
+
   extern video_t video;
   extern audio_t audio;
   extern stream_t stream;
   extern nvhttp_t nvhttp;
   extern input_t input;
   extern sunshine_t sunshine;
+  extern library_t library;  ///< Game library scanning and artwork settings.
 
 #ifdef SUNSHINE_TESTS
   /**

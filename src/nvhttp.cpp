@@ -30,12 +30,15 @@
 #include "client_permissions.h"
 #include "clipboard.h"
 #include "config.h"
+#include "display_follow.h"
 #include "display_device.h"
 #include "file_handler.h"
 #include "globals.h"
 #include "httpcommon.h"
+#include "library/library.h"
 #include "logging.h"
 #include "network.h"
+#include "nova_client_api.h"
 #include "nvhttp.h"
 #include "platform/common.h"
 #include "process.h"
@@ -615,6 +618,90 @@ namespace nvhttp {
   }
 
   /**
+   * @brief Read apps.json (under the library lock).
+   *
+   * @return Parsed tree, or an empty object on failure.
+   */
+  nlohmann::json read_apps_file() {
+    try {
+      std::scoped_lock lock(library::apps_file_mutex());
+      return nlohmann::json::parse(file_handler::read_file(config::stream.file_apps.c_str()));
+    } catch (const std::exception &) {
+      return nlohmann::json::object();
+    }
+  }
+
+  /**
+   * @brief Position in apps.json of the app with GameStream id @p appid.
+   *
+   * @param appid GameStream app id.
+   * @return Index, or nullopt.
+   */
+  std::optional<std::size_t> app_index_for_id(int appid) {
+    const auto &apps = proc::proc.get_apps();
+    for (std::size_t i = 0; i < apps.size(); ++i) {
+      if (apps[i].id == std::to_string(appid)) {
+        return i;
+      }
+    }
+    return std::nullopt;
+  }
+
+  /**
+   * @brief Run Nova's display-follow step for a launch or resume.
+   *
+   * @param session The launch session built from the client's request.
+   * @param appid GameStream id of the app being launched or resumed.
+   * @param launching True for /launch (the app's own prep commands still run), false for /resume.
+   */
+  void follow_client_display(const rtsp_stream::launch_session_t &session, int appid, bool launching);
+
+  /**
+   * @brief Per-app default display mode (`nova-display-mode` in apps.json).
+   *
+   * @param appid GameStream app id.
+   * @return "virtual", "mirror" or empty.
+   */
+  std::string default_display_mode(int appid) {
+    const auto index = app_index_for_id(appid);
+    if (!index) {
+      return {};
+    }
+    const auto tree = read_apps_file();
+    if (!tree.contains("apps") || !tree["apps"].is_array() || *index >= tree["apps"].size()) {
+      return {};
+    }
+    const auto &app = tree["apps"][*index];
+    if (app.contains("nova-display-mode") && app["nova-display-mode"].is_string()) {
+      return nova_api::parse_display_mode(app["nova-display-mode"].get<std::string>()).value_or(std::string {});
+    }
+    return {};
+  }
+
+  void follow_client_display(const rtsp_stream::launch_session_t &session, int appid, bool launching) {
+    display_follow::request_t request;
+    request.width = session.width;
+    request.height = session.height;
+    request.fps = session.fps;
+    request.client_name = session.client_name;
+    request.mode = session.display_mode.empty() ? default_display_mode(appid) : session.display_mode;
+
+    bool legacy_prep = false;
+    for (const auto &app : proc::proc.get_apps()) {
+      if (app.id != std::to_string(appid)) {
+        continue;
+      }
+      request.app_name = app.name;
+      // On launch the app's own prep command still runs; on resume it does not.
+      for (const auto &cmd : app.prep_cmds) {
+        legacy_prep = legacy_prep || (launching && display_follow::is_legacy_prep(cmd.do_cmd, config::video.display_follow_cmd));
+      }
+      break;
+    }
+    display_follow::stream_requested(request, legacy_prep, rtsp_stream::session_count() > 0);
+  }
+
+  /**
    * @brief Create launch session.
    *
    * @param host_audio Host audio.
@@ -669,6 +756,11 @@ namespace nvhttp {
     launch_session->client_cert = peer.cert;
     launch_session->client_name = peer.name;
     launch_session->permissions = peer.cert.empty() ? client_permissions::view_only : get_client_permissions(peer.cert);
+    if (const auto mode = nova_api::parse_display_mode(get_arg(args, "nova_display", ""))) {
+      launch_session->display_mode = *mode;
+    } else {
+      launch_session->display_mode = default_display_mode(launch_session->appid);
+    }
 
     // Generate the unique identifiers for this connection that we will send later during RTSP handshake
     unsigned char raw_payload[8];
@@ -1560,6 +1652,9 @@ namespace nvhttp {
     host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
     auto launch_session = make_launch_session(host_audio, args, verified_peer_for(request));
 
+    // Nova: switch the display to this client's mode before the probe and prep commands see it.
+    follow_client_display(*launch_session, (int) appid, true);
+
     bool probe_found_nothing {false};  ///< The pre-prep probe chose no encoder at all, so the re-probe is the last word.
 
     if (rtsp_stream::session_count() == 0) {
@@ -1724,6 +1819,9 @@ namespace nvhttp {
     }
     const auto launch_session = make_launch_session(host_audio, args, verified_peer_for(request));
 
+    // Nova: a resumed app's prep commands don't run again, so follow this client's mode here.
+    follow_client_display(*launch_session, proc::proc.running(), false);
+
     if (no_active_sessions) {
       // We want to prepare display only if there are no active sessions at
       // the moment. This should be done before probing encoders as it could
@@ -1887,6 +1985,254 @@ namespace nvhttp {
     response->close_connection_after_response = true;
   }
 
+  // ---------------------------------------------------------------------------
+  // Nova client API (/nova/v1/*, /bitrate): paired devices, authenticated by client certificate.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * @brief Write a JSON reply and close the connection.
+   *
+   * @param response HTTPS response.
+   * @param code HTTP status.
+   * @param body JSON body.
+   */
+  void nova_json(const resp_https_t &response, SimpleWeb::StatusCode code, const nlohmann::json &body) {
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Content-Type", "application/json");
+    headers.emplace("Cache-Control", "no-store");
+    response->write(code, body.dump(), headers);
+    response->close_connection_after_response = true;
+  }
+
+  /**
+   * @brief The verified device on this connection, or a 401 reply when there is none.
+   *
+   * @param response HTTPS response (written on failure).
+   * @param request HTTPS request.
+   * @return The device, or nullopt after replying 401.
+   */
+  std::optional<verified_peer_t> nova_require_device(const resp_https_t &response, const req_https_t &request) {
+    auto peer = verified_peer_for(request);
+    if (peer.cert.empty()) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_unauthorized, {{"error", "this device isn't paired"}});
+      return std::nullopt;
+    }
+    return peer;
+  }
+
+  /**
+   * @brief Index of the running app in apps.json order.
+   *
+   * @return Index, or nullopt when nothing runs.
+   */
+  std::optional<std::size_t> nova_running_index() {
+    if (const auto running_id = proc::proc.running(); running_id > 0) {
+      return app_index_for_id(running_id);
+    }
+    return std::nullopt;
+  }
+
+  /**
+   * @brief An app visible to the device on this connection, looked up by its Nova id.
+   *
+   * Devices without launch permission only see the running app.
+   *
+   * @param request HTTPS request.
+   * @param id Nova app id.
+   * @return The app object, or nullopt.
+   */
+  std::optional<nlohmann::json> nova_find_app(const req_https_t &request, const std::string &id) {
+    const auto tree = read_apps_file();
+    if (!tree.contains("apps") || !tree["apps"].is_array()) {
+      return std::nullopt;
+    }
+    const bool can_launch = client_permissions::has(permissions_for_request(request), client_permissions::launch_apps);
+    const auto running = nova_running_index();
+    for (std::size_t i = 0; i < tree["apps"].size(); ++i) {
+      if (nova_api::app_id(tree["apps"][i]) == id) {
+        if (!can_launch && (!running || *running != i)) {
+          return std::nullopt;
+        }
+        return tree["apps"][i];
+      }
+    }
+    return std::nullopt;
+  }
+
+  /**
+   * @brief Send an image file with caching headers (ETag from size + mtime, 304 on match).
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   * @param file Image file.
+   */
+  void nova_send_image(const resp_https_t &response, const req_https_t &request, const std::filesystem::path &file) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(file, ec);
+    if (ec) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_not_found, {{"error", "artwork not found"}});
+      return;
+    }
+    const auto mtime = std::filesystem::last_write_time(file, ec).time_since_epoch().count();
+    const auto etag = std::format("\"{:x}-{:x}\"", size, static_cast<std::uint64_t>(mtime));
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("ETag", etag);
+    headers.emplace("Cache-Control", "private, max-age=86400");
+    if (const auto it = request->header.find("If-None-Match"); it != request->header.end() && it->second == etag) {
+      response->write(SimpleWeb::StatusCode::redirection_not_modified, headers);
+      response->close_connection_after_response = true;
+      return;
+    }
+    auto ext = file.extension().string();
+    std::ranges::transform(ext, ext.begin(), [](unsigned char c) {
+      return static_cast<char>(std::tolower(c));
+    });
+    headers.emplace("Content-Type", ext == ".png" ? "image/png" : ext == ".webp" ? "image/webp" : "image/jpeg");
+    response->write(SimpleWeb::StatusCode::success_ok, file_handler::read_file(file.string().c_str()), headers);
+    response->close_connection_after_response = true;
+  }
+
+  /**
+   * @brief GET /nova/v1/capabilities: tells a client this host speaks the Nova API.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void nova_capabilities(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    nova_json(response, SimpleWeb::StatusCode::success_ok, {{"nova", true}, {"version", PROJECT_VERSION}, {"features", {"apps", "art", "details", "display_mode", "bitrate", "sessions"}}});
+  }
+
+  /**
+   * @brief GET /nova/v1/apps: the device's app list with artwork flags, playtime and display-mode defaults.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void nova_apps(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    const auto tree = read_apps_file();
+    std::vector<std::string> ids;
+    for (const auto &app : proc::proc.get_apps()) {
+      ids.push_back(app.id);
+    }
+    const bool can_launch = client_permissions::has(permissions_for_request(request), client_permissions::launch_apps);
+    const auto apps = nova_api::apps_list(tree.contains("apps") ? tree["apps"] : nlohmann::json::array(), ids, nova_running_index(), can_launch, nova_api::stats(), platf::appdata() / "covers" / "library");
+    nova_json(response, SimpleWeb::StatusCode::success_ok, apps);
+  }
+
+  /**
+   * @brief GET /nova/v1/apps/<id>/art/<poster|hero|logo|icon>: one piece of an app's artwork.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void nova_app_art(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    const auto app = nova_find_app(request, request->path_match[1].str());
+    const auto kind = library::parse_kind(request->path_match[2].str());
+    const auto file = app && kind ? library::app_art(*app, *kind, platf::appdata() / "covers" / "library") : std::nullopt;
+    if (!file) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_not_found, {{"error", "artwork not found"}});
+      return;
+    }
+    nova_send_image(response, request, *file);
+  }
+
+  /**
+   * @brief GET /nova/v1/apps/<id>/details: store details (fetched once, cached) plus playtime.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void nova_app_details(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    const auto id = request->path_match[1].str();
+    const auto app = nova_find_app(request, id);
+    if (!app) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_not_found, {{"error", "app not found"}});
+      return;
+    }
+    const auto all = nova_api::stats();
+    std::optional<nova_api::app_stats_t> stats;
+    if (const auto it = all.find(app->value("name", std::string {})); it != all.end()) {
+      stats = it->second;
+    }
+    nova_json(response, SimpleWeb::StatusCode::success_ok, nova_api::details_reply(id, nova_api::store_details(*app, true), stats));
+  }
+
+  /**
+   * @brief GET /nova/v1/apps/<id>/screenshot/<n>: a store screenshot, re-encoded and cached on the host.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void nova_app_screenshot(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    const auto app = nova_find_app(request, request->path_match[1].str());
+    const auto file = app ? nova_api::screenshot_file(*app, std::stoul(request->path_match[2].str())) : std::nullopt;
+    if (!file) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_not_found, {{"error", "screenshot not found"}});
+      return;
+    }
+    nova_send_image(response, request, *file);
+  }
+
+  /**
+   * @brief GET /bitrate?bitrate=<kbps>: change the calling device's running stream bitrate.
+   *
+   * Compatible with the Sunshine-Foundation extension moonlight-vplus uses; replies
+   * `<root status_code="200"><bitrate>1</bitrate></root>`, or `0` when the device isn't streaming.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void bitrate(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    pt::ptree tree;
+    auto g = util::fail_guard([&]() {
+      std::ostringstream data;
+      pt::write_xml(data, tree);
+      response->write(data.str());
+      response->close_connection_after_response = true;
+    });
+    const auto peer = verified_peer_for(request);
+    const auto args = request->parse_query_string();
+    long long requested = 0;
+    try {
+      requested = std::stoll(get_arg(args, "bitrate", "0"));
+    } catch (...) {
+      requested = 0;
+    }
+    const auto kbps = nova_api::clamp_bitrate(requested, config::video.max_bitrate);
+    if (peer.cert.empty() || !kbps) {
+      tree.put("root.bitrate", 0);
+      tree.put("root.<xmlattr>.status_code", peer.cert.empty() ? 401 : 400);
+      tree.put("root.<xmlattr>.status_message", peer.cert.empty() ? "This device isn't paired" : "Invalid bitrate");
+      return;
+    }
+    const int sessions = rtsp_stream::request_bitrate_by_cert(peer.cert, *kbps);
+    BOOST_LOG(info) << "Nova: "sv << peer.name << " asked for "sv << *kbps << " kbps ("sv << sessions << " session(s))"sv;
+    tree.put("root.bitrate", sessions > 0 ? 1 : 0);
+    tree.put("root.applied_kbps", *kbps);
+    tree.put("root.<xmlattr>.status_code", 200);
+  }
+
   /**
    * @brief Stream a file-transfer offer's bytes from disk (kind=4 offers).
    * @param response HTTP response object.
@@ -2032,6 +2378,12 @@ namespace nvhttp {
       resume(host_audio, resp, req);
     };
     https_server.resource["^/cancel$"]["GET"] = cancel;
+    https_server.resource["^/bitrate$"]["GET"] = bitrate;
+    https_server.resource["^/nova/v1/capabilities$"]["GET"] = nova_capabilities;
+    https_server.resource["^/nova/v1/apps$"]["GET"] = nova_apps;
+    https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/art/(poster|hero|logo|icon)$"]["GET"] = nova_app_art;
+    https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/details$"]["GET"] = nova_app_details;
+    https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/screenshot/([0-9]{1,2})$"]["GET"] = nova_app_screenshot;
     https_server.resource["^/api/v1/clipboard/blob$"]["POST"] = clipboard_blob_post;
     https_server.resource["^/api/v1/clipboard/blob/([a-fA-F0-9-]+)$"]["GET"] = clipboard_blob_get;
     https_server.resource["^/clipboard/file/([a-fA-F0-9-]+)$"]["GET"] = clipboard_file_get;
@@ -2081,6 +2433,7 @@ namespace nvhttp {
 
   void erase_all_clients() {
     std::lock_guard lock {client_auth_mutex()};
+    BOOST_LOG(info) << "Unpaired all devices ("sv << client_root.named_devices.size() << " removed)"sv;
     client_root = {};
     cert_chain.clear();
     save_state();
@@ -2091,6 +2444,7 @@ namespace nvhttp {
     bool removed = false;
     for (auto it = client_root.named_devices.begin(); it != client_root.named_devices.end();) {
       if ((*it).uuid == uuid) {
+        BOOST_LOG(info) << "Unpaired device ["sv << (*it).name << "] ("sv << uuid << ')';
         it = client_root.named_devices.erase(it);
         removed = true;
       } else {
@@ -2107,6 +2461,9 @@ namespace nvhttp {
     std::lock_guard lock {client_auth_mutex()};
     for (auto &named_cert : client_root.named_devices) {
       if (named_cert.uuid == uuid) {
+        if (named_cert.enabled != enabled) {
+          BOOST_LOG(info) << (enabled ? "Allowed device ["sv : "Blocked device ["sv) << named_cert.name << "] ("sv << uuid << ')';
+        }
         named_cert.enabled = enabled;
         rebuild_client_cert_chain();
         save_state();
@@ -2114,6 +2471,16 @@ namespace nvhttp {
       }
     }
     return false;
+  }
+
+  std::string get_client_name_by_uuid(const std::string_view uuid) {
+    std::lock_guard lock {client_auth_mutex()};
+    for (const auto &named_cert : client_root.named_devices) {
+      if (named_cert.uuid == uuid) {
+        return named_cert.name;
+      }
+    }
+    return {};
   }
 
   /**
@@ -2154,6 +2521,9 @@ namespace nvhttp {
     std::lock_guard lock {client_auth_mutex()};
     for (auto &named_cert : client_root.named_devices) {
       if (named_cert.uuid == uuid) {
+        if (named_cert.name != name) {
+          BOOST_LOG(info) << "Renamed device ["sv << named_cert.name << "] to ["sv << name << "] ("sv << uuid << ')';
+        }
         named_cert.name = std::string {name};
         save_state();
         return true;
@@ -2169,6 +2539,10 @@ namespace nvhttp {
       std::lock_guard lock {client_auth_mutex()};
       for (auto &named_cert : client_root.named_devices) {
         if (named_cert.uuid == uuid) {
+          if (named_cert.permissions != mask) {
+            BOOST_LOG(info) << "Changed permissions of device ["sv << named_cert.name << "] ("sv << uuid << ") to "sv
+                            << client_permissions::preset_name(mask) << " (mask 0x"sv << std::hex << static_cast<unsigned>(mask) << std::dec << ')';
+          }
           named_cert.permissions = mask;
           cert = named_cert.cert;
           save_state();
@@ -2222,6 +2596,19 @@ namespace nvhttp {
         return;
       }
     }
+  }
+
+  std::optional<std::pair<std::string, std::string>> get_client_identity(const std::string_view cert_pem) {
+    if (cert_pem.empty()) {
+      return std::nullopt;
+    }
+    std::lock_guard lock {client_auth_mutex()};
+    for (const auto &named_cert : client_root.named_devices) {
+      if (named_cert.cert == cert_pem) {
+        return std::make_pair(named_cert.uuid, named_cert.name);
+      }
+    }
+    return std::nullopt;
   }
 
   /**

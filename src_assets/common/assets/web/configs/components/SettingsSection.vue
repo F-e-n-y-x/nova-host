@@ -9,11 +9,12 @@
  *        [{ id, title, detected, items }]; config, platform, errors, otherOpen.
  * Emits: update(key, value), reset(key), touch(key).
  */
-import { shallowRef, watch } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown } from '@lucide/vue'
 import NvBadge from '../../nova/components/NvBadge.vue'
 import SettingField from './SettingField.vue'
+import { encoderSummary, useHostProbes } from '../hostProbes.js'
 
 const props = defineProps({
   section: { type: Object, required: true },
@@ -25,6 +26,10 @@ const props = defineProps({
 const emit = defineEmits(['update', 'reset', 'touch'])
 const { t } = useI18n()
 
+const probes = useHostProbes()
+/** "NVENC on GeForce GTX 1080 Ti · H.264, HEVC" when the host reports its encoder. */
+const detected = computed(() => (probes.hostInfo.value ? encoderSummary(t) : ''))
+
 const showOther = shallowRef(props.otherOpen)
 watch(() => props.otherOpen, (open) => { if (open) showOther.value = true })
 </script>
@@ -34,6 +39,9 @@ watch(() => props.otherOpen, (open) => { if (open) showOther.value = true })
     <div class="nv-settings-section__head">
       <h2 :id="`${section.id}-title`" class="nv-settings-section__title">{{ section.title }}</h2>
       <p v-if="section.summary" class="nv-settings-section__summary">{{ section.summary }}</p>
+      <p v-if="section.id === 'encoder' && detected" class="nv-settings-section__detected">
+        <span class="nv-settings-section__dot" aria-hidden="true" />{{ detected }}
+      </p>
     </div>
 
     <div v-if="section.items.length" class="nv-settings-card">
@@ -107,6 +115,23 @@ watch(() => props.otherOpen, (open) => { if (open) showOther.value = true })
     margin: 0;
     font-size: var(--nv-text-sm);
     color: var(--nv-text-secondary);
+  }
+
+  .nv-settings-section__detected {
+    display: flex;
+    align-items: center;
+    gap: var(--nv-space-2);
+    margin: var(--nv-space-1) 0 0;
+    font-size: var(--nv-text-sm);
+    color: var(--nv-text);
+  }
+
+  .nv-settings-section__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--nv-radius-pill);
+    background: var(--nv-success);
+    flex-shrink: 0;
   }
 
   .nv-settings-card {

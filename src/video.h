@@ -449,6 +449,16 @@ namespace video {
      * @param last_frame Last frame.
      */
     virtual void invalidate_ref_frames(int64_t first_frame, int64_t last_frame) = 0;
+
+    /**
+     * @brief Change the target bitrate of a running encoder.
+     *
+     * @param bitrate_kbps New bitrate in kilobits per second.
+     * @return True when the encoder applied the change (it takes effect on the next frame).
+     */
+    virtual bool set_bitrate(int bitrate_kbps) {
+      return false;
+    }
   };
 
   // encoders
@@ -531,6 +541,8 @@ namespace video {
     void *channel_data = nullptr;  ///< Platform or protocol state carried with this packet.
     bool after_ref_frame_invalidation = false;  ///< Whether the frame follows reference-frame invalidation.
     std::optional<std::chrono::steady_clock::time_point> frame_timestamp;  ///< Capture timestamp associated with the frame.
+    std::optional<std::chrono::steady_clock::time_point> encode_start;  ///< When the encoder dequeued the captured image.
+    std::optional<std::chrono::steady_clock::time_point> encode_done;  ///< When the encoded packet was produced.
   };
 
   /**
@@ -724,6 +736,30 @@ namespace video {
    * @return 0 when a usable encoder is selected; nonzero when probing fails.
    */
   int probe_encoders();
+
+  /**
+   * @brief Snapshot of the encoder chosen by the most recent successful probe.
+   */
+  struct encoder_summary_t {
+    bool probed = false;  ///< Whether a probe has selected an encoder.
+    std::string name;  ///< Encoder family name, e.g. `nvenc` or `software`.
+    std::string h264_codec;  ///< Backend codec name for H.264, empty when unsupported.
+    std::string hevc_codec;  ///< Backend codec name for HEVC, empty when unsupported.
+    std::string av1_codec;  ///< Backend codec name for AV1, empty when unsupported.
+    bool hevc_main10 = false;  ///< Whether HEVC Main10 (10-bit/HDR) passed the probe.
+    bool av1_main10 = false;  ///< Whether AV1 10-bit (HDR) passed the probe.
+    std::array<bool, 3> yuv444 = {};  ///< YUV 4:4:4 support for H.264, HEVC and AV1.
+    platf::mem_type_e mem_type = platf::mem_type_e::unknown;  ///< Memory type the encoder consumes.
+  };
+
+  /**
+   * @brief Return the encoder selected by the most recent probe.
+   *
+   * Safe to call from any thread.
+   *
+   * @return Copy of the summary; `probed` is false before the first successful probe.
+   */
+  encoder_summary_t get_encoder_summary();
 
   /**
    * @brief Whether the last probe rejected an encoder only for want of a display.
