@@ -6,7 +6,9 @@
  * Without the shell (unit tests, bare pages) it renders its own header instead.
  *
  * Props: title (required; the page's only <h1>), wide (kept for compatibility; pages are full width),
- *        grid (body becomes the 12-column grid — children use NvCard :cols="N").
+ *        grid (body becomes the 12-column grid — children use NvCard :cols="N"),
+ *        hideSearch (hide the top bar's global search button, for pages with their own search;
+ *        Ctrl/⌘K still opens the palette).
  * Slots: subtitle (short, muted, next to the title — hidden on phones), actions (the primary action,
  *        optionally one secondary / NvActionMenu before it), default (body).
  */
@@ -16,17 +18,24 @@ const props = defineProps({
   title: { type: String, required: true },
   wide: { type: Boolean, default: false },
   grid: { type: Boolean, default: false },
+  hideSearch: { type: Boolean, default: false },
 })
 
 const shell = inject('nvShell', null)
 
 watchEffect(() => {
   if (typeof document !== 'undefined') document.title = `${props.title} · Nova`
-  if (shell) shell.page.title = props.title
+  if (shell) {
+    shell.page.title = props.title
+    shell.page.hideSearch = props.hideSearch
+  }
 })
 
 onBeforeUnmount(() => {
-  if (shell && shell.page.title === props.title) shell.page.title = ''
+  if (shell && shell.page.title === props.title) {
+    shell.page.title = ''
+    shell.page.hideSearch = false
+  }
 })
 </script>
 

@@ -5,7 +5,7 @@
  * the live strip while a stream runs (every page except Overview); the routed page in <main>; toasts.
  *
  * Pages talk to it through NvPage (title, subtitle and actions are teleported into the top bar).
- * Provides `nvShell` = { page: { title }, live, openDrawer() }.
+ * Provides `nvShell` = { page: { title, hideSearch }, live, openDrawer() }.
  */
 import { computed, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -35,7 +35,7 @@ const counts = reactive({ library: null, devices: null })
 const theme = ref(getThemePreference())
 const menuButton = ref(null)
 const sidebar = ref(null)
-const page = reactive({ title: '' })
+const page = reactive({ title: '', hideSearch: false })
 
 provide('nvShell', { page, live, openDrawer: () => { drawerOpen.value = true } })
 
@@ -220,7 +220,7 @@ onBeforeUnmount(() => {
           <div id="nv-topbar-sub" class="nv-topbar__sub"></div>
         </div>
         <div class="nv-topbar__end" :inert="drawerOpen || null">
-          <button type="button" class="nv-topsearch" :aria-label="t('nova.search.open')" @click="openPalette()">
+          <button v-if="!page.hideSearch" type="button" class="nv-topsearch" :aria-label="t('nova.search.open')" @click="openPalette()">
             <Search :size="16" aria-hidden="true" />
             <span class="nv-topsearch__text">{{ t('nova.search.placeholder') }}</span>
             <kbd class="nv-topsearch__kbd" aria-hidden="true">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
@@ -246,9 +246,26 @@ onBeforeUnmount(() => {
 <style>
 @layer components {
   .nv-shell {
+    position: relative;
     display: flex;
     min-height: 100vh;
     background: var(--nv-bg);
+  }
+
+  /* The sidebar is sticky and 100vh tall; this column paints its background and border for the
+     full page height so long pages don't show the page background below it. */
+  .nv-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--nv-sidebar-width);
+    background: var(--nv-sidebar);
+    border-right: 1px solid var(--nv-border);
+    pointer-events: none;
+  }
+
+  .nv-sidebar {
+    z-index: 1;
   }
 
   .nv-skip {
@@ -565,6 +582,10 @@ onBeforeUnmount(() => {
 
   /* ------------------------------------------------------ tablet: rail */
   @media (min-width: 768px) and (max-width: 1023px) {
+    .nv-shell::before {
+      width: var(--nv-rail-width);
+    }
+
     .nv-sidebar {
       width: var(--nv-rail-width);
       padding: 14px var(--nv-space-2) var(--nv-space-3);
@@ -621,6 +642,10 @@ onBeforeUnmount(() => {
   @media (max-width: 767px) {
     .nv-shell {
       flex-direction: column;
+    }
+
+    .nv-shell::before {
+      content: none;
     }
 
     .nv-topbar {

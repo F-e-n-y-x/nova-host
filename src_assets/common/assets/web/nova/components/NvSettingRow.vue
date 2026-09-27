@@ -42,6 +42,7 @@ const describedBy = computed(() => (props.description || props.error ? descripti
 
 <template>
   <div :class="['nv-setting', { 'nv-setting--full': full, 'nv-setting--invalid': error }]">
+    <div class="nv-setting__grid">
     <div class="nv-setting__text">
       <div class="nv-setting__label-row">
         <label v-if="controlId" :id="labelId" :for="controlId" class="nv-setting__label">{{ label }}</label>
@@ -71,17 +72,24 @@ const describedBy = computed(() => (props.description || props.error ? descripti
     <div class="nv-setting__control">
       <slot :label-id="labelId" :description-id="describedBy" />
     </div>
+    </div>
   </div>
 </template>
 
 <style>
 @layer components {
+  /* The row is a size container so its layout follows the space it actually gets (a settings
+     card, a 440px side panel, a phone), not the viewport. */
   .nv-setting {
+    container-type: inline-size;
+    padding: var(--nv-space-4) var(--nv-space-5);
+    border-bottom: 1px solid var(--nv-divider);
+  }
+
+  .nv-setting__grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--nv-space-3);
-    padding: var(--nv-space-4) var(--nv-space-5);
-    border-bottom: 1px solid var(--nv-divider);
   }
 
   .nv-setting:last-child {
@@ -199,15 +207,22 @@ const describedBy = computed(() => (props.description || props.error ? descripti
     min-width: 0;
   }
 
-  @media (min-width: 720px) {
-    .nv-setting:not(.nv-setting--full) {
-      grid-template-columns: minmax(0, 1fr) minmax(240px, auto);
+  @container (min-width: 360px) {
+    .nv-setting:not(.nv-setting--full) > .nv-setting__grid {
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: start;
-      gap: var(--nv-space-6);
+      gap: var(--nv-space-4);
     }
 
     .nv-setting:not(.nv-setting--full) .nv-setting__control {
       justify-content: flex-end;
+    }
+  }
+
+  @container (min-width: 560px) {
+    .nv-setting:not(.nv-setting--full) > .nv-setting__grid {
+      grid-template-columns: minmax(0, 1fr) minmax(240px, auto);
+      gap: var(--nv-space-6);
     }
   }
 

@@ -5,7 +5,7 @@
  * chrome uses gradients.
  *
  * Props: title (required; alt text / placeholder label), src, kind ('poster' 2:3 | 'hero' 10:3 |
- *        'thumb' 16:9 | 'icon' 1:1 | 'fill' (fills its box)), showTitle (placeholder label; default
+ *        'thumb' 16:9 | 'icon' 1:1 | 'fill' (covers its nearest positioned ancestor)), showTitle (placeholder label; default
  *        true for poster/hero), radius (CSS length), hue (0–360 override), decorative (alt="").
  */
 import { computed, ref, watch } from 'vue'
@@ -39,7 +39,7 @@ const style = computed(() => ({ '--nv-art-h': computedHue.value, ...(props.radiu
     <img v-if="src && !failed" :src="src" :alt="decorative ? '' : title" loading="lazy" decoding="async"
          class="nv-art__img" @error="failed = true">
     <span v-else class="nv-art__placeholder" :role="decorative ? null : 'img'" :aria-label="decorative ? null : title">
-      <span v-if="kind === 'icon' || kind === 'thumb'" class="nv-art__initial" aria-hidden="true">{{ initial }}</span>
+      <span v-if="kind === 'icon' || kind === 'thumb' || kind === 'fill'" class="nv-art__initial" aria-hidden="true">{{ initial }}</span>
       <span v-if="labelVisible" class="nv-art__title" aria-hidden="true">{{ title }}</span>
     </span>
   </span>
@@ -75,9 +75,23 @@ const style = computed(() => ({ '--nv-art-h': computedHue.value, ...(props.radiu
     border-radius: var(--nv-radius-md);
   }
 
+  /* Covers its nearest positioned ancestor, so the parent doesn't need a definite height; the
+     placeholder initial scales with the box. */
   .nv-art--fill {
-    width: 100%;
-    height: 100%;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    container-type: size;
+  }
+
+  .nv-art--fill .nv-art__placeholder {
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nv-art--fill .nv-art__initial {
+    font-size: 50cqh;
+    line-height: 1;
   }
 
   .nv-art__img {
