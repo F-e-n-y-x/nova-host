@@ -443,7 +443,14 @@ function beforeClose() {
   }
 
   .nv-addgames__sources,
-  .nv-addgames__list,
+  .nv-addgames__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-3);
+  }
 
   .nv-addgames__source {
     display: flex;
