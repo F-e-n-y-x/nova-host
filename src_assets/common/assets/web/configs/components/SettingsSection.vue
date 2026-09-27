@@ -4,15 +4,17 @@
  * section also lists per-encoder settings — the encoder in use first, the rest behind
  * "Other encoders".
  *
- * Props: section ({ id, title, summary, items, primaryGroups, otherGroups }) where items are
+ * Props: section ({ id, title, summary, panel, items, primaryGroups, otherGroups }) where items are
  *        [{ kind: 'field', key } | { kind: 'heading', title }], groups are
- *        [{ id, title, detected, items }]; config, platform, errors, otherOpen.
+ *        [{ id, title, detected, items }], panel names a status/actions component shown above
+ *        the settings; config, platform, errors, otherOpen, dirtyKeys (unsaved option keys).
  * Emits: update(key, value), reset(key), touch(key).
  */
 import { computed, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown } from '@lucide/vue'
 import NvBadge from '../../nova/components/NvBadge.vue'
+import LibraryMetadataPanel from './LibraryMetadataPanel.vue'
 import SettingField from './SettingField.vue'
 import { encoderSummary, useHostProbes } from '../hostProbes.js'
 
@@ -22,6 +24,7 @@ const props = defineProps({
   platform: { type: String, required: true },
   errors: { type: Object, default: () => ({}) },
   otherOpen: { type: Boolean, default: false },
+  dirtyKeys: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update', 'reset', 'touch'])
 const { t } = useI18n()
@@ -29,6 +32,11 @@ const { t } = useI18n()
 const probes = useHostProbes()
 /** "NVENC on GeForce GTX 1080 Ti · H.264, HEVC" when the host reports its encoder. */
 const detected = computed(() => (probes.hostInfo.value ? encoderSummary(t) : ''))
+
+const PANELS = { LibraryMetadataPanel }
+const panel = computed(() => PANELS[props.section.panel] || null)
+/** Whether an option of this section has unsaved changes. */
+const sectionDirty = computed(() => props.section.items.some((i) => i.kind === 'field' && props.dirtyKeys.includes(i.key)))
 
 const showOther = shallowRef(props.otherOpen)
 watch(() => props.otherOpen, (open) => { if (open) showOther.value = true })
@@ -43,6 +51,8 @@ watch(() => props.otherOpen, (open) => { if (open) showOther.value = true })
         <span class="nv-settings-section__dot" aria-hidden="true" />{{ detected }}
       </p>
     </div>
+
+    <component :is="panel" v-if="panel" :dirty="sectionDirty" />
 
     <div v-if="section.items.length" class="nv-settings-card">
       <template v-for="item in section.items" :key="item.kind === 'field' ? item.key : `h-${item.title}`">

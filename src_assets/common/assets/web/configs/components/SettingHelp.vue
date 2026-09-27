@@ -3,7 +3,7 @@
  * Extra help shown under a setting's "More": commands to find device names, what the
  * host logs about displays, and the ports derived from the base port.
  *
- * Props: topic ('adapter_name' | 'output_name' | 'audio_sink' | 'steamgriddb' | 'ports'), platform, config.
+ * Props: topic ('adapter_name' | 'output_name' | 'audio_sink' | 'steamgriddb' | 'igdb' | 'rawg' | 'ports'), platform, config.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -75,6 +75,18 @@ const DISPLAY_LOG = {
       <p>{{ t('nova.settings.steamgriddb_help') }}</p>
       <a class="nv-cfg-help__link" href="https://www.steamgriddb.com/profile/preferences/api" target="_blank"
          rel="noopener noreferrer">{{ t('nova.settings.steamgriddb_get_key') }}</a>
+    </template>
+
+    <template v-else-if="topic === 'igdb'">
+      <p>{{ t('nova.settings.igdb_help') }}</p>
+      <a class="nv-cfg-help__link" href="https://dev.twitch.tv/console/apps/create" target="_blank"
+         rel="noopener noreferrer">{{ t('nova.settings.igdb_get_key') }}</a>
+    </template>
+
+    <template v-else-if="topic === 'rawg'">
+      <p>{{ t('nova.settings.rawg_help') }}</p>
+      <a class="nv-cfg-help__link" href="https://rawg.io/apidocs" target="_blank"
+         rel="noopener noreferrer">{{ t('nova.settings.rawg_get_key') }}</a>
     </template>
 
     <template v-else-if="topic === 'ports'">

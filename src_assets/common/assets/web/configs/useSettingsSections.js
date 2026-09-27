@@ -78,6 +78,7 @@ export function useSettingsSections(form, query) {
         id: section.id,
         title,
         summary: t(`nova.settings.sections.${section.id}.summary`),
+        panel: section.panel || null,
         items,
         primaryGroups,
         otherGroups,
