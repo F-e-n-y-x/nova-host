@@ -29,8 +29,6 @@ defineProps({
     align-items: center;
     gap: var(--nv-space-2);
     padding: var(--nv-space-10) var(--nv-space-6);
-    border-radius: var(--nv-radius-lg);
-    border: 1px dashed var(--nv-border-strong);
     text-align: center;
   }
 
@@ -39,16 +37,27 @@ defineProps({
   }
 
   .nv-empty__icon {
-    color: var(--nv-text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    margin-bottom: var(--nv-space-1);
+    border-radius: var(--nv-radius-lg);
+    background: var(--nv-raised);
+    color: var(--nv-text-secondary);
   }
 
   .nv-empty__title {
-    font-weight: 500;
+    font-size: var(--nv-text-md);
+    font-weight: 600;
+    color: var(--nv-text);
   }
 
   .nv-empty__desc {
     max-width: 44ch;
     font-size: var(--nv-text-sm);
+    line-height: 18px;
     color: var(--nv-text-secondary);
   }
 
@@ -56,7 +65,7 @@ defineProps({
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: var(--nv-space-3);
+    gap: var(--nv-space-2);
     margin-top: var(--nv-space-2);
   }
 }

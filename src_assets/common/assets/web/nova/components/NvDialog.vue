@@ -1,12 +1,18 @@
 <script setup>
 /**
- * Modal dialog. Traps Tab focus inside, closes on Esc and on backdrop click (unless
- * `persistent`), and returns focus to whatever was focused before it opened.
+ * Modal dialog (SPEC §5: 480 wide, radius 12). Traps Tab inside, closes on Esc and backdrop click
+ * (unless `persistent`), locks page scroll, and returns focus to what was focused before it opened.
+ * Header and footer stay put while the body scrolls, so the actions are always visible.
  *
  * v-model:open — boolean.
- * Props: title (required; labels the dialog), description, persistent, size ('md' | 'lg').
- * Slots: default (body), footer (actions; put the primary action last).
- * Emits: close (after any close request, before open becomes false).
+ * Props: title (required; a question naming the object for confirms), description,
+ *        persistent, size ('sm' 480 | 'md' 560 | 'lg' 760),
+ *        initialFocus (CSS selector inside the dialog, e.g. '[data-nv-cancel]'; default: [autofocus],
+ *        then the first control after the close button),
+ *        beforeClose (function → boolean | Promise<boolean>; return false to keep it open, e.g. to
+ *        confirm discarding edits).
+ * Slots: default (body), footer (actions; primary last).
+ * Emits: close (after a close request is accepted, before open becomes false).
  */
 import { nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -18,6 +24,8 @@ const props = defineProps({
   description: { type: String, default: '' },
   persistent: { type: Boolean, default: false },
   size: { type: String, default: 'md' },
+  initialFocus: { type: String, default: '' },
+  beforeClose: { type: Function, default: null },
 })
 const emit = defineEmits(['close'])
 
@@ -33,7 +41,8 @@ function focusables() {
   return panel.value ? Array.from(panel.value.querySelectorAll(FOCUSABLE)) : []
 }
 
-function close() {
+async function close() {
+  if (props.beforeClose && (await props.beforeClose()) === false) return
   emit('close')
   open.value = false
 }
@@ -63,12 +72,23 @@ function onKeydown(event) {
   }
 }
 
+function initialTarget() {
+  const el = panel.value
+  if (!el) return null
+  if (props.initialFocus) {
+    const chosen = el.querySelector(props.initialFocus)
+    if (chosen) return chosen
+  }
+  return el.querySelector('[autofocus]') ||
+    focusables().find((node) => !node.classList.contains('nv-dialog__close')) || focusables()[0] || el
+}
+
 watch(open, async (isOpen) => {
+  document.documentElement.classList.toggle('nv-scroll-locked', isOpen)
   if (isOpen) {
     returnFocus = document.activeElement
     await nextTick()
-    const target = panel.value?.querySelector('[autofocus]') || focusables()[0] || panel.value
-    target?.focus()
+    initialTarget()?.focus()
   } else if (returnFocus && typeof returnFocus.focus === 'function') {
     const el = returnFocus
     returnFocus = null
@@ -78,8 +98,11 @@ watch(open, async (isOpen) => {
 }, { immediate: true })
 
 onBeforeUnmount(() => {
+  if (open.value) document.documentElement.classList.remove('nv-scroll-locked')
   if (returnFocus && typeof returnFocus.focus === 'function') returnFocus.focus()
 })
+
+defineExpose({ close })
 </script>
 
 <template>
@@ -94,8 +117,10 @@ onBeforeUnmount(() => {
             <X :size="18" aria-hidden="true" />
           </button>
         </header>
-        <p v-if="description" :id="`${id}-desc`" class="nv-dialog__desc">{{ description }}</p>
-        <div class="nv-dialog__body"><slot /></div>
+        <div class="nv-dialog__body">
+          <p v-if="description" :id="`${id}-desc`" class="nv-dialog__desc">{{ description }}</p>
+          <slot />
+        </div>
         <footer v-if="$slots.footer" class="nv-dialog__footer"><slot name="footer" /></footer>
       </div>
     </div>
@@ -117,24 +142,27 @@ onBeforeUnmount(() => {
   .nv-dialog__backdrop {
     position: absolute;
     inset: 0;
-    background: rgba(8, 9, 11, 0.6);
+    background: var(--nv-scrim);
+    animation: nv-fade 200ms ease-out;
   }
 
   .nv-dialog__panel {
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: var(--nv-space-4);
     width: 100%;
-    max-width: 520px;
-    max-height: calc(100vh - 2 * var(--nv-space-4));
-    overflow-y: auto;
-    padding: var(--nv-space-6);
-    border-radius: var(--nv-radius-lg);
-    background: var(--nv-surface);
+    max-width: 560px;
+    max-height: min(720px, calc(100vh - 2 * var(--nv-space-4)));
+    border-radius: var(--nv-radius-xl);
     border: 1px solid var(--nv-border);
+    background: var(--nv-surface);
     box-shadow: var(--nv-shadow);
     color: var(--nv-text);
+    animation: nv-rise 200ms var(--nv-ease);
+  }
+
+  .nv-dialog__panel--sm {
+    max-width: 480px;
   }
 
   .nv-dialog__panel--lg {
@@ -147,21 +175,28 @@ onBeforeUnmount(() => {
 
   .nv-dialog__header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: var(--nv-space-3);
+    min-height: 60px;
+    padding: 0 var(--nv-space-3) 0 var(--nv-space-6);
+    flex-shrink: 0;
   }
 
   .nv-dialog__title {
     flex-grow: 1;
-    font-size: var(--nv-text-xl);
+    min-width: 0;
+    font-size: var(--nv-text-lg);
+    line-height: 22px;
   }
 
   .nv-dialog__close {
-    width: 36px;
-    height: 36px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    padding: 0;
     border: 0;
     border-radius: var(--nv-radius-md);
     background: transparent;
@@ -171,17 +206,64 @@ onBeforeUnmount(() => {
 
   .nv-dialog__close:hover {
     background: var(--nv-raised);
+    color: var(--nv-text);
+  }
+
+  .nv-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-4);
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 var(--nv-space-6) var(--nv-space-5);
   }
 
   .nv-dialog__desc {
+    font-size: var(--nv-text-md);
+    line-height: 20px;
     color: var(--nv-text-secondary);
   }
 
   .nv-dialog__footer {
     display: flex;
-    justify-content: flex-end;
     flex-wrap: wrap;
+    justify-content: flex-end;
     gap: var(--nv-space-3);
+    flex-shrink: 0;
+    padding: var(--nv-space-4) var(--nv-space-6);
+    border-top: 1px solid var(--nv-divider);
+  }
+
+  @keyframes nv-fade {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes nv-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  @media (max-width: 767px) {
+    .nv-dialog {
+      align-items: flex-end;
+      padding: 0;
+    }
+
+    .nv-dialog__panel {
+      max-width: none;
+      max-height: 92vh;
+      border-radius: var(--nv-radius-xl) var(--nv-radius-xl) 0 0;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .nv-dialog__footer > * {
+      flex-grow: 1;
+    }
   }
 }
 </style>

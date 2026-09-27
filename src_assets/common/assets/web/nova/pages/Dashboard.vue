@@ -213,20 +213,20 @@ async function restart() {
       </NvCard>
 
       <NvCard :title="t('nova.dashboard.applications')">
-        <template #actions><RouterLink to="/apps" class="nv-dash__count">{{ t('nova.dashboard.view_all') }}</RouterLink></template>
+        <template #actions><RouterLink to="/library" class="nv-dash__count">{{ t('nova.dashboard.view_all') }}</RouterLink></template>
         <div v-if="apps.loading.value" aria-busy="true"><NvSkeleton :lines="3" height="18px" /></div>
         <NvAlert v-else-if="apps.error.value" variant="danger" :title="t('nova.common.load_failed')">
           <template #actions><NvButton size="sm" variant="secondary" @click="apps.reload()">{{ t('nova.common.retry') }}</NvButton></template>
         </NvAlert>
         <NvEmptyState v-else-if="!apps.data.value?.length" compact :title="t('nova.dashboard.no_apps')" :description="t('nova.dashboard.no_apps_desc')">
-          <template #actions><NvButton size="sm" variant="secondary" to="/apps">{{ t('nova.dashboard.manage_apps') }}</NvButton></template>
+          <template #actions><NvButton size="sm" variant="secondary" to="/library">{{ t('nova.dashboard.manage_apps') }}</NvButton></template>
         </NvEmptyState>
         <ul v-else class="nv-list">
           <li v-for="(app, i) in apps.data.value.slice(0, PREVIEW)" :key="`${i}-${app.name}`" class="nv-list__row">
             <span class="nv-list__name">{{ app.name }}</span>
           </li>
         </ul>
-        <template #footer><RouterLink to="/apps">{{ t('nova.dashboard.manage_apps') }}</RouterLink></template>
+        <template #footer><RouterLink to="/library">{{ t('nova.dashboard.manage_apps') }}</RouterLink></template>
       </NvCard>
     </div>
 

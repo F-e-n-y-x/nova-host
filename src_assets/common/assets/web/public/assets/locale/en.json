@@ -733,7 +733,23 @@
       "load_failed": "Couldn't load this.",
       "view_logs": "View logs",
       "enabled": "Enabled",
-      "disabled": "Disabled"
+      "disabled": "Disabled",
+      "show_password": "Show password",
+      "hide_password": "Hide password",
+      "more": "More",
+      "less": "Less",
+      "copied": "Copied to the clipboard.",
+      "copy_failed": "Couldn’t copy. Select the text and copy it yourself.",
+      "copy_command": "Copy command",
+      "type_to_confirm": "Type “{text}” to confirm",
+      "undo": "Undo",
+      "browse_for": "Browse for {field}",
+      "browse_path": "Path",
+      "browse_go": "Go",
+      "browse_not_found": "That folder doesn’t exist or can’t be opened.",
+      "browse_program": "Choose a program",
+      "browse_folder": "Choose a folder",
+      "browse_file": "Choose a file"
     },
     "shell": {
       "skip_to_content": "Skip to content",
@@ -741,7 +757,12 @@
       "open_menu": "Open menu",
       "close_menu": "Close menu",
       "sign_out": "Sign out",
-      "signed_in_as": "Signed in as {username}"
+      "signed_in_as": "Signed in as {username}",
+      "host_ready": "Ready to stream",
+      "host_streaming": "Streaming",
+      "host_unreachable": "Can’t reach host",
+      "host_label": "Host {name}, {state}. Go to overview",
+      "account_menu": "Account, appearance and sign out"
     },
     "nav": {
       "dashboard": "Dashboard",
@@ -751,7 +772,11 @@
       "logs": "Logs & diagnostics",
       "help": "Help",
       "pair": "Pair a device",
-      "password": "Change password"
+      "password": "Change password",
+      "overview": "Overview",
+      "library": "Library",
+      "group_host": "Host",
+      "group_system": "System"
     },
     "theme": {
       "label": "Theme",
@@ -1352,6 +1377,33 @@
       "success_desc": "Finish on your device. It can stream from this host now.",
       "failure_title": "Couldn’t pair {name}",
       "failure_desc": "Check that the PIN matches the one on your device and try again. PINs expire after a short time."
+    },
+    "live": {
+      "region": "Live stream",
+      "live": "Live",
+      "title": "{app} on {device}",
+      "unknown_app": "A stream",
+      "unknown_device": "a device",
+      "network_label": "Network over the last minute, now {mbps} Mbps",
+      "network_none": "No network data yet",
+      "view_stream": "View stream"
+    },
+    "search": {
+      "open": "Search games, devices and settings",
+      "placeholder": "Search games, devices, settings",
+      "dialog_label": "Search Nova",
+      "results": "Results",
+      "no_results": "Nothing matches “{q}”.",
+      "hint": "Type to search pages, settings, games and devices.",
+      "group_pages": "Pages",
+      "group_settings": "Settings",
+      "group_apps": "Library",
+      "group_devices": "Devices"
+    },
+    "attention": {
+      "label": "Needs attention",
+      "count": "{n} thing needs attention | {n} things need attention",
+      "show_less": "Show less"
     }
   }
 }

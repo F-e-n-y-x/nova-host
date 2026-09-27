@@ -27,19 +27,16 @@ defineProps({
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--nv-control-height);
-    height: var(--nv-control-height);
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
     padding: 0;
     border-radius: var(--nv-radius-md);
     border: 1px solid transparent;
     background: transparent;
     color: var(--nv-text-secondary);
     cursor: pointer;
-  }
-
-  .nv-icon-btn--sm {
-    width: var(--nv-control-height-sm);
-    height: var(--nv-control-height-sm);
+    transition: background-color 150ms ease-out, color 150ms ease-out;
   }
 
   .nv-icon-btn:hover:not(:disabled) {
@@ -51,9 +48,21 @@ defineProps({
     border-color: var(--nv-border-strong);
   }
 
+  .nv-icon-btn--sm {
+    width: 28px;
+    height: 28px;
+  }
+
   .nv-icon-btn:disabled {
-    opacity: 0.55;
     cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  @media (max-width: 767px) {
+    .nv-icon-btn {
+      width: 44px;
+      height: 44px;
+    }
   }
 }
 </style>

@@ -44,35 +44,56 @@ const role = computed(() => {
 <style>
 @layer components {
   .nv-alert {
-    --nv-alert-fg: var(--nv-accent-text);
-    --nv-alert-bg: var(--nv-accent-tint);
     display: flex;
+    align-items: flex-start;
     gap: var(--nv-space-3);
     padding: var(--nv-space-3) var(--nv-space-4);
-    border-radius: var(--nv-radius-md);
-    background: var(--nv-alert-bg);
+    border-radius: var(--nv-radius-xl);
+    border: 1px solid var(--nv-border);
+    background: var(--nv-surface);
     color: var(--nv-text);
-  }
-
-  .nv-alert--success {
-    --nv-alert-fg: var(--nv-success);
-    --nv-alert-bg: var(--nv-success-tint);
-  }
-
-  .nv-alert--warning {
-    --nv-alert-fg: var(--nv-warning);
-    --nv-alert-bg: var(--nv-warning-tint);
-  }
-
-  .nv-alert--danger {
-    --nv-alert-fg: var(--nv-danger);
-    --nv-alert-bg: var(--nv-danger-tint);
+    font-size: var(--nv-text-sm);
+    line-height: 18px;
   }
 
   .nv-alert__icon {
     flex-shrink: 0;
     margin-top: 1px;
-    color: var(--nv-alert-fg);
+    color: var(--nv-text-secondary);
+  }
+
+  .nv-alert--warning {
+    background: var(--nv-warning-tint);
+    border-color: var(--nv-warning-border);
+  }
+
+  .nv-alert--warning .nv-alert__icon,
+  .nv-alert--warning .nv-alert__title {
+    color: var(--nv-warning);
+  }
+
+  .nv-alert--danger {
+    background: var(--nv-danger-tint);
+    border-color: var(--nv-danger-zone-border);
+  }
+
+  .nv-alert--danger .nv-alert__icon,
+  .nv-alert--danger .nv-alert__title {
+    color: var(--nv-danger);
+  }
+
+  .nv-alert--success {
+    background: var(--nv-success-tint);
+    border-color: var(--nv-border);
+  }
+
+  .nv-alert--success .nv-alert__icon,
+  .nv-alert--success .nv-alert__title {
+    color: var(--nv-success);
+  }
+
+  .nv-alert--info .nv-alert__icon {
+    color: var(--nv-accent-text);
   }
 
   .nv-alert__body {
@@ -85,38 +106,33 @@ const role = computed(() => {
 
   .nv-alert__title {
     font-weight: 500;
-    color: var(--nv-alert-fg);
-  }
-
-  .nv-alert__text {
-    font-size: var(--nv-text-sm);
+    color: var(--nv-text);
   }
 
   .nv-alert__actions {
     display: flex;
     flex-wrap: wrap;
     gap: var(--nv-space-2);
-    margin-top: var(--nv-space-1);
-  }
-
-  .nv-alert__actions a {
-    color: var(--nv-alert-fg);
-    font-size: var(--nv-text-sm);
-    font-weight: 500;
+    margin-top: var(--nv-space-2);
   }
 
   .nv-alert__close {
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin: -4px -6px -4px 0;
+    padding: 0;
     border: 0;
     border-radius: var(--nv-radius-sm);
     background: transparent;
     color: var(--nv-text-secondary);
     cursor: pointer;
+  }
+
+  .nv-alert__close:hover {
+    color: var(--nv-text);
   }
 }
 </style>

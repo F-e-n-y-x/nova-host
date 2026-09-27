@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 
 import { mountNova } from './helpers.js'
@@ -255,14 +255,43 @@ describe('NvDialog', () => {
 })
 
 describe('toasts', () => {
-  it('renders queued toasts in a polite live region and dismisses them', async () => {
+  it('renders calm toasts politely, urgent ones as alerts, and dismisses them', async () => {
     const w = track(mountNova(NvToastHost))
     const id = showToast('Saved', { variant: 'success', timeout: 0 })
+    const bad = showToast('Failed', { variant: 'danger', timeout: 0 })
     await nextTick()
-    expect(w.get('.nv-toasts').attributes('aria-live')).toBe('polite')
-    expect(w.text()).toContain('Saved')
+    const [urgent, calm] = w.findAll('.nv-toasts__region')
+    expect(calm.attributes('aria-live')).toBe('polite')
+    expect(calm.text()).toContain('Saved')
+    expect(urgent.attributes('role')).toBe('alert')
+    expect(urgent.text()).toContain('Failed')
     dismissToast(id)
+    dismissToast(bad)
     await nextTick()
     expect(toasts).toHaveLength(0)
+  })
+
+  it('pauses auto-hide while hovered and runs the action button', async () => {
+    vi.useFakeTimers()
+    try {
+      const undo = vi.fn()
+      const w = track(mountNova(NvToastHost))
+      showToast('Deleted Portal', { timeout: 5000, action: { label: 'Undo', onClick: undo } })
+      await nextTick()
+      await w.get('.nv-toast').trigger('mouseenter')
+      vi.advanceTimersByTime(8000)
+      expect(toasts).toHaveLength(1)
+      await w.get('.nv-toast').trigger('mouseleave')
+      vi.advanceTimersByTime(5000)
+      expect(toasts).toHaveLength(0)
+
+      showToast('Deleted Portal', { timeout: 5000, action: { label: 'Undo', onClick: undo } })
+      await nextTick()
+      await w.get('.nv-toast__action').trigger('click')
+      expect(undo).toHaveBeenCalledOnce()
+      expect(toasts).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
