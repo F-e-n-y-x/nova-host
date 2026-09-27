@@ -7,6 +7,9 @@ import ArtSourcesEditor from '../../../src_assets/common/assets/web/configs/comp
 import LibraryMetadataPanel from '../../../src_assets/common/assets/web/configs/components/LibraryMetadataPanel.vue'
 import SettingsSection from '../../../src_assets/common/assets/web/configs/components/SettingsSection.vue'
 import AppMetadataPanel from '../../../src_assets/common/assets/web/nova/pages/apps/AppMetadataPanel.vue'
+import AppArtworkPanel from '../../../src_assets/common/assets/web/nova/pages/apps/AppArtworkPanel.vue'
+import MatchResults from '../../../src_assets/common/assets/web/nova/pages/library/MatchResults.vue'
+import { artworkSites } from '../../../src_assets/common/assets/web/nova/pages/library/libraryApi.js'
 import AppEditor from '../../../src_assets/common/assets/web/nova/pages/apps/AppEditor.vue'
 import { OPTIONS, SECTIONS, parseArtSources } from '../../../src_assets/common/assets/web/configs/settings_schema.js'
 import { optionApplies } from '../../../src_assets/common/assets/web/configs/settings_model.js'
@@ -167,10 +170,11 @@ describe('LibraryMetadataPanel', () => {
 
 describe('metadataApi helpers', () => {
   it('merges Steam and IGDB candidates, best first, and builds the change body', () => {
-    const list = matchCandidates({
-      steam: [{ appid: 10, name: 'Hades', confidence: 0.8 }],
-      igdb: [{ id: 99, name: 'Hades II', year: '2024', confidence: 0.9 }],
-    })
+    const list = matchCandidates({ candidates: [
+      { source: 'igdb', appid: null, igdb_id: 99, name: 'Hades II', year: '2024', confidence: 0.9 },
+      { source: 'catalog', appid: 10, igdb_id: 5, name: 'Hades', confidence: 0.8 },
+      { source: 'steamgriddb', appid: null, igdb_id: null, sgdb_id: 3, name: 'No ids', confidence: 0.7 },
+    ] })
     expect(list.map((c) => c.key)).toEqual(['igdb-99', 'steam-10'])
     expect(matchChange(list[0])).toEqual({ igdb_id: 99, steam_appid: null, refetch: true })
     expect(matchChange(list[1])).toEqual({ steam_appid: 10, igdb_id: null, refetch: true })
@@ -205,7 +209,7 @@ describe('AppMetadataPanel', () => {
     let status = { ...STATUS, match: null }
     const fetch = routeFetch({
       'GET ./api/library/metadata/4': () => status,
-      'GET ./api/library/metadata/search?q=Hades': { steam: [{ appid: 1145360, name: 'Hades', confidence: 1 }], igdb: [] },
+      'GET ./api/library/metadata/search?q=Hades': { candidates: [{ source: 'steam', appid: 1145360, name: 'Hades', year: '2020', confidence: 1 }], igdb: false, steamgriddb: false },
       'POST ./api/library/metadata/4': (body) => {
         status = { ...STATUS, override: { steam_appid: body.steam_appid, igdb_id: null } }
         return { ...status, job_id: 'm1' }
@@ -217,7 +221,8 @@ describe('AppMetadataPanel', () => {
     expect(w.text()).toContain('No match.')
     await w.findAll('button').find((b) => b.text() === 'Change match').trigger('click')
     await flushPromises()
-    expect(w.text()).toContain('IGDB keys')  // no IGDB results: says how to enable it
+    expect(w.text()).toContain('Add SteamGridDB or IGDB keys')  // says how to search more sources
+    expect(w.text()).toContain('2020 · Steam 1145360')
     await w.findAll('button').find((b) => b.text() === 'Use').trigger('click')
     await flushPromises()
     expect(JSON.parse(calls(fetch, 'POST ./api/library/metadata/4')[0][1].body))
@@ -278,7 +283,7 @@ describe('AppEditor Metadata tab', () => {
     let status = { name: 'Hades', override: { steam_appid: null, igdb_id: null }, match: null, details: null }
     const fetch = routeFetch({
       'GET ./api/library/metadata/1': () => status,
-      'GET ./api/library/metadata/search?q=Hades': { steam: [], igdb: [{ id: 7, name: 'Hades', year: '2020', confidence: 1 }] },
+      'GET ./api/library/metadata/search?q=Hades': { candidates: [{ source: 'igdb', appid: null, igdb_id: 7, name: 'Hades', year: '2020', confidence: 1 }], igdb: true, steamgriddb: true },
       'POST ./api/library/metadata/1': () => {
         saved = { ...GAME, 'nova-igdb-id': 7 }
         status = { name: 'Hades', override: { steam_appid: null, igdb_id: 7 }, match: { source: 'igdb', id: 7, name: 'Hades', confidence: 1 }, details: null }
@@ -302,5 +307,108 @@ describe('AppEditor Metadata tab', () => {
     const body = JSON.parse(calls(fetch, 'POST ./api/apps')[0][1].body)
     expect(body['nova-igdb-id']).toBe(7)
     expect(w.vm.isDirty).toBe(false)
+  })
+})
+
+describe('MatchResults', () => {
+  it('lists every candidate with year, edition, source and type, ten at a time', async () => {
+    const candidates = Array.from({ length: 12 }, (_, i) => ({
+      key: `steam-${i}`, source: 'steam', id: i + 1, appid: i + 1, name: `Game ${i}`, year: '2015', edition: i === 0 ? 'Legacy' : '',
+      type: i === 1 ? 'dlc' : 'game', unlisted: i === 0, poster: i === 0 ? 'c1abcdef' : null, confidence: 0.9,
+    }))
+    const w = track(mountNova(MatchResults, { props: { candidates } }))
+    expect(w.findAll('.nv-matches__item')).toHaveLength(10)
+    const first = w.find('[data-key="steam-0"]').text()
+    expect(first).toContain('2015 · Legacy · Steam 1')
+    expect(first).toContain('Not sold any more')
+    expect(w.find('[data-key="steam-1"]').text()).toContain('DLC')
+    expect(w.find('[data-key="steam-0"] img').attributes('src')).toBe('./api/library/candidates/c1abcdef')
+    await w.findAll('button').find((b) => b.text() === 'Show more').trigger('click')
+    expect(w.findAll('.nv-matches__item')).toHaveLength(12)
+    await w.findAll('button').find((b) => b.text() === 'Use').trigger('click')
+    expect(w.emitted('choose')[0][0].appid).toBe(1)
+  })
+})
+
+describe('AppArtworkPanel', () => {
+  const APP = { name: 'Hades', 'nova-steam-appid': 1145360, 'image-path': '/c/p.png', 'nova-hero': '/c/h.jpg' }
+  const SEARCH = {
+    matches: [],
+    artwork: {
+      poster: [{ id: 'c1aaaaaa', label: 'Steam' }], hero: [{ id: 'c2aaaaaa', label: 'SteamGridDB' }], logo: [], icon: [],
+      background: [{ id: 'c3aaaaaa', label: 'Steam' }],
+    },
+  }
+
+  it('sets a kind from a pasted URL through the custom artwork job', async () => {
+    const fetch = routeFetch({
+      'GET ./api/library/artwork/search?appid=1145360': SEARCH,
+      'POST ./api/library/artwork/custom': { job_id: 'u1' },
+      'GET ./api/library/jobs/u1': { state: 'done', result: { applied: true, cleared: false } },
+    })
+    const w = track(mountNova(AppArtworkPanel, { props: { index: 2, app: APP, name: 'Hades' } }))
+    await flushPromises()
+    await w.findAll('button').find((b) => b.text() === 'Banner').trigger('click')
+    await w.find('input[type="url"]').setValue('https://example.com/hero.jpg')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(JSON.parse(calls(fetch, 'POST ./api/library/artwork/custom')[0][1].body))
+      .toEqual({ app_index: 2, kind: 'hero', url: 'https://example.com/hero.jpg' })
+    expect(w.emitted('artwork-applied')).toHaveLength(1)
+    expect(w.text()).toContain('Banner updated.')
+  })
+
+  it('offers found artwork per kind, and a background falls back to the banner preview', async () => {
+    const fetch = routeFetch({
+      'GET ./api/library/artwork/search?appid=1145360': SEARCH,
+      'POST ./api/library/artwork/apply': { job_id: 'a2' },
+      'GET ./api/library/jobs/a2': { state: 'done', result: {} },
+    })
+    const w = track(mountNova(AppArtworkPanel, { props: { index: 2, app: APP, name: 'Hades' } }))
+    await flushPromises()
+    await w.findAll('button').find((b) => b.text() === 'Background').trigger('click')
+    expect(w.find('.nv-artpanel__preview img').attributes('src')).toContain('./api/covers/2/hero')
+    await w.find('.nv-artpanel__option').trigger('click')
+    await flushPromises()
+    expect(JSON.parse(calls(fetch, 'POST ./api/library/artwork/apply')[0][1].body)).toEqual({ app_index: 2, background: 'c3aaaaaa' })
+  })
+
+  it('resets one kind to automatic and says when nothing automatic was found', async () => {
+    const fetch = routeFetch({
+      'GET ./api/library/artwork/search?appid=1145360': SEARCH,
+      'POST ./api/library/artwork/custom': { job_id: 'r2' },
+      'GET ./api/library/jobs/r2': { state: 'done', result: { applied: false, cleared: true } },
+    })
+    const w = track(mountNova(AppArtworkPanel, { props: { index: 2, app: APP, name: 'Hades' } }))
+    await flushPromises()
+    await w.findAll('button').find((b) => b.text() === 'Logo').trigger('click')
+    await w.findAll('button').find((b) => b.text() === 'Reset to automatic').trigger('click')
+    await flushPromises()
+    expect(JSON.parse(calls(fetch, 'POST ./api/library/artwork/custom')[0][1].body)).toEqual({ app_index: 2, kind: 'logo', reset: true })
+    expect(w.text()).toContain('No automatic Logo found')
+  })
+
+  it('shows the error the host gives for a refused URL', async () => {
+    routeFetch({
+      'GET ./api/library/artwork/search?appid=1145360': SEARCH,
+      'POST ./api/library/artwork/custom': { job_id: 'e1' },
+      'GET ./api/library/jobs/e1': { state: 'failed', error: 'Links to local or private network addresses aren’t allowed.' },
+    })
+    const w = track(mountNova(AppArtworkPanel, { props: { index: 2, app: APP, name: 'Hades' } }))
+    await flushPromises()
+    await w.find('input[type="url"]').setValue('https://192.168.1.1/x.png')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(w.text()).toContain('private network addresses')
+  })
+
+  it('links artwork sites with the title searched', () => {
+    const sites = artworkSites('Grand Theft Auto V')
+    expect(sites.map((s) => s.url)).toEqual([
+      'https://www.steamgriddb.com/search/grids?term=Grand%20Theft%20Auto%20V',
+      'https://www.igdb.com/search?q=Grand%20Theft%20Auto%20V',
+      'https://thegamesdb.net/search.php?name=Grand%20Theft%20Auto%20V',
+      'https://www.mobygames.com/search/?q=Grand%20Theft%20Auto%20V',
+    ])
   })
 })
