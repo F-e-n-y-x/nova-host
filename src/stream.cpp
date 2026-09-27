@@ -34,6 +34,7 @@ extern "C" {
 #include "platform/common.h"
 #include "process.h"
 #include "stream.h"
+#include "stream_stats.h"
 #include "sync.h"
 #include "system_tray.h"
 #include "thread_safe.h"
@@ -563,6 +564,9 @@ namespace stream {
     std::string input_session_id;  ///< Stable client identity used to retain input devices across resume.
     std::atomic<client_permissions::mask_t> permissions {client_permissions::full};  ///< What the client may do; updated live from the web UI.
 
+    stream_stats::session_info_t stats_info;  ///< Facts reported by /api/sessions, fixed when the session is allocated.
+    std::shared_ptr<stream_stats::session_stats_t> stats;  ///< Live telemetry; set while the session is running.
+
     safe::mail_raw_t::event_t<bool> shutdown_event;  ///< Event raised when the stream should shut down.
     safe::signal_t controlEnd;  ///< Signal raised when the control channel exits.
 
@@ -830,6 +834,9 @@ namespace stream {
         case ENET_EVENT_TYPE_DISCONNECT:
           BOOST_LOG(info) << "CLIENT DISCONNECTED"sv;
           // No more clients to send video data to ^_^
+          if (session->stats) {
+            session->stats->set_end_reason("client");
+          }
           if (session->state == session::state_e::RUNNING) {
             session::stop(*session);
           }
@@ -1279,6 +1286,10 @@ namespace stream {
 
       auto lastGoodFrame = stats[3];
 
+      if (session->stats && count >= 0) {
+        session->stats->record_loss(static_cast<std::uint32_t>(count), std::chrono::steady_clock::now());
+      }
+
       BOOST_LOG(verbose)
         << "type [IDX_LOSS_STATS]"sv << std::endl
         << "---begin stats---" << std::endl
@@ -1439,6 +1450,9 @@ namespace stream {
           if (now > session->pingTimeout) {
             auto address = session->control.peer ? platf::from_sockaddr((sockaddr *) &session->control.peer->address.address) : session->control.expected_peer_address;
             BOOST_LOG(info) << address << ": Ping Timeout"sv;
+            if (session->stats) {
+              session->stats->set_end_reason("timeout");
+            }
             session::stop(*session);
           }
 
@@ -1464,6 +1478,9 @@ namespace stream {
           if (!session->control.peer) {
             has_session_awaiting_peer = true;
           } else {
+            if (session->stats) {
+              session->stats->set_rtt(session->control.peer->roundTripTime);
+            }
             auto &feedback_queue = session->control.feedback_queue;
             while (feedback_queue->peek()) {
               auto feedback_msg = feedback_queue->pop();
@@ -1792,6 +1809,9 @@ namespace stream {
         frame_header.lastPayloadLen = session->config.packetsize - sizeof(NV_VIDEO_PACKET);
       }
 
+      // Frames without a capture timestamp repeat the previous image (minimum-fps encoding).
+      const bool frame_has_capture = packet->frame_timestamp.has_value();
+
       if (packet->frame_timestamp) {
         auto duration_to_latency = [](const std::chrono::steady_clock::duration &duration) {
           const auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
@@ -1885,6 +1905,9 @@ namespace stream {
         size_t ratecontrol_frame_packets_sent = 0;
         size_t ratecontrol_group_packets_sent = 0;
 
+        std::size_t stats_packets = 0;
+        std::size_t stats_fec_packets = 0;
+
         auto blockIndex = 0;
         std::for_each(fec_blocks_begin, fec_blocks_end, [&](std::string_view &current_payload) {
           auto packets = (current_payload.size() + (blocksize - 1)) / blocksize;
@@ -1911,6 +1934,8 @@ namespace stream {
           frame_fec_latency_logger.first_point_now();
           // If video encryption is enabled, we allocate space for the encryption header before each shard
           auto shards = fec::encode(current_payload, blocksize, fecPercentage, session->config.minRequiredFecPackets, session->video.cipher ? sizeof(video_packet_enc_prefix_t) : 0);
+          stats_packets += shards.size();
+          stats_fec_packets += shards.size() - shards.data_shards;
           frame_fec_latency_logger.second_point_now_and_log();
 
           auto peer_address = session->video.peer.address();
@@ -2043,6 +2068,18 @@ namespace stream {
         });
 
         session->video.lowseq = lowseq;
+
+        if (session->stats) {
+          session->stats->record_frame(stream_stats::make_frame_sample(
+            frame_has_capture ? packet->frame_timestamp : std::nullopt,
+            packet->encode_start,
+            packet->encode_done,
+            std::chrono::steady_clock::now(),
+            packet->data_size(),
+            stats_packets,
+            stats_fec_packets
+          ));
+        }
       } catch (const std::exception &e) {
         BOOST_LOG(error) << "Broadcast video failed "sv << e.what();
         std::this_thread::sleep_for(100ms);
@@ -2448,6 +2485,10 @@ namespace stream {
         return;
       }
 
+      // Ping timeouts and client disconnects record their own reason first; anything else is the host.
+      if (session.stats) {
+        session.stats->set_end_reason("host");
+      }
       session.shutdown_event->raise(true);
     }
 
@@ -2478,6 +2519,9 @@ namespace stream {
       // Reset input on session stop to avoid stuck repeated keys
       BOOST_LOG(debug) << "Resetting Input..."sv;
       input::reset(session.input);
+
+      // Keep `stats` alive with the session: the shared broadcast thread may still hold queued packets for it.
+      stream_stats::end_session(session.stats);
 
       // If this is the last session, invoke the platform callbacks
       if (--running_sessions == 0) {
@@ -2512,6 +2556,10 @@ namespace stream {
       if (!session.broadcast_ref) {
         return -1;
       }
+
+      // Set before any worker or the control server can see the session, so readers never race the assignment.
+      session.stats_info.app_name = proc::proc.get_last_run_app_name();
+      session.stats = stream_stats::start_session(session.stats_info);
 
       session.control.expected_peer_address = addr_string;
       BOOST_LOG(debug) << "Expecting incoming session connections from "sv << addr_string;
@@ -2562,6 +2610,15 @@ namespace stream {
       session->input_session_id = launch_session.client_cert.empty() ? launch_session.unique_id : launch_session.client_cert;
 
       session->config = config;
+
+      session->stats_info.id = launch_session.id;
+      session->stats_info.client_cert = launch_session.client_cert;
+      session->stats_info.client_name = launch_session.client_name;
+      session->stats_info.width = config.monitor.width;
+      session->stats_info.height = config.monitor.height;
+      session->stats_info.fps_requested = config.monitor.framerate;
+      session->stats_info.video_format = config.monitor.videoFormat;
+      session->stats_info.hdr = config.monitor.dynamicRange > 0;
 
       session->control.connect_data = launch_session.control_connect_data;
       session->control.feedback_queue = mail->queue<platf::gamepad_feedback_msg_t>(mail::gamepad_feedback);
