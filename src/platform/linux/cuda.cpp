@@ -1057,6 +1057,8 @@ namespace cuda {
               }
               break;
             case platf::capture_e::ok:
+              // NvFBC gives no presentation time; stamp the grab so frame latency and telemetry work.
+              img_out->frame_timestamp = std::chrono::steady_clock::now();
               if (!push_captured_image_cb(std::move(img_out), true)) {
                 return platf::capture_e::ok;
               }

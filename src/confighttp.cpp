@@ -52,6 +52,7 @@
 #include "platform/common.h"
 #include "process.h"
 #include "rtsp.h"
+#include "stream_stats.h"
 #include "system_tray.h"
 #include "utility.h"
 #include "uuid.h"
@@ -1053,6 +1054,8 @@ namespace confighttp {
    * @brief Get the list of available applications.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
+   * Besides the `apps` array, the reply carries `running_index` (position in `apps` of the running
+   * application, or null) and `running_name` (its name, or null).
    *
    * @api_examples{/api/apps|:| GET|:| null}
    */
@@ -1100,6 +1103,20 @@ namespace confighttp {
             }
           }
         }
+      }
+
+      // Which entry (if any) is running now, so the UI can show it and offer "Close".
+      file_tree["running_index"] = nullptr;
+      file_tree["running_name"] = nullptr;
+      if (const auto running_id = proc::proc.running(); running_id > 0) {
+        const auto &apps = proc::proc.get_apps();
+        for (std::size_t i = 0; i < apps.size(); ++i) {
+          if (apps[i].id == std::to_string(running_id)) {
+            file_tree["running_index"] = i;
+            break;
+          }
+        }
+        file_tree["running_name"] = proc::proc.get_last_run_app_name();
       }
 
       send_response(response, file_tree);
@@ -1307,6 +1324,84 @@ namespace confighttp {
     output_tree["status"] = true;
     send_response(response, output_tree);
   }
+
+  // ---- Nova: live stream sessions and session history (/api/sessions*) ----
+
+  /**
+   * @brief Resolve a session's client certificate to its current UUID and name.
+   * @param cert_pem PEM certificate recorded for the session.
+   * @return Identity; empty strings when the client is no longer paired.
+   */
+  stream_stats::client_identity_t session_client_identity(const std::string &cert_pem) {
+    stream_stats::client_identity_t who;
+    if (auto id = nvhttp::get_client_identity(cert_pem)) {
+      who.uuid = std::move(id->first);
+      who.name = std::move(id->second);
+    }
+    return who;
+  }
+
+  /**
+   * @brief Get live statistics for every active stream.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * Add `?samples=1` to include the last 120 one-second samples per session (for sparklines).
+   * Latencies are host-side milliseconds: `capture` is capture timestamp to encoder pickup, `encode` is
+   * colour conversion plus encoding, `send` is packetizing, FEC, encryption and pacing until the last
+   * packet leaves the socket. `loss_pct` is null until the client reports loss.
+   *
+   * @api_examples{/api/sessions|:| GET|:| null}
+   */
+  void getSessions(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    const auto query = request->parse_query_string();
+    const auto samples_it = query.find("samples");
+    const bool with_samples = samples_it != query.end() && (samples_it->second == "1" || samples_it->second == "true");
+
+    nlohmann::json sessions = nlohmann::json::array();
+    for (const auto &snap : stream_stats::active_sessions(with_samples)) {
+      sessions.push_back(stream_stats::snapshot_to_api_json(snap, session_client_identity(snap.info.client_cert), with_samples));
+    }
+
+    nlohmann::json output_tree;
+    output_tree["sessions"] = std::move(sessions);
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Get the most recent ended streams (up to 50), newest first.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * `end_reason` is "client" (the device disconnected), "host" (stopped from Nova or the app exited),
+   * "timeout" (the device stopped responding) or "ended".
+   *
+   * @api_examples{/api/sessions/history|:| GET|:| null}
+   */
+  void getSessionHistory(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    nlohmann::json sessions = nlohmann::json::array();
+    for (const auto &entry : stream_stats::history()) {
+      sessions.push_back(stream_stats::history_to_api_json(entry, session_client_identity(entry.client_cert)));
+    }
+
+    nlohmann::json output_tree;
+    output_tree["sessions"] = std::move(sessions);
+    output_tree["status"] = true;
+    send_response(response, output_tree);
+  }
+
+  // ---- end Nova sessions ----
 
   /**
    * @brief Update a paired client: enable or disable it, rename it, or change its permissions.
@@ -2545,6 +2640,9 @@ namespace confighttp {
     server.resource["^/api/clients/unpair-all$"]["POST"] = unpairAll;
     server.resource["^/api/clients/update$"]["POST"] = updateClient;
     server.resource["^/api/clients/disconnect$"]["POST"] = disconnectClient;
+    // Nova: live sessions and history
+    server.resource["^/api/sessions$"]["GET"] = getSessions;
+    server.resource["^/api/sessions/history$"]["GET"] = getSessionHistory;
     server.resource["^/api/config$"]["GET"] = getConfig;
     server.resource["^/api/config$"]["POST"] = saveConfig;
     server.resource["^/api/configLocale$"]["GET"] = getLocale;

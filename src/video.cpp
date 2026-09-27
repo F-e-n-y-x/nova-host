@@ -1829,9 +1829,10 @@ namespace video {
    * @param packets Output queue that receives encoded packets.
    * @param channel_data Platform or protocol state attached to each packet.
    * @param frame_timestamp Capture timestamp associated with the encoded frame.
+   * @param encode_start When the encoder dequeued the captured image (telemetry only).
    * @return 0 when packets are queued; nonzero when encoding or packetization fails.
    */
-  int encode_avcodec(int64_t frame_nr, avcodec_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
+  int encode_avcodec(int64_t frame_nr, avcodec_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, std::optional<std::chrono::steady_clock::time_point> encode_start = std::nullopt) {
     auto &frame = session.device->frame;
     frame->pts = frame_nr;
 
@@ -1895,6 +1896,8 @@ namespace video {
 
       if (av_packet && av_packet->pts == frame_nr) {
         packet->frame_timestamp = frame_timestamp;
+        packet->encode_start = encode_start;
+        packet->encode_done = std::chrono::steady_clock::now();
       }
 
       packet->replacements = &session.replacements;
@@ -1913,9 +1916,10 @@ namespace video {
    * @param packets Output queue that receives the encoded packet.
    * @param channel_data Platform or protocol state attached to the packet.
    * @param frame_timestamp Capture timestamp associated with the encoded frame.
+   * @param encode_start When the encoder dequeued the captured image (telemetry only).
    * @return 0 when packets are queued; nonzero when NVENC encoding fails.
    */
-  int encode_nvenc(int64_t frame_nr, nvenc_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
+  int encode_nvenc(int64_t frame_nr, nvenc_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, std::optional<std::chrono::steady_clock::time_point> encode_start = std::nullopt) {
     auto encoded_frame = session.encode_frame(frame_nr);
     if (encoded_frame.data.empty()) {
       BOOST_LOG(error) << "NvENC returned empty packet";
@@ -1930,6 +1934,8 @@ namespace video {
     packet->channel_data = channel_data;
     packet->after_ref_frame_invalidation = encoded_frame.after_ref_frame_invalidation;
     packet->frame_timestamp = frame_timestamp;
+    packet->encode_start = encode_start;
+    packet->encode_done = std::chrono::steady_clock::now();
     packets->raise(std::move(packet));
 
     return 0;
@@ -1943,13 +1949,14 @@ namespace video {
    * @param packets Packets queued or emitted by the stream.
    * @param channel_data Channel data.
    * @param frame_timestamp Frame timestamp.
+   * @param encode_start When the encoder dequeued the captured image (telemetry only).
    * @return 0 when the frame is encoded and queued; nonzero on encoder failure.
    */
-  int encode(int64_t frame_nr, encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
+  int encode(int64_t frame_nr, encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, std::optional<std::chrono::steady_clock::time_point> encode_start = std::nullopt) {
     if (auto avcodec_session = dynamic_cast<avcodec_encode_session_t *>(&session)) {
-      return encode_avcodec(frame_nr, *avcodec_session, packets, channel_data, frame_timestamp);
+      return encode_avcodec(frame_nr, *avcodec_session, packets, channel_data, frame_timestamp, encode_start);
     } else if (auto nvenc_session = dynamic_cast<nvenc_encode_session_t *>(&session)) {
-      return encode_nvenc(frame_nr, *nvenc_session, packets, channel_data, frame_timestamp);
+      return encode_nvenc(frame_nr, *nvenc_session, packets, channel_data, frame_timestamp, encode_start);
     }
 
     return -1;
@@ -2478,10 +2485,12 @@ namespace video {
       }
 
       std::optional<std::chrono::steady_clock::time_point> frame_timestamp;
+      std::optional<std::chrono::steady_clock::time_point> encode_start;
 
       // Encode at a minimum FPS to avoid image quality issues with static content
       if (!requested_idr_frame || images->peek()) {
         if (auto img = images->pop(max_frametime)) {
+          encode_start = std::chrono::steady_clock::now();
           frame_timestamp = img->frame_timestamp;
           if (session->convert(*img)) {
             BOOST_LOG(error) << "Could not convert image"sv;
@@ -2506,7 +2515,7 @@ namespace video {
         break;
       }
 
-      if (encode(frame_nr++, *session, packets, channel_data, frame_timestamp)) {
+      if (encode(frame_nr++, *session, packets, channel_data, frame_timestamp, encode_start)) {
         BOOST_LOG(error) << "Could not encode video packet"sv;
         return;
       }
@@ -2789,6 +2798,10 @@ namespace video {
             ctx->idr_events->pop();
           }
 
+          std::optional<std::chrono::steady_clock::time_point> encode_start;
+          if (frame_captured) {
+            encode_start = std::chrono::steady_clock::now();
+          }
           if (frame_captured && pos->session->convert(*img)) {
             BOOST_LOG(error) << "Could not convert image"sv;
             ctx->shutdown_event->raise(true);
@@ -2801,7 +2814,7 @@ namespace video {
             frame_timestamp = img->frame_timestamp;
           }
 
-          if (encode(ctx->frame_nr++, *pos->session, ctx->packets, ctx->channel_data, frame_timestamp)) {
+          if (encode(ctx->frame_nr++, *pos->session, ctx->packets, ctx->channel_data, frame_timestamp, encode_start)) {
             BOOST_LOG(error) << "Could not encode video packet"sv;
             ctx->shutdown_event->raise(true);
 

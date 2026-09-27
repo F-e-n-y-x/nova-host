@@ -391,6 +391,13 @@ namespace nvhttp {
   void record_client_connected(std::string_view cert_pem);
 
   /**
+   * @brief Look up the current UUID and name of a paired client by certificate.
+   * @param cert_pem PEM certificate of the client.
+   * @return UUID and name, or empty when the certificate isn't paired (anymore).
+   */
+  std::optional<std::pair<std::string, std::string>> get_client_identity(std::string_view cert_pem);
+
+  /**
    * @brief Get all paired clients.
    * @return The list of all paired clients: name, uuid, enabled, permissions (flags plus
    *         "preset"), paired_at and last_connected_at (Unix seconds or null), and connected

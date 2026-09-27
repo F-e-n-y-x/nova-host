@@ -2115,6 +2115,19 @@ namespace nvhttp {
     }
   }
 
+  std::optional<std::pair<std::string, std::string>> get_client_identity(const std::string_view cert_pem) {
+    if (cert_pem.empty()) {
+      return std::nullopt;
+    }
+    std::lock_guard lock {client_auth_mutex()};
+    for (const auto &named_cert : client_root.named_devices) {
+      if (named_cert.cert == cert_pem) {
+        return std::make_pair(named_cert.uuid, named_cert.name);
+      }
+    }
+    return std::nullopt;
+  }
+
   /**
    * @brief Check whether a paired client certificate is allowed to connect and return its friendly name.
    */
