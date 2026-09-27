@@ -57,15 +57,37 @@ namespace platf::virtualhid {
    */
   struct client_context_t {
     /**
-     * @brief Create per-client libvirtualhid devices.
+     * @brief Bind a client to the global context; its devices are created on first use.
+     *
+     * The touchscreen and pen tablet only appear once the client sends touch or pen input.
+     * Desktop shells hide the pointer while any touchscreen exists (muffin/Cinnamon hides it
+     * when one is added and only shows it again when input switches to another pointer), so
+     * creating them for every session left mouse-only clients with an invisible cursor on
+     * hosts without a physical mouse.
      *
      * @param input Global input context.
      */
     explicit client_context_t(input_context_t &input);
 
+    /**
+     * @brief Create the touchscreen on first use.
+     *
+     * @return Whether the touchscreen is available.
+     */
+    bool ensure_touch();
+
+    /**
+     * @brief Create the pen tablet on first use.
+     *
+     * @return Whether the pen tablet is available.
+     */
+    bool ensure_pen();
+
     input_context_t *global = nullptr;  ///< Shared global input context.
-    std::unique_ptr<lvh::Touchscreen> touch;  ///< Per-client touchscreen.
-    std::unique_ptr<lvh::PenTablet> pen;  ///< Per-client pen tablet.
+    std::unique_ptr<lvh::Touchscreen> touch;  ///< Per-client touchscreen, created on first touch.
+    std::unique_ptr<lvh::PenTablet> pen;  ///< Per-client pen tablet, created on first pen input.
+    bool touch_attempted = false;  ///< Whether touchscreen creation was already tried.
+    bool pen_attempted = false;  ///< Whether pen tablet creation was already tried.
     std::set<std::int32_t> active_touches;  ///< Active touchscreen contacts.
     std::set<lvh::PenButton> pressed_pen_buttons;  ///< Active pen tablet buttons.
   };

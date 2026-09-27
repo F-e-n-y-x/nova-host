@@ -42,6 +42,8 @@ if(${SUNSHINE_BUILD_APPIMAGE} OR ${SUNSHINE_BUILD_FLATPAK})
             DESTINATION "${SUNSHINE_ASSETS_DIR}/udev/rules.d")
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-nova-host-vdd.rules"
             DESTINATION "${SUNSHINE_ASSETS_DIR}/udev/rules.d")
+    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-nova-host-input.rules"
+            DESTINATION "${SUNSHINE_ASSETS_DIR}/udev/rules.d")
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-sunshine.conf"
             DESTINATION "${SUNSHINE_ASSETS_DIR}/modules-load.d")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/app-${PROJECT_FQDN}.service"
@@ -50,6 +52,8 @@ elseif(${SUNSHINE_BUILD_HOMEBREW})
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-sunshine.rules"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/udev/rules.d")
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-nova-host-vdd.rules"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/udev/rules.d")
+    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-nova-host-input.rules"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/udev/rules.d")
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-sunshine.conf"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/modules-load.d")
@@ -70,6 +74,8 @@ else()
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-sunshine.rules"
             DESTINATION "${SUNSHINE_UDEV_RULES_INSTALL_DIR}")
     install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-nova-host-vdd.rules"
+            DESTINATION "${SUNSHINE_UDEV_RULES_INSTALL_DIR}")
+    install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-nova-host-input.rules"
             DESTINATION "${SUNSHINE_UDEV_RULES_INSTALL_DIR}")
     if(SYSTEMD_FOUND)
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/app-${PROJECT_FQDN}.service"
