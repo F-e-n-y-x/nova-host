@@ -88,6 +88,14 @@ export const OPTIONS = {
     type: 'choice', platforms: ['linux'],
     choices: ['auto', 'vblank', 'timer'].map((value) => ({ value, label: `nova.settings.choices.capture_pacing_${value}` })),
   },
+  display_follow: {
+    type: 'choice', platforms: ['linux', 'freebsd'],
+    choices: ['virtual', 'off'].map((value) => ({ value, label: `nova.settings.choices.display_follow_${value}` })),
+  },
+  display_follow_cmd: {
+    type: 'text', mono: true, platforms: ['linux', 'freebsd'], placeholder: { default: '/usr/local/bin/sunshine-resolution.sh' },
+    when: (c) => c.display_follow !== 'off',
+  },
   adapter_name: {
     type: 'text', mono: true, hideOn: ['macos'],
     placeholder: { windows: 'Radeon RX 580 Series', default: '/dev/dri/renderD128' },
@@ -344,7 +352,7 @@ export const SECTIONS = [
   { id: 'general', options: ['sunshine_name', 'locale', 'min_log_level', 'notify_pre_releases', 'system_tray', 'global_prep_cmd', 'steamgriddb_api_key', 'windows_exe_launcher'] },
   {
     id: 'display',
-    options: ['capture', 'capture_pacing', 'adapter_name', 'output_name', 'max_bitrate', 'minimum_fps_target', 'max_fps_target',
+    options: ['capture', 'capture_pacing', 'display_follow', 'display_follow_cmd', 'adapter_name', 'output_name', 'max_bitrate', 'minimum_fps_target', 'max_fps_target',
       'dd_configuration_option', 'dd_resolution_option', 'dd_manual_resolution', 'dd_refresh_rate_option', 'dd_manual_refresh_rate',
       'dd_hdr_option', 'dd_wa_hdr_toggle_delay', 'dd_config_revert_delay', 'dd_config_revert_on_disconnect', 'dd_mode_remapping'],
   },

@@ -412,6 +412,10 @@
     "mic_enabled_desc": "Accept microphone audio from connecting clients (Voidlink/Moonlight forks with mic redirection). Creates a virtual \"Nova Mic\" source in PipeWire that any application can use. Linux only.",
     "capture_pacing": "Capture pacing",
     "capture_pacing_desc": "How the KMS capture loop schedules frame grabs. Auto paces on display vblank when the client framerate fits the display refresh and falls back to a timer otherwise. Linux only.",
+    "display_follow": "Follow the device's display",
+    "display_follow_desc": "On every connect — starting or resuming an app, or switching devices — switch the host display to the device's resolution and refresh rate, then restore it after the last device disconnects. Mirror (chosen per game in Nebula, or the app's display mode) leaves the desktop as it is.",
+    "display_follow_cmd": "Display follow command",
+    "display_follow_cmd_desc": "Script run with \"set\" (with SUNSHINE_CLIENT_WIDTH, _HEIGHT, _FPS and NOVA_DISPLAY_MODE) and \"restore\". Skipped if the file does not exist.",
     "sunshine_name": "Host name",
     "sunshine_name_desc": "The name displayed by Moonlight. If not specified, the PC's hostname is used",
     "steamgriddb_api_key": "SteamGridDB API key",
@@ -1078,7 +1082,9 @@
       "choices": {
         "capture_pacing_auto": "Auto",
         "capture_pacing_vblank": "Vblank",
-        "capture_pacing_timer": "Timer"
+        "capture_pacing_timer": "Timer",
+        "display_follow_virtual": "Follow the device (virtual display)",
+        "display_follow_off": "Off"
       },
       "picker_primary": "primary",
       "picker_virtual": "virtual, created by Nova",

@@ -2386,6 +2386,72 @@ supported on the current platform.
     </tr>
 </table>
 
+### display_follow
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Switch the host display to the connecting device's resolution and refresh rate on every
+            stream start (Nova) — launching or resuming an app, including when another device or a new
+            resolution joins an app that is already running — and restore it after the last device
+            disconnects. Runs `display_follow_cmd`. A stream in Mirror mode
+            (Nebula's "Play on desktop", or the app's `nova-display-mode`) leaves the desktop as it is.
+            While another device is streaming, the current mode is kept. Apps whose own prep command
+            still runs the same script are skipped on launch to avoid switching twice.
+            @note{Applies to Linux and FreeBSD.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            display_follow = virtual
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            display_follow = off
+            @endcode</td>
+    </tr>
+    <tr>
+        <td rowspan="2">Choices</td>
+        <td>virtual</td>
+        <td>Follow the device's mode on every connect.</td>
+    </tr>
+    <tr>
+        <td>off</td>
+        <td>Never change the display (per-app prep commands still run).</td>
+    </tr>
+</table>
+
+### display_follow_cmd
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Command used by `display_follow` (Nova). It is run as `<cmd> set` with
+            `SUNSHINE_CLIENT_WIDTH`, `SUNSHINE_CLIENT_HEIGHT`, `SUNSHINE_CLIENT_FPS` and `NOVA_DISPLAY_MODE`
+            set, and as `<cmd> restore` afterwards, with a 10 second timeout. Skipped when the file does not
+            exist; empty disables the feature.
+            @note{Applies to Linux and FreeBSD.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            display_follow_cmd = /usr/local/bin/sunshine-resolution.sh
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            display_follow_cmd = /home/me/bin/set-display.sh
+            @endcode</td>
+    </tr>
+</table>
+
 ### mic_enabled
 
 <table>

@@ -30,6 +30,7 @@
 #include "client_permissions.h"
 #include "clipboard.h"
 #include "config.h"
+#include "display_follow.h"
 #include "display_device.h"
 #include "file_handler.h"
 #include "globals.h"
@@ -647,6 +648,15 @@ namespace nvhttp {
   }
 
   /**
+   * @brief Run Nova's display-follow step for a launch or resume.
+   *
+   * @param session The launch session built from the client's request.
+   * @param appid GameStream id of the app being launched or resumed.
+   * @param launching True for /launch (the app's own prep commands still run), false for /resume.
+   */
+  void follow_client_display(const rtsp_stream::launch_session_t &session, int appid, bool launching);
+
+  /**
    * @brief Per-app default display mode (`nova-display-mode` in apps.json).
    *
    * @param appid GameStream app id.
@@ -666,6 +676,29 @@ namespace nvhttp {
       return nova_api::parse_display_mode(app["nova-display-mode"].get<std::string>()).value_or(std::string {});
     }
     return {};
+  }
+
+  void follow_client_display(const rtsp_stream::launch_session_t &session, int appid, bool launching) {
+    display_follow::request_t request;
+    request.width = session.width;
+    request.height = session.height;
+    request.fps = session.fps;
+    request.client_name = session.client_name;
+    request.mode = session.display_mode.empty() ? default_display_mode(appid) : session.display_mode;
+
+    bool legacy_prep = false;
+    for (const auto &app : proc::proc.get_apps()) {
+      if (app.id != std::to_string(appid)) {
+        continue;
+      }
+      request.app_name = app.name;
+      // On launch the app's own prep command still runs; on resume it does not.
+      for (const auto &cmd : app.prep_cmds) {
+        legacy_prep = legacy_prep || (launching && display_follow::is_legacy_prep(cmd.do_cmd, config::video.display_follow_cmd));
+      }
+      break;
+    }
+    display_follow::stream_requested(request, legacy_prep, rtsp_stream::session_count() > 0);
   }
 
   /**
@@ -1619,6 +1652,9 @@ namespace nvhttp {
     host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
     auto launch_session = make_launch_session(host_audio, args, verified_peer_for(request));
 
+    // Nova: switch the display to this client's mode before the probe and prep commands see it.
+    follow_client_display(*launch_session, (int) appid, true);
+
     bool probe_found_nothing {false};  ///< The pre-prep probe chose no encoder at all, so the re-probe is the last word.
 
     if (rtsp_stream::session_count() == 0) {
@@ -1782,6 +1818,9 @@ namespace nvhttp {
       host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
     }
     const auto launch_session = make_launch_session(host_audio, args, verified_peer_for(request));
+
+    // Nova: a resumed app's prep commands don't run again, so follow this client's mode here.
+    follow_client_display(*launch_session, proc::proc.running(), false);
 
     if (no_active_sessions) {
       // We want to prepare display only if there are no active sessions at

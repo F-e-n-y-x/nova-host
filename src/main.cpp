@@ -32,6 +32,7 @@
 // local includes
 #include "confighttp.h"
 #include "display_device.h"
+#include "display_follow.h"
 #include "entry_handler.h"
 #include "globals.h"
 #include "httpcommon.h"
@@ -436,6 +437,9 @@ int main(int argc, char *argv[]) {
 #endif
 
   proc::refresh(config::stream.file_apps);
+
+  // Nova: a crash or kill mid-stream can leave the display switched to a client mode.
+  display_follow::recover_at_startup();
 
   // If any of the following fail, we log an error and continue event though sunshine will not function correctly.
   // This allows access to the UI to fix configuration problems or view the logs.

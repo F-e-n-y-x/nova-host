@@ -779,6 +779,8 @@ namespace config {
 
     {},  // capture
     "auto",  // capture_pacing (Nova): vblank-paced when client fps fits the display refresh
+    "virtual",  // display_follow (Nova)
+    "/usr/local/bin/sunshine-resolution.sh",  // display_follow_cmd (Nova); skipped when the file does not exist
     {},  // encoder
     {},  // adapter_name
     {},  // output_name
@@ -1713,6 +1715,8 @@ namespace config {
 
     string_f(vars, "capture", video.capture);
     string_f(vars, "capture_pacing", video.capture_pacing);
+    string_restricted_f(vars, "display_follow", video.display_follow, {"virtual"sv, "off"sv});
+    string_f(vars, "display_follow_cmd", video.display_follow_cmd);
     string_f(vars, "encoder", video.encoder);
     string_f(vars, "adapter_name", video.adapter_name);
     string_f(vars, "output_name", video.output_name);

@@ -135,6 +135,8 @@ namespace config {
 
     std::string capture;  ///< Capture backend name selected by configuration.
     std::string capture_pacing;  ///< Nova: "timer" (default) or "vblank" (present-paced KMS capture).
+    std::string display_follow;  ///< Nova: "virtual" (default) follows the client mode on every connect; "off" disables it.
+    std::string display_follow_cmd;  ///< Nova: command run with "set"/"restore" to switch the display to the client mode.
     std::string encoder;  ///< Encoder backend name selected by configuration.
     std::string adapter_name;  ///< Display adapter name selected in configuration.
     std::string output_name;  ///< Display output name selected in configuration.

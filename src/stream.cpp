@@ -27,6 +27,7 @@ extern "C" {
 #include "clipboard.h"
 #include "config.h"
 #include "display_device.h"
+#include "display_follow.h"
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
@@ -2543,6 +2544,9 @@ namespace stream {
         if (revert_display_config) {
           display_device::revert_configuration();
         }
+
+        // Nova: put the display back the way it was before this stream switched it.
+        display_follow::last_session_ended();
 
         platf::streaming_will_stop();
       }
