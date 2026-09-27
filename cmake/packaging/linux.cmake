@@ -25,6 +25,10 @@ install(DIRECTORY "${CMAKE_SOURCE_DIR}/tools/display/nova_display"
 install(PROGRAMS "${CMAKE_SOURCE_DIR}/tools/display/helpers/nova-drm-vdd"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host/helpers")
 
+# GE-Proton/umu launcher for Windows games (see src/nova_compat.h).
+install(PROGRAMS "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/nova-proton-run"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host")
+
 # copy assets (excluding shaders) to build directory, for running without install
 file(COPY "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/assets/"
         DESTINATION "${CMAKE_BINARY_DIR}/assets"

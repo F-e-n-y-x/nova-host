@@ -1707,7 +1707,8 @@ namespace nvhttp {
       auto err = proc::proc.execute((int) appid, launch_session);
       if (err) {
         tree.put("root.<xmlattr>.status_code", err);
-        tree.put("root.<xmlattr>.status_message", "Failed to start the specified application");
+        const auto &reason = proc::proc.last_error();
+        tree.put("root.<xmlattr>.status_message", reason.empty() ? "Failed to start the specified application" : reason);
         tree.put("root.gamesession", 0);
 
         return;

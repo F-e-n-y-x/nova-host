@@ -404,7 +404,9 @@ namespace config {
    */
   struct library_t {
     std::string steamgriddb_api_key;  ///< Nova: optional SteamGridDB API key for extra artwork; never returned in plain text by /api/config.
-    std::string windows_exe_launcher;  ///< Nova: command template for detected Windows games; "{exe}" is replaced by the quoted path. Empty picks a default.
+    std::string windows_exe_launcher;  ///< Nova: command template for detected Windows games; "{exe}" is replaced by the quoted path. Used when windows_launcher is "custom".
+    std::string windows_launcher;  ///< Nova: how Windows games run: "proton" (GE-Proton via umu, default), "wine" or "custom".
+    bool proton_auto_update;  ///< Nova: let umu fetch and keep the latest GE-Proton release.
   };
 
   extern video_t video;

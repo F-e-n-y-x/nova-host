@@ -13,6 +13,57 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
+/**
+ * Whether an app runs a Windows game through Nova's compatibility layer (not Lutris, not a native app).
+ *
+ * @param {object} app Application or form.
+ * @returns {boolean} True for Windows games Nova launches itself.
+ */
+export function isWindowsGame(app) {
+  const cmd = String(app?.cmd ?? '')
+  if (/lutris:rungameid/i.test(cmd) || app?.['nova-source'] === 'lutris') return false
+  return Boolean(app?.['nova-exe']) || /nova-proton-run/.test(cmd) || /\.exe"?\s*$/i.test(cmd)
+}
+
+/**
+ * Editable copy of an app's `nova-compat` options (see docs/configuration.md, windows_launcher).
+ *
+ * @param {object} [compat] Stored `nova-compat` object.
+ * @returns {{prefix: string, fsr: string, fps_cap: number|null, mangohud: boolean, proton_version: string, extra_env: string}} Form state.
+ */
+export function compatForm(compat = {}) {
+  return {
+    prefix: compat.prefix ?? '',
+    fsr: String(compat.fsr ?? 0),
+    fps_cap: compat.fps_cap > 0 ? Number(compat.fps_cap) : null,
+    mangohud: Boolean(compat.mangohud),
+    proton_version: compat.proton_version ?? '',
+    extra_env: (compat.extra_env ?? []).join('\n'),
+  }
+}
+
+/**
+ * Turn the editable options back into the stored `nova-compat` object.
+ *
+ * @param {object} form Output of compatForm().
+ * @returns {object|null} Stored object, or null when every option is at its default.
+ */
+export function compatPayload(form) {
+  const out = {}
+  const prefix = String(form.prefix ?? '').trim()
+  if (prefix) out.prefix = prefix
+  const fsr = Number(form.fsr)
+  if (fsr >= 1 && fsr <= 5) out.fsr = fsr
+  const fps = Number(form.fps_cap)
+  if (Number.isInteger(fps) && fps > 0) out.fps_cap = fps
+  if (form.mangohud) out.mangohud = true
+  const version = String(form.proton_version ?? '').trim()
+  if (version && version !== 'latest') out.proton_version = version
+  const env = String(form.extra_env ?? '').split('\n').map((l) => l.trim()).filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
+  if (env.length) out.extra_env = env
+  return Object.keys(out).length ? out : null
+}
+
 /** Seconds the host waits for app processes to exit when no timeout is stored. */
 export const DEFAULT_EXIT_TIMEOUT = 5
 
@@ -63,6 +114,7 @@ export function formFromApp(app, index, platform) {
   form['auto-detach'] = form['auto-detach'] ?? true
   form['wait-all'] = form['wait-all'] ?? true
   form['exit-timeout'] = form['exit-timeout'] ?? DEFAULT_EXIT_TIMEOUT
+  if (isWindowsGame(form)) form['nova-compat'] = compatForm(form['nova-compat'])
   return form
 }
 
@@ -113,6 +165,11 @@ export function buildPayload(form) {
     delete payload['exit-timeout']
   } else {
     payload['exit-timeout'] = Number(timeout)
+  }
+  if (payload['nova-compat']) {
+    const compat = compatPayload(payload['nova-compat'])
+    if (compat) payload['nova-compat'] = compat
+    else delete payload['nova-compat']
   }
   return payload
 }

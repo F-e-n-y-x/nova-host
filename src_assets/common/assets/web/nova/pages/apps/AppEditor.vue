@@ -28,6 +28,7 @@ import NvNumberField from '../../components/NvNumberField.vue'
 import NvSwitch from '../../components/NvSwitch.vue'
 import NvSettingRow from '../../components/NvSettingRow.vue'
 import NvAlert from '../../components/NvAlert.vue'
+import NvSelect from '../../components/NvSelect.vue'
 import ArtworkPicker from '../library/ArtworkPicker.vue'
 import PathField from './PathField.vue'
 import PrepCommandList from './PrepCommandList.vue'
@@ -66,6 +67,11 @@ const artwork = reactive({ open: false, loading: false, error: '', busy: false, 
 const browser = ref({ open: false, type: 'any', title: '', start: '', apply: null })
 
 const isWindows = computed(() => props.platform === 'windows')
+/** Proton FSR choices: off, then 1 (sharpest) to 5. */
+const fsrOptions = computed(() => [
+  { value: '0', label: t('nova.apps.compat_fsr_off') },
+  ...[1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: t('nova.apps.compat_fsr_level', { n }) })),
+])
 const isNew = computed(() => props.index === -1)
 const title = computed(() => (isNew.value ? t('nova.apps.add_title') : t('nova.apps.edit_title', { name: props.app?.name || t('nova.apps.unnamed') })))
 const isDirty = computed(() => formsDiffer(form.value, JSON.parse(initial.value || '{}')))
@@ -248,6 +254,11 @@ function browseField(key, type, titleKey) {
   browse(type, titleKey, form.value[key], (p) => { form.value[key] = p })
 }
 
+function browseCompatPrefix() {
+  const compat = form.value['nova-compat']
+  browse('directory', 'nova.apps.browse_folder', compat.prefix, (p) => { compat.prefix = p })
+}
+
 function browsePrep(index, field) {
   browse('executable', 'nova.apps.browse_program', form.value['prep-cmd'][index][field], (p) => {
     form.value['prep-cmd'] = form.value['prep-cmd'].map((c, i) => (i === index ? { ...c, [field]: p } : c))
@@ -324,6 +335,27 @@ defineExpose({ isDirty, askDiscard, openArtwork })
           </NvSettingRow>
         </div>
         <PrepCommandList v-model="form['prep-cmd']" :platform="platform" @browse="browsePrep" />
+      </section>
+
+      <section v-if="!isWindows && form['nova-compat']" class="nv-editor__section" aria-labelledby="nv-editor-compat">
+        <h3 id="nv-editor-compat" class="nv-editor__heading">{{ t('nova.apps.section_compat') }}</h3>
+        <p class="nv-editor__desc">{{ t('nova.apps.compat_desc') }}</p>
+        <PathField v-model="form['nova-compat'].prefix" :label="t('nova.apps.compat_prefix')" :hint="t('nova.apps.compat_prefix_hint')"
+                   @browse="browseCompatPrefix" />
+        <NvSelect v-model="form['nova-compat'].fsr" :label="t('nova.apps.compat_fsr')" :hint="t('nova.apps.compat_fsr_hint')" :options="fsrOptions" />
+        <NvNumberField v-model="form['nova-compat'].fps_cap" :label="t('nova.apps.compat_fps_cap')" :unit="t('nova.apps.compat_fps')"
+                       :min="0" :hint="t('nova.apps.compat_fps_cap_hint')" />
+        <div class="nv-editor__group">
+          <NvSettingRow :label="t('nova.apps.compat_mangohud')" :description="t('nova.apps.compat_mangohud_hint')">
+            <template #default="{ labelId, descriptionId }">
+              <NvSwitch v-model="form['nova-compat'].mangohud" :labelledby="labelId" :describedby="descriptionId" show-state />
+            </template>
+          </NvSettingRow>
+        </div>
+        <NvTextField v-model="form['nova-compat'].proton_version" :label="t('nova.apps.compat_proton')" :hint="t('nova.apps.compat_proton_hint')"
+                     placeholder="latest" mono />
+        <NvTextField v-model="form['nova-compat'].extra_env" :label="t('nova.apps.compat_env')" :hint="t('nova.apps.compat_env_hint')"
+                     placeholder="DXVK_HUD=fps" mono multiline />
       </section>
 
       <details class="nv-editor__advanced">

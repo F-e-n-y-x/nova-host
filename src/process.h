@@ -18,6 +18,7 @@
 
 // local includes
 #include "config.h"
+#include "nova_compat.h"
 #include "platform/common.h"
 #include "rtsp.h"
 #include "src/boost_process_compat.h"
@@ -79,6 +80,9 @@ namespace proc {
     bool auto_detach;  ///< Whether the process should detach automatically.
     bool wait_all;  ///< Whether Sunshine waits for all child processes.
     std::chrono::seconds exit_timeout;  ///< Exit timeout.
+    std::string nova_exe;  ///< Game executable checked before launch ("nova-exe"), or empty.
+    std::uint32_t steam_appid = 0;  ///< Matched Steam app id ("nova-steam-appid"), or 0.
+    nova_compat::options_t compat;  ///< Windows compatibility options ("nova-compat").
   };
 
   /**
@@ -111,6 +115,13 @@ namespace proc {
      * @return Process exit code or launch error status.
      */
     int execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t> launch_session);
+
+    /**
+     * @brief User-facing reason the last execute() call failed, if it knows one.
+     *
+     * @return Message such as a missing game file, or empty for a generic failure.
+     */
+    const std::string &last_error() const;
 
     /**
      * @return `_app_id` if a process is running, otherwise returns `0`
@@ -151,6 +162,7 @@ namespace proc {
 
   private:
     int _app_id;
+    std::string _last_error;
 
     boost::process::v1::environment _env;
     std::vector<ctx_t> _apps;

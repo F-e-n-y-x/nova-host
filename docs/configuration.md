@@ -312,16 +312,83 @@ supported on the current platform.
     </tr>
 </table>
 
+### windows_launcher
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            How Nova starts Windows games it finds or you add (Nova). Games imported from Lutris always launch
+            through Lutris.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            proton
+            @endcode</td>
+    </tr>
+    <tr>
+        <td rowspan="3">Choices</td>
+        <td>proton</td>
+        <td>Run the game with GE-Proton through umu-launcher, using Nova's `nova-proton-run` wrapper. Each game
+            gets its own Wine prefix (`~/Games/nova/<game>` unless set), `GAMEID=umu-<steam app id>` so the game's
+            Steam protonfixes apply, NTSYNC, DXVK-NVAPI on NVIDIA GPUs, GameMode when installed and a per-game shader
+            cache in `~/.cache/nova/shaders/<game>`. Per-game options are read from the app's `nova-compat` object in
+            apps.json: `prefix`, `fsr` (0 = off, 1-5 = Proton fullscreen FSR, 1 is sharpest), `fps_cap`,
+            `mangohud`, `proton_version` (`latest` or a GE-Proton release name) and `extra_env` (list of
+            `KEY=VALUE`). Falls back to the old detection order when the wrapper is not installed.</td>
+    </tr>
+    <tr>
+        <td>wine</td>
+        <td>Run the game with the system `wine`.</td>
+    </tr>
+    <tr>
+        <td>custom</td>
+        <td>Use the [windows_exe_launcher](#windows_exe_launcher) command.</td>
+    </tr>
+</table>
+
+Apps with a `nova-exe` path in apps.json are checked before launch: if that file is missing, the launch fails with
+a message naming the file instead of streaming a desktop while the game silently exits.
+
+### proton_auto_update
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Let umu-launcher download and use the newest GE-Proton release when a game starts. When disabled, or
+            when the PC is offline, the newest GE-Proton already installed (Steam `compatibilitytools.d`, Lutris or
+            umu) is used.
+            @note{Applies to Linux only, with [windows_launcher](#windows_launcher) set to `proton`.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            proton_auto_update = disabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### windows_exe_launcher
 
 <table>
     <tr>
         <td>Description</td>
         <td colspan="2">
-            Command used to start Windows games found by the library scanner (Nova). `{exe}` is replaced by the quoted
-            path of the game's executable; without `{exe}` the path is appended. When empty, Nova uses
-            `/usr/local/bin/run-windows-exe {exe}` if that wrapper exists, else `umu-run {exe}`, else `wine {exe}`.
-            On Windows hosts the executable is run directly. Prep commands are not added to imported games.
+            Command used to start Windows games when [windows_launcher](#windows_launcher) is `custom` (Nova).
+            `{exe}` is replaced by the quoted path of the game's executable; without `{exe}` the path is appended.
+            When empty, GE-Proton is used. On Windows hosts the executable is run directly. Prep commands are not
+            added to imported games.
             @note{Applies to Linux only.}
         </td>
     </tr>

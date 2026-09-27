@@ -26,6 +26,7 @@
 #include "src/config.h"
 #include "src/logging.h"
 #include "src/nova_client_api.h"
+#include "src/nova_compat.h"
 #include "src/platform/common.h"
 #include "src/process.h"
 #include "steam.h"
@@ -286,6 +287,9 @@ namespace library {
       e.source = to_string(game.source);
       e.source_id = game.source_id;
       e.steam_appid = game.steam_appid;
+      if (game.source == source_e::folder) {
+        e.exe = game.executable;
+      }
       return e;
     }
 
@@ -663,6 +667,20 @@ namespace library {
 #endif
   }
 
+  std::string resolve_windows_launcher(std::string_view mode, const std::string &custom, const std::string &wrapper) {
+    if (mode == "wine") {
+      return "wine {exe}";
+    }
+    if (mode == "custom" && !custom.empty()) {
+      return custom;
+    }
+    std::error_code ec;
+    if (!wrapper.empty() && wrapper.find('"') == std::string::npos && fs::exists(wrapper, ec)) {
+      return "\"" + wrapper + "\" {exe}";
+    }
+    return resolve_windows_launcher(std::string {});
+  }
+
   settings_t current_settings() {
     settings_t s;
     if (const char *home = std::getenv("HOME")) {
@@ -671,7 +689,7 @@ namespace library {
     s.apps_file = config::stream.file_apps;
     s.covers_dir = platf::appdata() / "covers" / "library";
     s.steamgriddb_api_key = config::library.steamgriddb_api_key;
-    s.windows_launcher = resolve_windows_launcher(config::library.windows_exe_launcher);
+    s.windows_launcher = resolve_windows_launcher(config::library.windows_launcher, config::library.windows_exe_launcher, nova_compat::wrapper_path());
     return s;
   }
 
@@ -996,6 +1014,9 @@ namespace library {
       };
       if (e.steam_appid != 0) {
         app["nova-steam-appid"] = e.steam_appid;
+      }
+      if (!e.exe.empty()) {
+        app["nova-exe"] = e.exe.string();
       }
       if (!e.working_dir.empty()) {
         app["working-dir"] = escape_dollars(e.working_dir);
