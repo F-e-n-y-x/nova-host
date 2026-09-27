@@ -6,6 +6,7 @@ import { computed, ref, shallowRef } from 'vue'
 import { fetchJson, getConfig, postJson } from '../nova/api.js'
 import { detectEncoders, parseLogs } from '../nova/logs.js'
 import { applyRules } from './settings_schema.js'
+import { hostEncoders, useHostProbes } from './hostProbes.js'
 import {
   DEFAULTS, allOptionKeys, buildSavePayload, changedKeys, clone, optionApplies, prepareConfig, validateOption,
 } from './settings_model.js'
@@ -42,6 +43,13 @@ export function useSettingsForm() {
       loadError.value = error
     } finally {
       loading.value = false
+    }
+    // Prefer what the host reports directly; older hosts only say it in the log.
+    await useHostProbes().ready
+    const fromHost = hostEncoders()
+    if (fromHost) {
+      detectedEncoders.value = fromHost
+      return
     }
     try {
       const response = await fetch('./api/logs')

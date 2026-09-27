@@ -27,6 +27,9 @@ export const DEFAULTS = Object.freeze(Object.fromEntries(
   configTabs.flatMap((tab) => Object.entries(tab.options)),
 ))
 
+/** What the host returns instead of a stored secret (e.g. steamgriddb_api_key); saving it back keeps the secret. */
+export const SECRET_MASK = '********'
+
 /** Config-tab id each option belongs to (used to hide encoder options of other platforms). */
 export const OPTION_TAB = Object.freeze(Object.fromEntries(
   configTabs.flatMap((tab) => Object.keys(tab.options).map((key) => [key, tab.id])),

@@ -7,7 +7,10 @@
  * descriptions come from en.json `config.<key>` / `config.<key>_desc`.
  *
  * Option fields:
- * - type: 'bool' | 'choice' | 'number' | 'text' | 'path' | custom component name
+ * - type: 'bool' | 'choice' | 'number' | 'text' | 'path' | 'secret' | custom component name
+ * - picker: 'displays' | 'sinks' — offer the host's list (GET /api/displays, /api/audio/sinks)
+ *   as choices; falls back to the text field when the host doesn't provide it
+ * - secret: the host returns "********" for a stored value and keeps it when saved back
  * - choices: [{ value, label }] — label is an i18n key, or `{ text }` for a literal
  * - platforms: only on these platforms; hideOn: never on these platforms
  * - when(config, platform): only while this returns true (dependent options)
@@ -72,6 +75,8 @@ export const OPTIONS = {
   notify_pre_releases: { type: 'bool' },
   system_tray: { type: 'bool' },
   global_prep_cmd: { type: 'PrepCommandsEditor' },
+  steamgriddb_api_key: { type: 'secret', mono: true, placeholder: 'Paste your API key', help: 'steamgriddb' },
+  windows_exe_launcher: { type: 'text', mono: true, hideOn: ['windows', 'macos'], placeholder: '/usr/local/bin/run-windows-exe {exe}' },
 
   // Display & capture
   capture: {
@@ -90,7 +95,7 @@ export const OPTIONS = {
     help: 'adapter_name',
   },
   output_name: {
-    type: 'text', mono: true,
+    type: 'text', mono: true, picker: 'displays',
     placeholder: { windows: '{de9bb7e2-186e-505b-9e93-f48793333810}', linux: 'DP-0', freebsd: 'DP-0', default: '0' },
     platformDesc: true,
     help: 'output_name',
@@ -157,10 +162,10 @@ export const OPTIONS = {
   // Audio
   stream_audio: { type: 'bool' },
   audio_sink: {
-    type: 'text', mono: true, platformDesc: true, help: 'audio_sink',
+    type: 'text', mono: true, platformDesc: true, help: 'audio_sink', picker: 'sinks',
     placeholder: { windows: 'Speakers (High Definition Audio Device)', macos: 'BlackHole 2ch', default: 'alsa_output.pci-0000_09_00.3.analog-stereo' },
   },
-  virtual_sink: { type: 'text', platforms: ['windows'], placeholder: 'Steam Streaming Speakers' },
+  virtual_sink: { type: 'text', platforms: ['windows'], placeholder: 'Steam Streaming Speakers', picker: 'sinks' },
   install_steam_audio_drivers: { type: 'bool', platforms: ['windows'] },
   mic_enabled: { type: 'bool', platforms: ['linux'] },
 
@@ -336,7 +341,7 @@ export const OPTIONS = {
  * encoder groups shown inside the Encoder section.
  */
 export const SECTIONS = [
-  { id: 'general', options: ['sunshine_name', 'locale', 'min_log_level', 'notify_pre_releases', 'system_tray', 'global_prep_cmd'] },
+  { id: 'general', options: ['sunshine_name', 'locale', 'min_log_level', 'notify_pre_releases', 'system_tray', 'global_prep_cmd', 'steamgriddb_api_key', 'windows_exe_launcher'] },
   {
     id: 'display',
     options: ['capture', 'capture_pacing', 'adapter_name', 'output_name', 'max_bitrate', 'minimum_fps_target', 'max_fps_target',

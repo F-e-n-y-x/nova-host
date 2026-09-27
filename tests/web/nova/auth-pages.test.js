@@ -57,8 +57,9 @@ describe('Welcome', () => {
 
   it('reveals passwords on request', async () => {
     const w = track(mountNova(Welcome))
-    await w.get('input[type="checkbox"]').setValue(true)
+    await w.get('button[aria-label="Show password"]').trigger('click')
     expect(byLabel(w, 'Password').attributes('type')).toBe('text')
+    expect(byLabel(w, 'Confirm password').attributes('type')).toBe('password')
   })
 
   it('posts new credentials and shows the host error when it refuses', async () => {
