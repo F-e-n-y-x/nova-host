@@ -5,3 +5,13 @@ rights reserved.
 IBM Plex Sans and IBM Plex Mono (bundled with the web UI via @fontsource):
 Copyright 2019 IBM Corp. All rights reserved.
 Licensed under the SIL Open Font License, Version 1.1 (https://openfontlicense.org).
+
+stb_image and stb_image_write (third-party/stb, used to validate and convert game artwork):
+Written by Sean Barrett and contributors; public domain or MIT, at your choice
+(third-party/stb/LICENSE). https://github.com/nothings/stb
+
+Game library integrations: the Lutris, Steam and Heroic readers were informed by the
+design of Vibeshine's Lutris integration (https://github.com/Nonary/vibeshine, GPL-3.0).
+Game artwork is fetched at the user's request from Steam's public CDN and, when the user
+supplies an API key, from SteamGridDB (https://www.steamgriddb.com); it belongs to its
+respective owners and is cached only on the user's own machine.

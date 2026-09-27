@@ -288,6 +288,56 @@ supported on the current platform.
     </tr>
 </table>
 
+### steamgriddb_api_key
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Optional [SteamGridDB](https://www.steamgriddb.com/profile/preferences/api) API key (Nova). When set, the
+            game library scanner also offers SteamGridDB posters, heroes, logos and icons. Without it, artwork comes
+            from Steam and from your launchers. The Web UI never shows the stored key; it shows `********` instead.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            steamgriddb_api_key = 0123456789abcdef0123456789abcdef
+            @endcode</td>
+    </tr>
+</table>
+
+### windows_exe_launcher
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Command used to start Windows games found by the library scanner (Nova). `{exe}` is replaced by the quoted
+            path of the game's executable; without `{exe}` the path is appended. When empty, Nova uses
+            `/usr/local/bin/run-windows-exe {exe}` if that wrapper exists, else `umu-run {exe}`, else `wine {exe}`.
+            On Windows hosts the executable is run directly. Prep commands are not added to imported games.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            windows_exe_launcher = umu-run {exe}
+            @endcode</td>
+    </tr>
+</table>
+
 ## Input
 
 ### controller

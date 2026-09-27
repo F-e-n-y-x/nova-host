@@ -884,6 +884,11 @@ namespace config {
   /**
    * @brief Default top-level Sunshine configuration values used before file and CLI overrides.
    */
+  library_t library {
+    {},  // steamgriddb_api_key
+    {},  // windows_exe_launcher
+  };
+
   sunshine_t sunshine {
     "en",  // locale
     2,  // min_log_level
@@ -1865,6 +1870,9 @@ namespace config {
     bool_f(vars, "high_resolution_scrolling", input.high_resolution_scrolling);
     bool_f(vars, "native_pen_touch", input.native_pen_touch);
     bool_f(vars, "clipboard_sync", input.clipboard_sync);
+
+    string_f(vars, "steamgriddb_api_key", library.steamgriddb_api_key);
+    string_f(vars, "windows_exe_launcher", library.windows_exe_launcher);
 
     bool_f(vars, "notify_pre_releases", sunshine.notify_pre_releases);
     bool_f(vars, "system_tray", sunshine.system_tray);

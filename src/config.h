@@ -397,12 +397,21 @@ namespace config {
     std::vector<std::string> csrf_allowed_origins;  ///< Additional origins allowed by CSRF validation.
   };
 
+  /**
+   * @brief Game library scanning and artwork settings.
+   */
+  struct library_t {
+    std::string steamgriddb_api_key;  ///< Nova: optional SteamGridDB API key for extra artwork; never returned in plain text by /api/config.
+    std::string windows_exe_launcher;  ///< Nova: command template for detected Windows games; "{exe}" is replaced by the quoted path. Empty picks a default.
+  };
+
   extern video_t video;
   extern audio_t audio;
   extern stream_t stream;
   extern nvhttp_t nvhttp;
   extern input_t input;
   extern sunshine_t sunshine;
+  extern library_t library;  ///< Game library scanning and artwork settings.
 
 #ifdef SUNSHINE_TESTS
   /**
