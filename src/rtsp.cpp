@@ -718,6 +718,28 @@ namespace rtsp_stream {
     }
 
     /**
+     * @brief Ask the running sessions of a certificate to change bitrate.
+     *
+     * @param cert Client certificate PEM.
+     * @param bitrate_kbps New bitrate in kilobits per second.
+     * @return Number of sessions asked.
+     */
+    int request_bitrate_by_cert(std::string_view cert, int bitrate_kbps) {
+      int count = 0;
+      if (cert.empty()) {
+        return 0;
+      }
+      auto lg = _session_slots.lock();
+      for (const auto &slot : *_session_slots) {
+        if (stream::session::client_cert(*slot) == cert && stream::session::state(*slot) == stream::session::state_e::RUNNING) {
+          stream::session::request_bitrate(*slot, bitrate_kbps);
+          ++count;
+        }
+      }
+      return count;
+    }
+
+    /**
      * @brief Removes the provided session from the set of sessions.
      * @param session The session to remove.
      */
@@ -809,6 +831,10 @@ namespace rtsp_stream {
 
   void update_permissions_by_cert(std::string_view cert, client_permissions::mask_t permissions) {
     server.set_permissions_by_cert(cert, permissions);
+  }
+
+  int request_bitrate_by_cert(std::string_view cert, int bitrate_kbps) {
+    return server.request_bitrate_by_cert(cert, bitrate_kbps);
   }
 
   /**

@@ -497,6 +497,31 @@ namespace video {
     }
 
     /**
+     * @brief Retarget the FFmpeg rate control; NVENC applies it on the next frame without a restart.
+     *
+     * The VBV buffer scales with the bitrate and the VBR offset (bit_rate one below rc_max_rate)
+     * is kept when it was in use.
+     *
+     * @param bitrate_kbps New bitrate in kilobits per second.
+     * @return True when a codec context was updated.
+     */
+    bool set_bitrate(int bitrate_kbps) override {
+      if (!avcodec_ctx || bitrate_kbps <= 0) {
+        return false;
+      }
+      auto *ctx = avcodec_ctx.get();
+      const std::int64_t old_max = ctx->rc_max_rate > 0 ? ctx->rc_max_rate : ctx->bit_rate;
+      const bool vbr_offset = ctx->rc_max_rate > 0 && ctx->bit_rate == ctx->rc_max_rate - 1;
+      const std::int64_t bits = static_cast<std::int64_t>(bitrate_kbps) * 1000;
+      if (ctx->rc_buffer_size > 0 && old_max > 0) {
+        ctx->rc_buffer_size = static_cast<int>(static_cast<double>(ctx->rc_buffer_size) * static_cast<double>(bits) / static_cast<double>(old_max));
+      }
+      ctx->rc_max_rate = bits;
+      ctx->bit_rate = vbr_offset ? bits - 1 : bits;
+      return true;
+    }
+
+    /**
      * @brief Mark the frame as a request for an IDR frame.
      */
     void request_idr_frame() override {
@@ -629,11 +654,26 @@ namespace video {
     safe::mail_raw_t::event_t<bool> idr_events;  ///< Event raised when an IDR frame is requested.
     safe::mail_raw_t::event_t<hdr_info_t> hdr_events;  ///< Event carrying updated HDR metadata.
     safe::mail_raw_t::event_t<input::touch_port_t> touch_port_events;  ///< Event carrying updated touch viewport metadata.
+    safe::mail_raw_t::event_t<int> bitrate_events;  ///< Event carrying a requested bitrate change in kbps.
 
     config_t config;  ///< Stream or encoder configuration captured for the worker.
     int frame_nr;  ///< Next capture-frame number assigned to encoded packets.
     void *channel_data;  ///< Platform-specific channel data forwarded to packet senders.
   };
+
+  /**
+   * @brief Apply a client-requested bitrate change to a running encoder and log the result.
+   *
+   * @param session Encoder of the stream.
+   * @param bitrate_kbps New bitrate in kilobits per second.
+   */
+  void apply_bitrate_change(encode_session_t &session, int bitrate_kbps) {
+    if (session.set_bitrate(bitrate_kbps)) {
+      BOOST_LOG(info) << "Streaming bitrate changed to "sv << bitrate_kbps << " kbps"sv;
+    } else {
+      BOOST_LOG(warning) << "This encoder can't change bitrate during a stream; ignoring "sv << bitrate_kbps << " kbps"sv;
+    }
+  }
 
   /**
    * @brief Synchronization state for one encode session.
@@ -2463,6 +2503,7 @@ namespace video {
     auto packets = mail::man->queue<packet_t>(mail::video_packets);
     auto idr_events = mail->event<bool>(mail::idr);
     auto invalidate_ref_frames_events = mail->event<std::pair<int64_t, int64_t>>(mail::invalidate_ref_frames);
+    auto bitrate_events = mail->event<int>(mail::dynamic_bitrate);
 
     {
       // Load a dummy image into the AVFrame to ensure we have something to encode
@@ -2487,6 +2528,10 @@ namespace video {
       if (idr_events->peek()) {
         requested_idr_frame = true;
         idr_events->pop();
+      }
+
+      if (auto kbps = bitrate_events->try_pop()) {
+        apply_bitrate_change(*session, *kbps);
       }
 
       if (requested_idr_frame) {
@@ -2807,6 +2852,10 @@ namespace video {
             ctx->idr_events->pop();
           }
 
+          if (auto kbps = ctx->bitrate_events->try_pop()) {
+            apply_bitrate_change(*pos->session, *kbps);
+          }
+
           std::optional<std::chrono::steady_clock::time_point> encode_start;
           if (frame_captured) {
             encode_start = std::chrono::steady_clock::now();
@@ -3015,6 +3064,7 @@ namespace video {
         std::move(idr_events),
         mail->event<hdr_info_t>(mail::hdr),
         mail->event<input::touch_port_t>(mail::touch_port),
+        mail->event<int>(mail::dynamic_bitrate),
         config,
         1,
         channel_data,

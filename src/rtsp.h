@@ -46,6 +46,7 @@ namespace rtsp_stream {
     uint32_t rtsp_iv_counter;  ///< Counter value mixed into encrypted RTSP IVs.
     std::string client_cert;  ///< PEM certificate for the paired Moonlight client.
     client_permissions::mask_t permissions = client_permissions::full;  ///< What the client may do in this stream.
+    std::string display_mode;  ///< Nova display mode for this launch: "virtual", "mirror" or empty (app default / unset).
   };
 
   /**
@@ -93,6 +94,15 @@ namespace rtsp_stream {
    * @param permissions New permission mask.
    */
   void update_permissions_by_cert(std::string_view cert, client_permissions::mask_t permissions);
+
+  /**
+   * @brief Ask a client's running stream sessions to change encoder bitrate.
+   *
+   * @param cert PEM certificate of the paired client.
+   * @param bitrate_kbps New bitrate in kilobits per second.
+   * @return Number of running sessions that were asked (0 when the client isn't streaming).
+   */
+  int request_bitrate_by_cert(std::string_view cert, int bitrate_kbps);
 
   /**
    * @brief Runs the RTSP server loop.

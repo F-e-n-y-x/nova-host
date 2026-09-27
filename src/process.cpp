@@ -198,6 +198,12 @@ namespace proc {
     _env["SUNSHINE_CLIENT_GCMAP"] = std::to_string(launch_session->gcmap);
     _env["SUNSHINE_CLIENT_HOST_AUDIO"] = launch_session->host_audio ? "true" : "false";
     _env["SUNSHINE_CLIENT_ENABLE_SOPS"] = launch_session->enable_sops ? "true" : "false";
+    // Nova display mode for prep commands: "virtual" (client's native mode) or "mirror" (leave the desktop as is).
+    if (launch_session->display_mode.empty()) {
+      _env.erase("NOVA_DISPLAY_MODE");
+    } else {
+      _env["NOVA_DISPLAY_MODE"] = launch_session->display_mode;
+    }
     int channelCount = launch_session->surround_info & 65535;
     switch (channelCount) {
       case 2:

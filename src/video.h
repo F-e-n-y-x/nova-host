@@ -449,6 +449,16 @@ namespace video {
      * @param last_frame Last frame.
      */
     virtual void invalidate_ref_frames(int64_t first_frame, int64_t last_frame) = 0;
+
+    /**
+     * @brief Change the target bitrate of a running encoder.
+     *
+     * @param bitrate_kbps New bitrate in kilobits per second.
+     * @return True when the encoder applied the change (it takes effect on the next frame).
+     */
+    virtual bool set_bitrate(int bitrate_kbps) {
+      return false;
+    }
   };
 
   // encoders

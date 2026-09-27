@@ -2474,6 +2474,10 @@ namespace stream {
       }
     }
 
+    void request_bitrate(session_t &session, const int bitrate_kbps) {
+      session.mail->event<int>(mail::dynamic_bitrate)->raise(bitrate_kbps);
+    }
+
     /**
      * @brief Stop the active streaming session and prevent new packets from being queued.
      */
