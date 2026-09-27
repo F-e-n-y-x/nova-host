@@ -20,11 +20,12 @@ defineProps({
     display: inline-flex;
     align-items: center;
     gap: var(--nv-space-1);
-    padding: 2px var(--nv-space-2);
-    border-radius: 10px;
+    min-height: 22px;
+    padding: 0 var(--nv-space-2);
+    border-radius: var(--nv-radius-pill);
     font-size: var(--nv-text-xs);
     font-weight: 500;
-    line-height: 1.5;
+    line-height: 16px;
     white-space: nowrap;
     background: var(--nv-raised);
     color: var(--nv-text-secondary);
@@ -48,6 +49,16 @@ defineProps({
   .nv-badge--danger {
     background: var(--nv-danger-tint);
     color: var(--nv-danger);
+  }
+
+  .nv-badge--info {
+    background: var(--nv-raised);
+    color: var(--nv-info);
+  }
+
+  .nv-badge--outline {
+    background: transparent;
+    border: 1px solid var(--nv-chip-border);
   }
 }
 </style>

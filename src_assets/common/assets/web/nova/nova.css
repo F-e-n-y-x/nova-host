@@ -276,6 +276,32 @@
     color: var(--nv-text);
   }
 
+  @keyframes nv-fade {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes nv-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  @keyframes nv-slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(16px);
+    }
+  }
+
+  @keyframes nv-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -284,6 +310,139 @@
       animation-iteration-count: 1;
       transition-duration: 0.01ms;
       scroll-behavior: auto;
+    }
+  }
+}
+
+/* ---------------------------------------------------- shared form fields */
+/* Global (not per component) so page-local controls can reuse .nv-field / .nv-input. */
+@layer components {
+  .nv-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .nv-field__label {
+    font-size: var(--nv-text-sm);
+    font-weight: 500;
+    color: var(--nv-text);
+  }
+
+  .nv-field__hint {
+    font-size: var(--nv-text-xs);
+    line-height: 16px;
+    color: var(--nv-text-muted);
+  }
+
+  .nv-field__error {
+    font-size: var(--nv-text-xs);
+    line-height: 16px;
+    color: var(--nv-danger);
+  }
+
+  .nv-input {
+    width: 100%;
+    min-height: var(--nv-control-height);
+    padding: 0 var(--nv-space-3);
+    border-radius: var(--nv-radius-md);
+    border: 1px solid var(--nv-border-strong);
+    background: var(--nv-bg);
+    color: var(--nv-text);
+    font: inherit;
+    font-size: var(--nv-text-md);
+    transition: border-color 150ms ease-out;
+  }
+
+  textarea.nv-input {
+    min-height: 80px;
+    padding: var(--nv-space-2) var(--nv-space-3);
+    line-height: 20px;
+    resize: vertical;
+  }
+
+  .nv-input:hover:not(:disabled) {
+    border-color: var(--nv-text-muted);
+  }
+
+  .nv-input:focus-visible {
+    outline: var(--nv-focus-width) solid var(--nv-focus);
+    outline-offset: 0;
+    border-color: var(--nv-focus);
+  }
+
+  .nv-input::placeholder {
+    color: var(--nv-text-muted);
+  }
+
+  .nv-input:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .nv-input--invalid,
+  .nv-input--invalid:hover:not(:disabled) {
+    border-color: var(--nv-danger);
+  }
+
+  .nv-input.nv-mono {
+    font-size: var(--nv-text-sm);
+  }
+
+  .nv-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .nv-input-wrap > .nv-input {
+    padding-right: 40px;
+  }
+
+  .nv-input-wrap__action {
+    position: absolute;
+    right: 4px;
+  }
+
+  .nv-select {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .nv-select > select.nv-input {
+    appearance: none;
+    padding-right: 36px;
+    cursor: pointer;
+  }
+
+  .nv-select__icon {
+    position: absolute;
+    right: 12px;
+    color: var(--nv-text-secondary);
+    pointer-events: none;
+  }
+
+  .nv-number {
+    display: flex;
+    align-items: center;
+    gap: var(--nv-space-2);
+  }
+
+  .nv-number__input {
+    max-width: 120px;
+  }
+
+  .nv-number__unit {
+    font-size: var(--nv-text-sm);
+    color: var(--nv-text-secondary);
+  }
+
+  @media (max-width: 767px) {
+    .nv-input {
+      min-height: var(--nv-control-height-lg);
+      font-size: 16px;
     }
   }
 }

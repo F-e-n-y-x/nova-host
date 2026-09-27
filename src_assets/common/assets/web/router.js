@@ -10,7 +10,7 @@ const keep = (path) => (to) => ({ path, hash: to.hash, query: to.query })
 
 const routes = [
   { path: '/', component: () => import('./nova/pages/Dashboard.vue') },
-  { path: '/apps', component: () => import('./Apps.vue') },
+  { path: '/library', component: () => import('./Apps.vue') },
   { path: '/devices/:uuid?', component: () => import('./nova/pages/Devices.vue') },
   { path: '/settings', component: () => import('./Config.vue') },
   { path: '/logs', component: () => import('./nova/pages/Logs.vue') },
@@ -20,6 +20,7 @@ const routes = [
   { path: '/password', component: () => import('./Password.vue') },
   { path: '/welcome', component: () => import('./Welcome.vue'), meta: { bare: true } },
   { path: '/logout', component: () => import('./Logout.vue'), meta: { bare: true } },
+  { path: '/apps', redirect: keep('/library') },
   { path: '/config', redirect: keep('/settings') },
   { path: '/troubleshooting', redirect: keep('/logs') },
   { path: '/pin', redirect: keep('/pair') },

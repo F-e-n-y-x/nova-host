@@ -41,20 +41,3 @@ const describedBy = computed(() => [props.hint && `${selectId.value}-hint`, prop
     <p v-if="error" :id="`${selectId}-error`" class="nv-field__error">{{ error }}</p>
   </div>
 </template>
-
-<style>
-@layer components {
-  .nv-select {
-    position: relative;
-    display: flex;
-    align-items: center;
-  }
-
-  .nv-select__icon {
-    position: absolute;
-    right: var(--nv-space-3);
-    pointer-events: none;
-    color: var(--nv-text-secondary);
-  }
-}
-</style>

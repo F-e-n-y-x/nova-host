@@ -27,8 +27,11 @@ defineProps({
   .nv-dl {
     display: grid;
     grid-template-columns: var(--nv-dl-term) minmax(0, 1fr);
-    gap: var(--nv-space-3);
+    column-gap: var(--nv-space-3);
+    row-gap: var(--nv-space-2);
     margin: 0;
+    font-size: var(--nv-text-sm);
+    line-height: 20px;
   }
 
   .nv-dl__term {
@@ -38,11 +41,20 @@ defineProps({
 
   .nv-dl__value {
     margin: 0;
+    min-width: 0;
     overflow-wrap: anywhere;
+    color: var(--nv-text);
   }
 
-  .nv-dl__value.nv-mono {
-    font-size: var(--nv-text-sm);
+  @media (max-width: 599px) {
+    .nv-dl {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: 2px;
+    }
+
+    .nv-dl__value {
+      margin-bottom: var(--nv-space-2);
+    }
   }
 }
 </style>

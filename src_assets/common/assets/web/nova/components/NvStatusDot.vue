@@ -24,35 +24,51 @@ defineProps({
 <style>
 @layer components {
   .nv-status {
-    --nv-status-color: var(--nv-text-muted);
     display: inline-flex;
     align-items: center;
     gap: var(--nv-space-2);
-  }
-
-  .nv-status--success {
-    --nv-status-color: var(--nv-success);
-  }
-
-  .nv-status--warning {
-    --nv-status-color: var(--nv-warning);
-  }
-
-  .nv-status--danger {
-    --nv-status-color: var(--nv-danger);
+    color: var(--nv-text);
   }
 
   .nv-status__dot {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     flex-shrink: 0;
-    border-radius: 4px;
-    background: var(--nv-status-color);
+    border-radius: 3px;
+    background: var(--nv-text-muted);
   }
 
-  .nv-status--tone-status {
-    color: var(--nv-status-color);
-    font-weight: 500;
+  .nv-status--success .nv-status__dot {
+    background: var(--nv-success);
+    box-shadow: 0 0 0 4px var(--nv-success-tint);
+  }
+
+  .nv-status--warning .nv-status__dot {
+    background: var(--nv-warning);
+  }
+
+  .nv-status--danger .nv-status__dot {
+    background: var(--nv-danger);
+  }
+
+  .nv-status--accent .nv-status__dot {
+    background: var(--nv-accent-text);
+  }
+
+  .nv-status--tone-status.nv-status--success {
+    color: var(--nv-success);
+  }
+
+  .nv-status--tone-status.nv-status--warning {
+    color: var(--nv-warning);
+  }
+
+  .nv-status--tone-status.nv-status--danger {
+    color: var(--nv-danger);
+  }
+
+  .nv-status--tone-muted {
+    color: var(--nv-text-secondary);
   }
 }
 </style>

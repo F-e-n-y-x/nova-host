@@ -45,21 +45,3 @@ function onInput(event) {
     <p v-if="error" :id="`${inputId}-error`" class="nv-field__error">{{ error }}</p>
   </div>
 </template>
-
-<style>
-@layer components {
-  .nv-number {
-    display: flex;
-    align-items: center;
-    gap: var(--nv-space-2);
-  }
-
-  .nv-number__input {
-    width: 112px;
-  }
-
-  .nv-number__unit {
-    color: var(--nv-text-secondary);
-  }
-}
-</style>
