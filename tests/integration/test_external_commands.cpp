@@ -153,6 +153,12 @@ constexpr auto SIMPLE_COMMAND = IS_WINDOWS ? "where cmd" : "which sh";
       "linux", \
       true, \
       "Test udev rules file" \
+    }, \
+    ExternalCommandTestData { \
+      std::format("{} verify {}/src_assets/linux/misc/60-nova-host-input.rules", UDEVADM_EXECUTABLE, SUNSHINE_TEST_BIN_DIR), \
+      "linux", \
+      true, \
+      "Test Nova input udev rules file" \
     },
 #else
   #define UDEV_TESTS

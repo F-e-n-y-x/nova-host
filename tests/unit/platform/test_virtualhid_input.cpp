@@ -115,8 +115,8 @@ namespace {
       ASSERT_NE(context_->runtime, nullptr);
       ASSERT_NE(context_->keyboard, nullptr);
       ASSERT_NE(context_->mouse, nullptr);
-      ASSERT_NE(client_->touch, nullptr);
-      ASSERT_NE(client_->pen, nullptr);
+      ASSERT_EQ(client_->touch, nullptr);
+      ASSERT_EQ(client_->pen, nullptr);
     }
 
     /**
@@ -216,6 +216,8 @@ TEST_F(VirtualHidDeviceTest, CreatesEveryDeviceWithFakeRuntime) {
   EXPECT_TRUE(context()->runtime->capabilities().supports_gamepad);
   EXPECT_TRUE(context()->keyboard->is_open());
   EXPECT_TRUE(context()->mouse->is_open());
+  ASSERT_TRUE(client()->ensure_touch());
+  ASSERT_TRUE(client()->ensure_pen());
   EXPECT_TRUE(client()->touch->is_open());
   EXPECT_TRUE(client()->pen->is_open());
 
@@ -787,6 +789,42 @@ TEST_F(VirtualHidDeviceTest, TranslatesTouchscreenLifecycleAndGeometry) {
   platf::virtualhid::touch_update(*client(), viewport, touch);
   client()->touch.reset();
   platf::virtualhid::touch_update(*client(), viewport, touch);
+  EXPECT_EQ(client()->touch, nullptr) << "a failed or dropped touchscreen must not be recreated on every packet";
+}
+
+TEST_F(VirtualHidDeviceTest, CreatesTouchAndPenDevicesOnlyOnFirstUse) {
+  const platf::touch_port_t viewport {0, 0, 1920, 1080, 1920, 1080};
+
+  // Mouse-only clients never get a touchscreen, so desktop shells keep the pointer visible.
+  platf::virtualhid::move_mouse(*context(), 5, 5);
+  platf::virtualhid::button_mouse(*context(), BUTTON_LEFT, false);
+  platf::virtualhid::button_mouse(*context(), BUTTON_LEFT, true);
+  EXPECT_EQ(client()->touch, nullptr);
+  EXPECT_EQ(client()->pen, nullptr);
+
+  // Events that only end a contact have nothing to end yet.
+  platf::touch_input_t touch {LI_TOUCH_EVENT_UP, 0, 1, 0.5F, 0.5F, 1.0F, 0.0F, 0.0F};
+  for (const auto type : {LI_TOUCH_EVENT_UP, LI_TOUCH_EVENT_CANCEL, LI_TOUCH_EVENT_CANCEL_ALL, LI_TOUCH_EVENT_HOVER_LEAVE}) {
+    touch.eventType = type;
+    platf::virtualhid::touch_update(*client(), viewport, touch);
+  }
+  EXPECT_EQ(client()->touch, nullptr);
+  EXPECT_FALSE(client()->touch_attempted);
+
+  touch.eventType = LI_TOUCH_EVENT_DOWN;
+  platf::virtualhid::touch_update(*client(), viewport, touch);
+  ASSERT_NE(client()->touch, nullptr);
+  EXPECT_TRUE(client()->touch->is_open());
+  EXPECT_TRUE(client()->active_touches.contains(1));
+  EXPECT_EQ(client()->pen, nullptr) << "touch input must not create the pen tablet";
+
+  platf::pen_input_t pen {LI_TOUCH_EVENT_UP, LI_TOOL_TYPE_PEN, 0, 0, 0, 0.5F, 0.5F, 0.5F, 0.0F};
+  platf::virtualhid::pen_update(*client(), viewport, pen);
+  EXPECT_EQ(client()->pen, nullptr);
+  pen.eventType = LI_TOUCH_EVENT_HOVER;
+  platf::virtualhid::pen_update(*client(), viewport, pen);
+  ASSERT_NE(client()->pen, nullptr);
+  EXPECT_TRUE(client()->pen->is_open());
 }
 
 TEST_F(VirtualHidDeviceTest, TranslatesPenButtonsToolsAndTransitions) {
@@ -940,9 +978,10 @@ TEST_F(VirtualHidDeviceTest, PlatformWrappersForwardToVirtualHidContext) {
   auto platform_client = platf::allocate_client_input_context(platform_input);
   ASSERT_NE(platform_client, nullptr);
   auto &platform_client_context = platf::virtualhid::get_client_context(platform_client.get());
-  ASSERT_NE(platform_client_context.touch, nullptr);
-  ASSERT_NE(platform_client_context.pen, nullptr);
+  EXPECT_EQ(platform_client_context.touch, nullptr);
+  EXPECT_EQ(platform_client_context.pen, nullptr);
   platf::touch_update(platform_client.get(), viewport, {LI_TOUCH_EVENT_DOWN, 0, 1, 0.25F, 0.5F, 1.0F, 2.0F, 1.0F});
+  ASSERT_NE(platform_client_context.touch, nullptr);
   EXPECT_EQ(platform_client_context.touch->last_submitted_contact().id, 1);
   platf::pen_update(platform_client.get(), viewport, {LI_TOUCH_EVENT_HOVER, LI_TOOL_TYPE_PEN, 0, LI_TILT_UNKNOWN, LI_ROT_UNKNOWN, 0.25F, 0.5F, 0.5F, 0.0F, 0.0F});
   EXPECT_EQ(platform_client_context.pen->last_submitted_tool().tool, lvh::PenToolType::pen);

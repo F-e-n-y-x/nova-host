@@ -492,34 +492,50 @@ namespace platf::virtualhid {
   }
 
   client_context_t::client_context_t(input_context_t &input):
-      global {&input} {
-    if (!global->runtime) {
-      return;
+      global {&input} {}
+
+  bool client_context_t::ensure_touch() {
+    if (touch || touch_attempted) {
+      return touch != nullptr;
     }
 
-    const auto &capabilities = global->runtime->capabilities();
-    if (capabilities.supports_touchscreen) {
-      lvh::CreateTouchscreenOptions options;
-      options.profile = lvh::profiles::touchscreen();
-      options.stable_id = "sunshine-touchscreen";
-      auto created = global->runtime->create_touchscreen(options);
-      if (created) {
-        touch = std::move(created.touchscreen);
-      } else {
-        log_failure("create libvirtualhid touchscreen"sv, created.status);
-      }
+    touch_attempted = true;
+    if (!global->runtime || !global->runtime->capabilities().supports_touchscreen) {
+      return false;
     }
-    if (capabilities.supports_pen_tablet) {
-      lvh::CreatePenTabletOptions options;
-      options.profile = lvh::profiles::pen_tablet();
-      options.stable_id = "sunshine-pen-tablet";
-      auto created = global->runtime->create_pen_tablet(options);
-      if (created) {
-        pen = std::move(created.pen_tablet);
-      } else {
-        log_failure("create libvirtualhid pen tablet"sv, created.status);
-      }
+
+    lvh::CreateTouchscreenOptions options;
+    options.profile = lvh::profiles::touchscreen();
+    options.stable_id = "sunshine-touchscreen";
+    auto created = global->runtime->create_touchscreen(options);
+    if (created) {
+      touch = std::move(created.touchscreen);
+    } else {
+      log_failure("create libvirtualhid touchscreen"sv, created.status);
     }
+    return touch != nullptr;
+  }
+
+  bool client_context_t::ensure_pen() {
+    if (pen || pen_attempted) {
+      return pen != nullptr;
+    }
+
+    pen_attempted = true;
+    if (!global->runtime || !global->runtime->capabilities().supports_pen_tablet) {
+      return false;
+    }
+
+    lvh::CreatePenTabletOptions options;
+    options.profile = lvh::profiles::pen_tablet();
+    options.stable_id = "sunshine-pen-tablet";
+    auto created = global->runtime->create_pen_tablet(options);
+    if (created) {
+      pen = std::move(created.pen_tablet);
+    } else {
+      log_failure("create libvirtualhid pen tablet"sv, created.status);
+    }
+    return pen != nullptr;
   }
 
   std::unique_ptr<lvh::Runtime> create_runtime(lvh::BackendKind backend) {
@@ -849,7 +865,10 @@ namespace platf::virtualhid {
   }
 
   void touch_update(client_context_t &context, const touch_port_t &touch_port, const touch_input_t &touch) {
-    if (!context.touch) {
+    // Only a contact that lands or hovers creates the touchscreen; ending events have nothing to end.
+    const bool places_contact = touch.eventType == LI_TOUCH_EVENT_DOWN || touch.eventType == LI_TOUCH_EVENT_MOVE ||
+                                touch.eventType == LI_TOUCH_EVENT_HOVER;
+    if (!(places_contact ? context.ensure_touch() : context.touch != nullptr)) {
       return;
     }
 
@@ -893,7 +912,9 @@ namespace platf::virtualhid {
   }
 
   void pen_update(client_context_t &context, const touch_port_t &touch_port, const pen_input_t &pen) {
-    if (!context.pen) {
+    const bool places_tool = pen.eventType == LI_TOUCH_EVENT_DOWN || pen.eventType == LI_TOUCH_EVENT_MOVE ||
+                             pen.eventType == LI_TOUCH_EVENT_HOVER;
+    if (!(places_tool ? context.ensure_pen() : context.pen != nullptr)) {
       return;
     }
 
