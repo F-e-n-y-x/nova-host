@@ -825,6 +825,15 @@ namespace platf {
   };
 
   /**
+   * @brief An audio output device reported by the sound server.
+   */
+  struct sink_desc_t {
+    std::string name;  ///< Sink name accepted by the `audio_sink` setting.
+    std::string description;  ///< Human-readable device description.
+    bool is_virtual = false;  ///< Whether Nova created this sink for streaming.
+  };
+
+  /**
    * @brief Platform audio controller that manages sinks and microphone capture.
    */
   class audio_control_t {
@@ -863,6 +872,15 @@ namespace platf {
      * @return Host and virtual sink names when the backend can report them.
      */
     virtual std::optional<sink_t> sink_info() = 0;
+
+    /**
+     * @brief List the sound server's output devices without creating any.
+     *
+     * @return Sinks; empty when the backend can't enumerate them.
+     */
+    virtual std::vector<sink_desc_t> list_sinks() {
+      return {};
+    }
 
     /**
      * @brief Write one remote-microphone Opus payload received from a Moonlight client.
@@ -952,6 +970,67 @@ namespace platf {
    * @return Display names accepted by the selected capture backend.
    */
   std::vector<std::string> display_names(mem_type_e hwdevice_type);
+
+  /**
+   * @brief A display output the host can see, for the web UI's display pickers.
+   */
+  struct capture_output_t {
+    std::string name;  ///< Output name, e.g. `HDMI-0`.
+    int index = 0;  ///< Position in the platform's output list (legacy numeric `output_name`).
+    bool connected = false;  ///< Whether a monitor is attached.
+    bool primary = false;  ///< Whether this is the primary output.
+    int x = 0;  ///< Horizontal offset in the desktop.
+    int y = 0;  ///< Vertical offset in the desktop.
+    int width = 0;  ///< Current scanout width (0 when the output is off).
+    int height = 0;  ///< Current scanout height (0 when the output is off).
+    int mode_width = 0;  ///< Width of the active mode (0 when unknown).
+    int mode_height = 0;  ///< Height of the active mode (0 when unknown).
+    double refresh_hz = 0;  ///< Refresh rate of the active mode (0 when unknown).
+  };
+
+  /**
+   * @brief List display outputs without opening a capture session.
+   *
+   * @return Outputs; empty when the platform can't enumerate them.
+   */
+  std::vector<capture_output_t> enumerate_outputs();
+
+  /**
+   * @brief Name the capture backend that would serve an encoder of the given memory type.
+   *
+   * @param hwdevice_type Memory type the chosen encoder consumes.
+   * @return Backend name such as `nvfbc`, `kms`, `x11`, `wlr`, `portal`, `kwin`, `ddx`, `wgc`
+   *         or `avfoundation`; empty when none is available.
+   */
+  std::string capture_backend_name(mem_type_e hwdevice_type);
+
+  /**
+   * @brief Name the desktop session type.
+   *
+   * @return `x11`, `wayland`, `windows`, `macos` or `none`.
+   */
+  std::string window_system_name();
+
+  /**
+   * @brief One captured desktop frame in system memory.
+   */
+  struct preview_frame_t {
+    std::vector<std::uint8_t> bgra;  ///< Tightly packed BGRA pixels.
+    int width = 0;  ///< Frame width in pixels.
+    int height = 0;  ///< Frame height in pixels.
+  };
+
+  /**
+   * @brief Capture a single frame of a display for a still preview.
+   *
+   * Uses a system-memory capture path that never prompts the user; backends that
+   * would (the XDG portal) report an error instead.
+   *
+   * @param display_name Output name or legacy index; empty for the whole desktop.
+   * @param error Receives a human-readable reason when no frame is returned.
+   * @return The frame, or `std::nullopt` on failure.
+   */
+  std::optional<preview_frame_t> capture_preview_frame(const std::string &display_name, std::string &error);
 
   /**
    * @brief Check if GPUs/drivers have changed since the last call to this function.

@@ -5,3 +5,6 @@ rights reserved.
 IBM Plex Sans and IBM Plex Mono (bundled with the web UI via @fontsource):
 Copyright 2019 IBM Corp. All rights reserved.
 Licensed under the SIL Open Font License, Version 1.1 (https://openfontlicense.org).
+
+stb_image_write (third-party/stb/stb_image_write.h, used for web UI desktop previews):
+Copyright (c) 2017 Sean Barrett. Dual-licensed: public domain or the MIT License.

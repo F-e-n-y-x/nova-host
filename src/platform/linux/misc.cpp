@@ -13,9 +13,11 @@
 #endif
 
 // standard includes
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -64,6 +66,7 @@
 #include "src/globals.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/video.h"
 #include "vaapi.h"
 
 #ifdef __GNUC__
@@ -1398,6 +1401,167 @@ namespace platf {
 #endif
 
     return nullptr;
+  }
+
+#ifdef SUNSHINE_BUILD_X11
+  std::vector<capture_output_t> x11_outputs();
+#endif
+
+  /**
+   * @brief Read connector state from sysfs when no X server can be asked.
+   *
+   * Only connected connectors are reported; the first line of `modes` is the
+   * preferred mode, and refresh is unknown at this level.
+   *
+   * @return Connected DRM connectors, or an empty list when sysfs is unavailable.
+   */
+  static std::vector<capture_output_t> drm_sysfs_outputs() {
+    std::vector<capture_output_t> outputs;
+    std::error_code ec;
+    std::vector<std::filesystem::path> connectors;
+    for (const auto &entry : std::filesystem::directory_iterator("/sys/class/drm", ec)) {
+      const auto name = entry.path().filename().string();
+      if (name.starts_with("card") && name.find('-') != std::string::npos) {
+        connectors.push_back(entry.path());
+      }
+    }
+    std::ranges::sort(connectors);
+
+    for (const auto &path : connectors) {
+      std::ifstream status_file {path / "status"};
+      std::string status;
+      if (!std::getline(status_file, status) || status != "connected") {
+        continue;
+      }
+
+      capture_output_t output;
+      const auto name = path.filename().string();
+      output.name = name.substr(name.find('-') + 1);
+      output.index = static_cast<int>(outputs.size());
+      output.connected = true;
+
+      std::ifstream modes_file {path / "modes"};
+      std::string mode;
+      if (std::getline(modes_file, mode)) {
+        if (const auto x = mode.find('x'); x != std::string::npos) {
+          output.mode_width = std::atoi(mode.substr(0, x).c_str());
+          output.mode_height = std::atoi(mode.substr(x + 1).c_str());
+          output.width = output.mode_width;
+          output.height = output.mode_height;
+        }
+      }
+      outputs.emplace_back(std::move(output));
+    }
+    return outputs;
+  }
+
+  std::vector<capture_output_t> enumerate_outputs() {
+#ifdef SUNSHINE_BUILD_X11
+    if (window_system == window_system_e::X11) {
+      if (auto outputs = x11_outputs(); !outputs.empty()) {
+        return outputs;
+      }
+    }
+#endif
+    return drm_sysfs_outputs();
+  }
+
+  std::string capture_backend_name(mem_type_e hwdevice_type) {
+#ifdef SUNSHINE_BUILD_DRM
+    if (sources[source::KMS]) {
+      return "kms";
+    }
+#endif
+#ifdef SUNSHINE_BUILD_CUDA
+    if (sources[source::NVFBC] && hwdevice_type == mem_type_e::cuda) {
+      return "nvfbc";
+    }
+#endif
+#ifdef SUNSHINE_BUILD_WAYLAND
+    if (sources[source::WAYLAND]) {
+      return "wlr";
+    }
+#endif
+#ifdef SUNSHINE_BUILD_X11
+    if (sources[source::X11]) {
+      return "x11";
+    }
+#endif
+#ifdef SUNSHINE_BUILD_PORTAL
+    if (sources[source::PORTAL]) {
+      return "portal";
+    }
+#endif
+#ifdef SUNSHINE_BUILD_KWIN
+    if (sources[source::KWIN]) {
+      return "kwin";
+    }
+#endif
+    return {};
+  }
+
+  std::string window_system_name() {
+    switch (window_system) {
+      case window_system_e::X11:
+        return "x11";
+      case window_system_e::WAYLAND:
+        return "wayland";
+      default:
+        return "none";
+    }
+  }
+
+  std::optional<preview_frame_t> capture_preview_frame(const std::string &display_name, std::string &error) {
+    video::config_t config {};
+    config.width = 1920;
+    config.height = 1080;
+    config.framerate = 10;
+
+    std::shared_ptr<display_t> disp;
+#ifdef SUNSHINE_BUILD_X11
+    // X11 grabs work alongside an NvFBC/KMS stream and never prompt, so prefer them
+    // even when the configured capture method is something else.
+    if (window_system == window_system_e::X11) {
+      disp = x11_display(mem_type_e::system, display_name, config);
+    }
+#endif
+#ifdef SUNSHINE_BUILD_DRM
+    if (!disp && sources[source::KMS]) {
+      disp = kms_display(mem_type_e::system, display_name, config);
+    }
+#endif
+    if (!disp) {
+      error = "Preview needs X11 or KMS capture; this desktop uses " + (window_system_name() == "wayland" ? std::string {"Wayland"} : std::string {"no supported capture method"});
+      return std::nullopt;
+    }
+
+    std::optional<preview_frame_t> frame;
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    auto push = [&](std::shared_ptr<img_t> &&img, bool frame_captured) {
+      if (frame_captured && img && img->data) {
+        preview_frame_t out;
+        out.width = img->width;
+        out.height = img->height;
+        out.bgra.resize(static_cast<std::size_t>(img->width) * img->height * 4);
+        for (int row = 0; row < img->height; ++row) {
+          std::memcpy(out.bgra.data() + static_cast<std::size_t>(row) * img->width * 4, img->data + static_cast<std::size_t>(row) * img->row_pitch, static_cast<std::size_t>(img->width) * 4);
+        }
+        frame = std::move(out);
+        return false;
+      }
+      return std::chrono::steady_clock::now() < deadline;
+    };
+    auto pull = [&](std::shared_ptr<img_t> &img_out) {
+      img_out = disp->alloc_img();
+      return img_out != nullptr;
+    };
+
+    bool cursor = true;
+    disp->capture(push, pull, &cursor);
+    if (!frame) {
+      error = "The display didn't return a frame";
+    }
+    return frame;
   }
 
   /**

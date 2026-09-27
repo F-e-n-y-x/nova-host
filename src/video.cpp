@@ -8,6 +8,7 @@
 #include <atomic>
 #include <bitset>
 #include <list>
+#include <mutex>
 #include <thread>
 #include <utility>
 
@@ -1468,6 +1469,14 @@ namespace video {
   };
 
   static encoder_t *chosen_encoder;
+
+  static std::mutex encoder_summary_mutex;  ///< Guards ::encoder_summary for readers on HTTP threads.
+  static encoder_summary_t encoder_summary;  ///< Encoder chosen by the latest successful probe.
+
+  encoder_summary_t get_encoder_summary() {
+    std::lock_guard lock {encoder_summary_mutex};
+    return encoder_summary;
+  }
 
   /// Whether the last probe rejected an encoder only because no display could be
   /// opened. Zenith's virtual display is created by the app's prep command, which
@@ -3296,6 +3305,10 @@ namespace video {
     // Restart encoder selection
     auto previous_encoder = chosen_encoder;
     chosen_encoder = nullptr;
+    {
+      std::lock_guard lock {encoder_summary_mutex};
+      encoder_summary = {};
+    }
     probe_missing_display = false;
     active_hevc_mode = config::video.hevc_mode;
     active_av1_mode = config::video.av1_mode;
@@ -3496,6 +3509,21 @@ namespace video {
       BOOST_LOG(debug) << "-------------------"sv;
 
       BOOST_LOG(info) << "Found AV1 encoder: "sv << encoder.av1.name << " ["sv << encoder.name << ']';
+    }
+
+    {
+      encoder_summary_t summary;
+      summary.probed = true;
+      summary.name = std::string {encoder.name};
+      summary.h264_codec = encoder.h264[encoder_t::PASSED] ? encoder.h264.name : std::string {};
+      summary.hevc_codec = encoder.hevc[encoder_t::PASSED] ? encoder.hevc.name : std::string {};
+      summary.av1_codec = encoder.av1[encoder_t::PASSED] ? encoder.av1.name : std::string {};
+      summary.hevc_main10 = encoder.hevc[encoder_t::PASSED] && encoder.hevc[encoder_t::DYNAMIC_RANGE];
+      summary.av1_main10 = encoder.av1[encoder_t::PASSED] && encoder.av1[encoder_t::DYNAMIC_RANGE];
+      summary.yuv444 = last_encoder_probe_supported_yuv444_for_codec;
+      summary.mem_type = encoder.platform_formats->dev_type;
+      std::lock_guard lock {encoder_summary_mutex};
+      encoder_summary = std::move(summary);
     }
 
     // 2 - passed
