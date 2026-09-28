@@ -7,7 +7,7 @@ import { computed, nextTick, reactive, shallowRef } from 'vue'
 import { apiFetch } from '../../../fetch_utils'
 
 /** Minimum length for a new web UI password. */
-export const MIN_PASSWORD_LENGTH = 8
+export const MIN_PASSWORD_LENGTH = 4
 
 /** serverError value when the host failed without saying why. */
 export const GENERIC_ERROR = 'generic'
