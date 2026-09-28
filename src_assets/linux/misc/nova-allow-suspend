@@ -1,0 +1,64 @@
+#!/bin/sh
+# nova-allow-suspend: let one user suspend this machine without a password, so Nova's
+# "Sleep host" (/pcsleep, devices with the "power" permission) works.
+#
+# Nova runs as a systemd --user service, outside any login session, and polkit's default
+# for org.freedesktop.login1.suspend outside an active session is "ask for a password".
+# This installs a polkit rule that answers "yes" for that one user only.
+#
+# Usage:  sudo nova-allow-suspend [USER]      install (USER defaults to the sudo caller)
+#         sudo nova-allow-suspend --remove    remove the rule
+#         nova-allow-suspend --check [USER]   show what logind answers now (no changes)
+set -eu
+
+RULE=/etc/polkit-1/rules.d/50-nova-host-suspend.rules
+
+can_suspend() {
+  busctl --system call org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager CanSuspend 2>/dev/null | sed 's/^s //; s/"//g' || echo unknown
+}
+
+case "${1:-}" in
+  --check)
+    user="${2:-$(id -un)}"
+    if [ -f "$RULE" ]; then echo "Rule installed: $RULE"; else echo "No Nova suspend rule installed."; fi
+    if [ "$(id -un)" = "$user" ]; then echo "logind CanSuspend for $user (this shell): $(can_suspend)"; fi
+    exit 0
+    ;;
+  --remove)
+    [ "$(id -u)" -eq 0 ] || { echo "Run as root: sudo $0 --remove" >&2; exit 1; }
+    rm -f "$RULE"
+    echo "Removed $RULE"
+    exit 0
+    ;;
+  -h|--help)
+    sed -n '2,12p' "$0"
+    exit 0
+    ;;
+esac
+
+[ "$(id -u)" -eq 0 ] || { echo "Run as root: sudo $0 [USER]" >&2; exit 1; }
+user="${1:-${SUDO_USER:-}}"
+[ -n "$user" ] || { echo "Say which user runs Nova: sudo $0 USER" >&2; exit 1; }
+id "$user" >/dev/null 2>&1 || { echo "No such user: $user" >&2; exit 1; }
+case "$user" in
+  *[!a-zA-Z0-9._-]*) echo "Unexpected characters in user name: $user" >&2; exit 1 ;;
+esac
+
+mkdir -p "$(dirname "$RULE")"
+tmp="$(mktemp "$RULE.XXXXXX")"
+cat > "$tmp" <<EOF
+// Installed by nova-allow-suspend. Lets "$user" (who runs Nova) suspend without a password,
+// also from its user services. Remove with: sudo nova-allow-suspend --remove
+polkit.addRule(function (action, subject) {
+  if ((action.id == "org.freedesktop.login1.suspend" ||
+       action.id == "org.freedesktop.login1.suspend-multiple-sessions") &&
+      subject.user == "$user") {
+    return polkit.Result.YES;
+  }
+});
+EOF
+chmod 0644 "$tmp"
+mv -f "$tmp" "$RULE"
+echo "Installed $RULE for user $user."
+echo "polkit picks it up immediately. Check with: nova-allow-suspend --check (as $user)"

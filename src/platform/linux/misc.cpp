@@ -60,6 +60,7 @@
 // local includes
 #include "graphics.h"
 #include "misc.h"
+#include "nic.h"
 #include "src/boost_process_compat.h"
 #include "src/config.h"
 #include "src/config_migration.h"
@@ -441,15 +442,23 @@ namespace platf {
       }
     }
 #else
-    // On Linux, read MAC address from sysfs
+    // On Linux, report the physical NIC that receives Wake-on-LAN packets: the wired member behind
+    // a bridge (br0 -> enp7s0), and the primary NIC for tailscale0 or virtual interfaces, which have
+    // no usable MAC of their own.
+    std::string interface_name;
     for (auto pos = ifaddrs.get(); pos != nullptr; pos = pos->ifa_next) {
       if (pos->ifa_addr && address == from_sockaddr(pos->ifa_addr)) {
-        std::ifstream mac_file("/sys/class/net/"s + pos->ifa_name + "/address");
-        if (mac_file.good()) {
-          std::string mac_address;
-          std::getline(mac_file, mac_address);
-          return mac_address;
+        interface_name = pos->ifa_name;
+        break;
+      }
+    }
+    const std::filesystem::path sysfs_net {"/sys/class/net"};
+    if (const auto wol_interface = nic::wol_interface_for(sysfs_net, interface_name)) {
+      if (auto mac = nic::mac_of(sysfs_net, *wol_interface)) {
+        if (*wol_interface != interface_name) {
+          BOOST_LOG(debug) << "Reporting the MAC of "sv << *wol_interface << " for "sv << (interface_name.empty() ? "unknown interface"s : interface_name);
         }
+        return *mac;
       }
     }
 #endif

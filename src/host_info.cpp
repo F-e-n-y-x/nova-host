@@ -27,9 +27,15 @@
 
 // local includes
 #include "config.h"
+#include "host_commands.h"
+#include "host_power.h"
 #include "logging.h"
 #include "process.h"
+#include "secure_files.h"
 #include "video.h"
+#ifdef __linux__
+  #include "platform/linux/nic.h"
+#endif
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_STATIC
@@ -477,6 +483,69 @@ namespace host_info {
       });
     }
 
+    if (probes.check_wake_on_lan) {
+      health_check_t check {.id = "wake-on-lan"};
+      if (probes.wol_interface.empty()) {
+        check.status = health_status_e::warn;
+        check.title = "No wired network card for Wake-on-LAN";
+        check.detail = "Devices can't wake this host from sleep: Nova found no physical network interface.";
+      } else if (!probes.ethtool_found) {
+        check.status = health_status_e::warn;
+        check.title = "Wake-on-LAN state unknown";
+        check.detail = std::format("Install ethtool so Nova can check whether {} ({}) wakes on a magic packet.", probes.wol_interface, probes.wol_mac);
+        check.fix_kind = fix_kind_e::command;
+        check.fix_value = "sudo apt install ethtool";
+      } else if (!probes.wol_supported.has_value() || !probes.wol_enabled.has_value()) {
+        check.status = health_status_e::warn;
+        check.title = "Wake-on-LAN state unknown";
+        check.detail = std::format("The driver of {} doesn't report Wake-on-LAN.", probes.wol_interface);
+      } else if (!*probes.wol_supported) {
+        check.status = health_status_e::warn;
+        check.title = "Network card can't wake the host";
+        check.detail = std::format("{} doesn't support waking on a magic packet.", probes.wol_interface);
+      } else if (!*probes.wol_enabled) {
+        check.status = health_status_e::warn;
+        check.title = "Wake-on-LAN is off";
+        check.detail = std::format("{} ({}) won't wake the host. Turn it on, and make it persistent in NetworkManager or a systemd .link file.", probes.wol_interface, probes.wol_mac);
+        check.fix_kind = fix_kind_e::command;
+        check.fix_value = std::format("sudo ethtool -s {} wol g", probes.wol_interface);
+      } else {
+        check.title = "Wake-on-LAN ready";
+        check.detail = std::format("{} ({}) wakes the host on a magic packet from the local network.", probes.wol_interface, probes.wol_mac);
+      }
+      checks.push_back(std::move(check));
+    }
+
+    if (probes.pcsleep_enabled && !probes.can_suspend.empty()) {
+      health_check_t check {.id = "sleep"};
+      if (probes.can_suspend == "yes") {
+        check.title = "Devices can put the host to sleep";
+        check.detail = "Devices with the Sleep permission can suspend this host.";
+      } else if (probes.can_suspend == "challenge") {
+        check.status = health_status_e::warn;
+        check.title = "Sleep needs a password";
+        check.detail = "The system asks for a password before suspending, so devices can't put the host to sleep. Allow it once with the script shipped with Nova.";
+        check.fix_kind = fix_kind_e::command;
+        check.fix_value = "sudo /usr/share/nova-host/nova-allow-suspend";
+      } else {
+        check.status = health_status_e::warn;
+        check.title = "Sleep isn't available";
+        check.detail = "systemd-logind says this host can't suspend (" + probes.can_suspend + ").";
+      }
+      checks.push_back(std::move(check));
+    }
+
+    if (!probes.exposed_files.empty()) {
+      checks.push_back({
+        .id = "private-files",
+        .status = health_status_e::warn,
+        .title = "Private files are readable by other users",
+        .detail = std::format("{} and {} more are not owner-only; Nova tightens them at start-up.", probes.exposed_files.front(), probes.exposed_files.size() - 1),
+        .fix_kind = fix_kind_e::command,
+        .fix_value = "systemctl --user restart app-io.github.f_e_n_y_x.NovaHost.service",
+      });
+    }
+
     if (probes.origin_web_ui_allowed == "wan") {
       checks.push_back({
         .id = "web-ui-exposure",
@@ -524,7 +593,32 @@ namespace host_info {
     if (const auto modeset = read_first_line("/sys/module/nvidia_drm/parameters/modeset"); !modeset.empty()) {
       probes.nvidia_drm_modeset = modeset == "Y" || modeset == "1";
     }
+
+    probes.check_wake_on_lan = true;
+    const std::filesystem::path sysfs_net {"/sys/class/net"};
+    if (const auto iface = platf::nic::primary_physical_interface(sysfs_net)) {
+      probes.wol_interface = *iface;
+      probes.wol_mac = platf::nic::mac_of(sysfs_net, *iface).value_or("");
+      probes.ethtool_found = on_path("ethtool");
+      if (probes.ethtool_found) {
+        // Read-only query; `ethtool <iface>` reads Wake-on over netlink without privileges.
+        const auto result = host_commands::run_sync({.id = "ethtool", .name = "ethtool", .cmd = "ethtool " + *iface, .timeout = 3s}, host_commands::build_env({{"LC_ALL", "C"}}));
+        if (const auto wol = platf::nic::parse_ethtool_wol(result.output)) {
+          probes.wol_supported = wol->magic_supported();
+          probes.wol_enabled = wol->magic_enabled();
+        }
+      }
+    }
+    probes.pcsleep_enabled = config::sunshine.pcsleep_enabled;
+    if (probes.pcsleep_enabled) {
+      probes.can_suspend = host_power::can_suspend();
+    }
 #endif
+    for (const auto &path : secure_files::private_paths()) {
+      if (secure_files::is_exposed(path)) {
+        probes.exposed_files.push_back(path.filename().string());
+      }
+    }
     return probes;
   }
 
