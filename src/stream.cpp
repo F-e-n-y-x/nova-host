@@ -572,6 +572,7 @@ namespace stream {
     safe::signal_t controlEnd;  ///< Signal raised when the control channel exits.
 
     std::atomic<session::state_e> state;  ///< Current lifecycle state observed by stream workers.
+    std::atomic_bool video_pinged {false};  ///< Nova: the client's first video ping arrived (the stream really started).
   };
 
   /**
@@ -2338,6 +2339,11 @@ namespace stream {
    * @param timeout Maximum time to wait for the operation.
    * @return Network operation status.
    */
+  /**
+   * @brief How often the wait for a client's first ping checks whether its session was stopped.
+   */
+  constexpr auto PING_WAIT_SLICE = 100ms;
+
   int recv_ping(session_t *session, decltype(broadcast)::ptr_t ref, socket_e type, std::string_view expected_payload, udp::endpoint &peer, std::chrono::milliseconds timeout) {
     auto messages = std::make_shared<message_queue_t::element_type>(30);
     av_session_id_t session_id = std::string {expected_payload};
@@ -2362,10 +2368,23 @@ namespace stream {
     auto current_time = start_time;
 
     while (current_time - start_time < config::stream.ping_timeout) {
+      // Nova: a session stopped before its first ping (the client disconnected mid-start, or a
+      // new /resume from the same device replaced it) must end now, not after the full ping
+      // timeout: until it ends, session_count() blocks joining it and the device's reconnect
+      // is refused as "another device is streaming".
+      if (session->shutdown_event->peek()) {
+        BOOST_LOG(info) << "Session stopped before the client's first ping"sv;
+        return -1;
+      }
       auto delta_time = current_time - start_time;
+      const auto slice = std::min<std::chrono::steady_clock::duration>(config::stream.ping_timeout - delta_time, PING_WAIT_SLICE);
 
-      auto msg_opt = messages->pop(config::stream.ping_timeout - delta_time);
+      auto msg_opt = messages->pop(slice);
       if (!msg_opt) {
+        if (messages->running()) {
+          current_time = std::chrono::steady_clock::now();
+          continue;
+        }
         break;
       }
 
@@ -2409,6 +2428,7 @@ namespace stream {
     if (error < 0) {
       return;
     }
+    session->video_pinged.store(true, std::memory_order_release);
 
     // Enable local prioritization and QoS tagging on video traffic if requested by the client
     auto address = session->video.peer.address();
@@ -2460,6 +2480,10 @@ namespace stream {
      */
     const std::string &client_cert(session_t &session) {
       return session.client_cert;
+    }
+
+    bool streaming(session_t &session) {
+      return session.video_pinged.load(std::memory_order_acquire) && session.state.load(std::memory_order_acquire) != state_e::STOPPING;
     }
 
     client_permissions::mask_t permissions(session_t &session) {

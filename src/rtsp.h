@@ -50,6 +50,30 @@ namespace rtsp_stream {
   };
 
   /**
+   * @brief End a device's sessions that haven't started streaming yet (no first ping).
+   *
+   * Called on that device's /launch and /resume: it has abandoned them. Streaming sessions and the
+   * device's virtual gamepads are left alone.
+   *
+   * @param cert The device's client certificate (PEM); empty does nothing.
+   * @return How many sessions were ended.
+   */
+  int end_stale_sessions_for_cert(std::string_view cert);
+
+  /**
+   * @brief Whether a new launch session replaces the one still waiting for its RTSP handshake.
+   *
+   * Only one launch session can wait at a time. A second device must not take over the first one's
+   * slot, but the same device (same client certificate, or the same unique id when it has none)
+   * asking again has abandoned its pending attempt.
+   *
+   * @param pending The launch session waiting now.
+   * @param next The one just prepared by /launch or /resume.
+   * @return True when next should replace pending.
+   */
+  bool replaces_pending_launch(const launch_session_t &pending, const launch_session_t &next);
+
+  /**
    * @brief Queue a launch session until the RTSP client connects.
    *
    * @param launch_session Session state prepared by the GameStream launch handler.

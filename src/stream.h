@@ -97,6 +97,13 @@ namespace stream {
      */
     const std::string &client_cert(session_t &session);
     /**
+     * @brief Whether the session's client is streaming (its first video ping arrived and it isn't stopping).
+     *
+     * @param session Stream session.
+     * @return False for a session still waiting for its client, or one that is ending.
+     */
+    bool streaming(session_t &session);
+    /**
      * @brief Current permissions of a stream session's client.
      *
      * @param session Active streaming session.

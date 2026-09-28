@@ -595,9 +595,17 @@ namespace rtsp_stream {
      * @param launch_session Streaming session information.
      */
     void session_raise(std::shared_ptr<launch_session_t> launch_session) {
-      // If a launch event is still pending, don't overwrite it.
-      if (launch_event.view(0s)) {
-        return;
+      // If a launch event is still pending, don't overwrite it; unless the same device sent this
+      // one. A device that asks again has given up on its pending session (Nebula's live resolution
+      // switch abandons an attempt that timed out and reconnects), and its RTSP handshake uses the
+      // new keys, so keeping the old session fails that handshake with a bad message tag.
+      if (auto pending = launch_event.view(0s)) {
+        if (!replaces_pending_launch(*pending, *launch_session)) {
+          return;
+        }
+        BOOST_LOG(info) << "RTSP: the same device asked again; replacing its pending launch session"sv;
+        raised_timer.cancel();
+        launch_event.pop(0s);
       }
 
       // Raise the new launch session to prepare for the RTSP handshake
@@ -665,6 +673,29 @@ namespace rtsp_stream {
           i++;
         }
       }
+    }
+
+    /**
+     * @brief End the certificate's sessions that aren't streaming (no first ping yet, or stopping).
+     *
+     * @param cert Certificate data or object used by the operation.
+     * @return How many sessions were ended.
+     */
+    int clear_stale_by_cert(std::string_view cert) {
+      int ended = 0;
+      auto lg = _session_slots.lock();
+      for (auto i = _session_slots->begin(); i != _session_slots->end();) {
+        auto &slot = *(*i);
+        if (stream::session::client_cert(slot) == cert && !stream::session::streaming(slot)) {
+          stream::session::stop(slot);
+          stream::session::join(slot);
+          i = _session_slots->erase(i);
+          ++ended;
+        } else {
+          i++;
+        }
+      }
+      return ended;
     }
 
     /**
@@ -797,6 +828,13 @@ namespace rtsp_stream {
   /**
    * @brief Queue a launch session until the RTSP client connects.
    */
+  bool replaces_pending_launch(const launch_session_t &pending, const launch_session_t &next) {
+    if (!pending.client_cert.empty() || !next.client_cert.empty()) {
+      return pending.client_cert == next.client_cert;
+    }
+    return !pending.unique_id.empty() && pending.unique_id == next.unique_id;
+  }
+
   void launch_session_raise(std::shared_ptr<launch_session_t> launch_session) {
     server.session_raise(std::move(launch_session));
   }
@@ -815,6 +853,17 @@ namespace rtsp_stream {
   void terminate_sessions() {
     server.clear(true);
     input::terminate_gamepads();
+  }
+
+  int end_stale_sessions_for_cert(std::string_view cert) {
+    if (cert.empty()) {
+      return 0;
+    }
+    const int ended = server.clear_stale_by_cert(cert);
+    if (ended > 0) {
+      BOOST_LOG(info) << "Ended "sv << ended << " session(s) this device abandoned before they started streaming"sv;
+    }
+    return ended;
   }
 
   /**

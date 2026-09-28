@@ -1831,6 +1831,7 @@ namespace nvhttp {
     }
 
     host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
+    rtsp_stream::end_stale_sessions_for_cert(verified_peer_for(request).cert);
     auto launch_session = make_launch_session(host_audio, args, verified_peer_for(request));
 
     // Nova: switch the display to this client's mode before the probe and prep commands see it.
@@ -1991,6 +1992,11 @@ namespace nvhttp {
 
       return;
     }
+
+    // Nova: a device asking to resume has given up on any session it still has here (one that
+    // never connected, or that its client already dropped while starting). Waiting for that
+    // session's ping timeout would refuse this reconnect as "another device is streaming".
+    rtsp_stream::end_stale_sessions_for_cert(verified_peer_for(request).cert);
 
     // Newer Moonlight clients send localAudioPlayMode on /resume too,
     // so we should use it if it's present in the args and there are
