@@ -137,6 +137,9 @@ namespace config {
     std::string capture_pacing;  ///< Nova: "timer" (default) or "vblank" (present-paced KMS capture).
     std::string display_follow;  ///< Nova: "virtual" (default) follows the client mode on every connect; "off" disables it.
     std::string display_follow_cmd;  ///< Nova: command run with "set"/"restore" to switch the display to the client mode.
+    std::string virtual_display;  ///< Nova: "headless_x" (default) gives Virtual display streams their own X server; "off" sends them through display_follow_cmd.
+    std::string virtual_display_wm;  ///< Nova: window manager started on the virtual display ("openbox"), empty for none.
+    int virtual_display_fps_cap;  ///< Nova: frame cap for apps on the virtual display: 0 = the client's frame rate, -1 = none, >0 = that rate.
     std::string encoder;  ///< Encoder backend name selected by configuration.
     std::string adapter_name;  ///< Display adapter name selected in configuration.
     std::string output_name;  ///< Display output name selected in configuration.

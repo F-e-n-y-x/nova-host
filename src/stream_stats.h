@@ -80,6 +80,10 @@ namespace stream_stats {
     int fps_requested = 0;  ///< Frame rate the client requested.
     int video_format = 0;  ///< 0 = H.264, 1 = HEVC, 2 = AV1.
     bool hdr = false;  ///< Whether the stream is HDR.
+    std::string virtual_display;  ///< Nova virtual display the stream captures (":20"), empty for the desktop.
+    int virtual_width = 0;  ///< Virtual display width when the stream started.
+    int virtual_height = 0;  ///< Virtual display height when the stream started.
+    int virtual_fps = 0;  ///< Frame rate the virtual display was created for.
   };
 
   /**

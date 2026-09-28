@@ -13,7 +13,9 @@
 #endif
 
 // standard includes
+#include <map>
 #include <optional>
+#include <string>
 #include <unordered_map>
 
 // local includes
@@ -165,6 +167,7 @@ namespace proc {
     std::string _last_error;
 
     boost::process::v1::environment _env;
+    std::map<std::string, std::optional<std::string>> _vd_base_env;  ///< Desktop values of the variables a virtual-display launch overrides.
     std::vector<ctx_t> _apps;
     ctx_t _app;
     std::chrono::steady_clock::time_point _app_launch_time;

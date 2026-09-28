@@ -1613,6 +1613,8 @@ namespace nvhttp {
 
       if (revert_display_configuration) {
         display_device::revert_configuration();
+        // Nova: a virtual display started for this launch has no stream to belong to.
+        display_follow::app_closed();
       }
     });
 
@@ -1895,6 +1897,9 @@ namespace nvhttp {
 
     if (proc::proc.running() > 0) {
       proc::proc.terminate();
+    }
+    if (rtsp_stream::session_count() == 0) {
+      display_follow::app_closed();  // the sessions still ending stop it themselves otherwise
     }
 
     // The config needs to be reverted regardless of whether "proc::proc.terminate()" was called or not.

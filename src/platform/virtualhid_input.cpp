@@ -457,14 +457,27 @@ namespace platf::virtualhid {
     refresh_mouse();
   }
 
+  void input_context_t::set_seat(const std::string &suffix, bool blocked) {
+    if (suffix == name_suffix && blocked == devices_blocked) {
+      return;
+    }
+    name_suffix = suffix;
+    devices_blocked = blocked;
+    ++seat_generation;
+    BOOST_LOG(info) << "Input devices: "sv << (blocked ? "disabled while the virtual display runs"sv : suffix.empty() ? "back on the desktop"sv : "moved to the virtual display"sv);
+    refresh_keyboard();
+    refresh_mouse();
+  }
+
   void input_context_t::refresh_keyboard() {
     keyboard.reset();
-    if (!runtime || !runtime->capabilities().supports_keyboard) {
+    if (devices_blocked || !runtime || !runtime->capabilities().supports_keyboard) {
       return;
     }
 
     lvh::CreateKeyboardOptions options;
     options.profile = lvh::profiles::keyboard();
+    options.profile.name += name_suffix;
     options.stable_id = "sunshine-keyboard";
     auto created = runtime->create_keyboard(options);
     if (created) {
@@ -476,12 +489,13 @@ namespace platf::virtualhid {
 
   void input_context_t::refresh_mouse() {
     mouse.reset();
-    if (!runtime || !runtime->capabilities().supports_mouse) {
+    if (devices_blocked || !runtime || !runtime->capabilities().supports_mouse) {
       return;
     }
 
     lvh::CreateMouseOptions options;
     options.profile = lvh::profiles::mouse();
+    options.profile.name += name_suffix;
     options.stable_id = "sunshine-mouse";
     auto created = runtime->create_mouse(options);
     if (created) {
@@ -492,20 +506,36 @@ namespace platf::virtualhid {
   }
 
   client_context_t::client_context_t(input_context_t &input):
-      global {&input} {}
+      global {&input},
+      seat_generation {input.seat_generation} {}
+
+  void client_context_t::sync_seat() {
+    if (seat_generation == global->seat_generation) {
+      return;
+    }
+    seat_generation = global->seat_generation;
+    touch.reset();
+    pen.reset();
+    touch_attempted = false;
+    pen_attempted = false;
+    active_touches.clear();
+    pressed_pen_buttons.clear();
+  }
 
   bool client_context_t::ensure_touch() {
+    sync_seat();
     if (touch || touch_attempted) {
       return touch != nullptr;
     }
 
     touch_attempted = true;
-    if (!global->runtime || !global->runtime->capabilities().supports_touchscreen) {
+    if (global->devices_blocked || !global->runtime || !global->runtime->capabilities().supports_touchscreen) {
       return false;
     }
 
     lvh::CreateTouchscreenOptions options;
     options.profile = lvh::profiles::touchscreen();
+    options.profile.name += global->name_suffix;
     options.stable_id = "sunshine-touchscreen";
     auto created = global->runtime->create_touchscreen(options);
     if (created) {
@@ -517,17 +547,19 @@ namespace platf::virtualhid {
   }
 
   bool client_context_t::ensure_pen() {
+    sync_seat();
     if (pen || pen_attempted) {
       return pen != nullptr;
     }
 
     pen_attempted = true;
-    if (!global->runtime || !global->runtime->capabilities().supports_pen_tablet) {
+    if (global->devices_blocked || !global->runtime || !global->runtime->capabilities().supports_pen_tablet) {
       return false;
     }
 
     lvh::CreatePenTabletOptions options;
     options.profile = lvh::profiles::pen_tablet();
+    options.profile.name += global->name_suffix;
     options.stable_id = "sunshine-pen-tablet";
     auto created = global->runtime->create_pen_tablet(options);
     if (created) {
@@ -868,6 +900,7 @@ namespace platf::virtualhid {
     // Only a contact that lands or hovers creates the touchscreen; ending events have nothing to end.
     const bool places_contact = touch.eventType == LI_TOUCH_EVENT_DOWN || touch.eventType == LI_TOUCH_EVENT_MOVE ||
                                 touch.eventType == LI_TOUCH_EVENT_HOVER;
+    context.sync_seat();
     if (!(places_contact ? context.ensure_touch() : context.touch != nullptr)) {
       return;
     }
@@ -914,6 +947,7 @@ namespace platf::virtualhid {
   void pen_update(client_context_t &context, const touch_port_t &touch_port, const pen_input_t &pen) {
     const bool places_tool = pen.eventType == LI_TOUCH_EVENT_DOWN || pen.eventType == LI_TOUCH_EVENT_MOVE ||
                              pen.eventType == LI_TOUCH_EVENT_HOVER;
+    context.sync_seat();
     if (!(places_tool ? context.ensure_pen() : context.pen != nullptr)) {
       return;
     }

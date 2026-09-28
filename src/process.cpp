@@ -25,6 +25,7 @@
 #include "config.h"
 #include "crypto.h"
 #include "display_device.h"
+#include "display_follow.h"
 #include "input.h"
 #include "logging.h"
 #include "nova_compat.h"
@@ -32,6 +33,7 @@
 #include "process.h"
 #include "system_tray.h"
 #include "utility.h"
+#include "virtual_display.h"
 
 #ifdef _WIN32
   // from_utf8() string conversion function
@@ -226,6 +228,32 @@ namespace proc {
     }
     for (const auto &[key, value] : nova_compat::build_env(_app.name, _app.steam_appid, _app.compat, config::library.proton_auto_update)) {
       _env[key] = value;
+    }
+
+    // Nova virtual display: the app gets DISPLAY/XAUTHORITY of the virtual display, PULSE_SINK and a
+    // frame cap. Put the desktop values back first so a desktop launch never inherits them.
+    if (_vd_base_env.empty()) {
+      for (const auto &key : virtual_display::app_env_keys()) {
+        const auto it = _env.find(key);
+        _vd_base_env.emplace(key, it == _env.end() ? std::nullopt : std::make_optional(it->to_string()));
+      }
+    }
+    for (const auto &[key, value] : _vd_base_env) {
+      if (value) {
+        _env[key] = *value;
+      } else {
+        _env.erase(key);
+      }
+    }
+    {
+      const auto base_preload = _vd_base_env["LD_PRELOAD"].value_or(std::string {});
+      const auto vd_env = display_follow::app_env(launch_session->surround_info & 65535, launch_session->host_audio, base_preload);
+      for (const auto &[key, value] : vd_env) {
+        _env[key] = value;
+      }
+      if (!vd_env.empty()) {
+        BOOST_LOG(info) << "Launching ["sv << _app.name << "] on virtual display "sv << _env["DISPLAY"].to_string();
+      }
     }
 
     // Fail the launch with a clear reason instead of streaming a desktop while the game silently exits.

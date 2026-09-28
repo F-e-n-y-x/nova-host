@@ -46,10 +46,26 @@ namespace platf::virtualhid {
      */
     void refresh_mouse();
 
+    /**
+     * @brief Rename (or disable) Nova's keyboard, mouse, touch and pen for a display seat.
+     *
+     * While a Nova virtual display runs, the devices carry a name suffix that the packaged udev
+     * rule maps to `ID_SEAT=seat-nova`, so the desktop's X server ignores them and the virtual
+     * one takes them. The shared keyboard and mouse are recreated when the seat changes; per-client
+     * touch and pen devices are recreated on their next use.
+     *
+     * @param suffix Name suffix, empty for the desktop.
+     * @param blocked True to create no keyboard, mouse, touch or pen at all (the seat rule is missing).
+     */
+    void set_seat(const std::string &suffix, bool blocked);
+
     std::unique_ptr<lvh::Runtime> runtime;  ///< libvirtualhid runtime.
     std::unique_ptr<lvh::Keyboard> keyboard;  ///< Shared virtual keyboard.
     std::unique_ptr<lvh::Mouse> mouse;  ///< Shared virtual mouse.
     std::vector<std::shared_ptr<struct gamepad_context_t>> gamepads {static_cast<std::size_t>(MAX_GAMEPADS)};  ///< Virtual gamepad slots.
+    std::string name_suffix;  ///< Suffix of the keyboard, mouse, touch and pen names (see set_seat()).
+    bool devices_blocked = false;  ///< No keyboard, mouse, touch or pen while true (see set_seat()).
+    unsigned seat_generation = 0;  ///< Bumped on every seat change so clients recreate touch and pen.
   };
 
   /**
@@ -83,7 +99,13 @@ namespace platf::virtualhid {
      */
     bool ensure_pen();
 
+    /**
+     * @brief Drop touch and pen devices created for a previous seat.
+     */
+    void sync_seat();
+
     input_context_t *global = nullptr;  ///< Shared global input context.
+    unsigned seat_generation = 0;  ///< Seat generation the touch and pen devices were created for.
     std::unique_ptr<lvh::Touchscreen> touch;  ///< Per-client touchscreen, created on first touch.
     std::unique_ptr<lvh::PenTablet> pen;  ///< Per-client pen tablet, created on first pen input.
     bool touch_attempted = false;  ///< Whether touchscreen creation was already tried.

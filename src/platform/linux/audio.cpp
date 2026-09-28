@@ -675,6 +675,12 @@ namespace platf {
        * @param sink Audio sink name to route or capture.
        * @return Status from updating sink.
        */
+      int set_capture_sink(const std::string &sink) override {
+        // microphone() captures requested_sink's monitor; the default sink is not touched.
+        requested_sink = sink;
+        return 0;
+      }
+
       int set_sink(const std::string &sink) override {
         auto alarm = safe::make_alarm<int>();
 

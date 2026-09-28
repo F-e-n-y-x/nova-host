@@ -92,6 +92,22 @@ namespace input {
   void refresh_virtual_input();
 
   /**
+   * @brief Which X server Nova's keyboard, mouse, touch and pen belong to.
+   */
+  enum class seat_e {
+    desktop,  ///< The user's desktop (normal names).
+    virtual_display,  ///< Nova's virtual display (names carry " (Nova VD)", seated by the udev rule).
+    blocked,  ///< No devices: a virtual display runs but the seat rule is missing, so they would reach the desktop.
+  };
+
+  /**
+   * @brief Move Nova's input devices to a seat; serialized with streamed input.
+   *
+   * @param seat Target seat.
+   */
+  void set_virtual_display_seat(seat_e seat);
+
+  /**
    * @brief Allocate and initialize platform input state for a stream.
    *
    * @param mail Mailbox used to exchange messages with worker threads.

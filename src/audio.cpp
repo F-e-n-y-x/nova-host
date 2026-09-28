@@ -11,6 +11,7 @@
 // local includes
 #include "audio.h"
 #include "config.h"
+#include "display_follow.h"
 #include "globals.h"
 #include "logging.h"
 #include "platform/common.h"
@@ -192,6 +193,10 @@ namespace audio {
       sink = &config::audio.sink;
     }
 
+    // Nova virtual display: the app plays to Nova's sink through PULSE_SINK, so capture that sink
+    // without making it the default; the desktop's own audio stays on the desk speakers.
+    const bool virtual_display_audio = display_follow::virtual_target().has_value() && !config.flags[config_t::HOST_AUDIO] && ref->sink.null;
+
     // Prefer the virtual sink if host playback is disabled or there's no other sink
     if (ref->sink.null && (!config.flags[config_t::HOST_AUDIO] || sink->empty())) {
       auto &null = *ref->sink.null;
@@ -208,8 +213,14 @@ namespace audio {
       }
     }
 
+    if (virtual_display_audio) {
+      BOOST_LOG(info) << "Audio: capturing ["sv << *sink << "] for the virtual display, the default sink is left alone"sv;
+      if (control->set_capture_sink(*sink)) {
+        return;
+      }
+    }
     // Only the first to start a session may change the default sink
-    if (!ref->sink_flag->exchange(true, std::memory_order_acquire)) {
+    else if (!ref->sink_flag->exchange(true, std::memory_order_acquire)) {
       // If the selected sink is different than the current one, change sinks.
       ref->restore_sink = ref->sink.host != *sink;
       if (ref->restore_sink) {

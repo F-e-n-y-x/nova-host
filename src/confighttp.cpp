@@ -43,6 +43,7 @@
 #include "confighttp.h"
 #include "crypto.h"
 #include "display_device.h"
+#include "display_follow.h"
 #include "file_handler.h"
 #include "globals.h"
 #include "host_info.h"
@@ -1276,6 +1277,9 @@ namespace confighttp {
     print_req(request);
 
     proc::proc.terminate();
+    if (rtsp_stream::session_count() == 0) {
+      display_follow::app_closed();
+    }
 
     nlohmann::json output_tree;
     output_tree["status"] = true;

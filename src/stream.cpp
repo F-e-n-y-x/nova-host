@@ -2627,6 +2627,12 @@ namespace stream {
       session->stats_info.fps_requested = config.monitor.framerate;
       session->stats_info.video_format = config.monitor.videoFormat;
       session->stats_info.hdr = config.monitor.dynamicRange > 0;
+      if (const auto vd = display_follow::virtual_target()) {
+        session->stats_info.virtual_display = vd->display;
+        session->stats_info.virtual_width = vd->width;
+        session->stats_info.virtual_height = vd->height;
+        session->stats_info.virtual_fps = vd->fps;
+      }
 
       session->control.connect_data = launch_session.control_connect_data;
       session->control.feedback_queue = mail->queue<platf::gamepad_feedback_msg_t>(mail::gamepad_feedback);

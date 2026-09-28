@@ -847,6 +847,16 @@ namespace platf {
     virtual int set_sink(const std::string &sink) = 0;
 
     /**
+     * @brief Capture from a sink without making it the default output (Nova virtual display).
+     *
+     * @param sink Audio sink whose monitor is captured.
+     * @return 0 on success. The default implementation switches the default sink, like set_sink().
+     */
+    virtual int set_capture_sink(const std::string &sink) {
+      return set_sink(sink);
+    }
+
+    /**
      * @brief Create a microphone capture stream for the requested layout.
      *
      * @param mapping Opus channel mapping table for the requested layout.

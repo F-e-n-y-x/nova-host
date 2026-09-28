@@ -525,6 +525,9 @@ int main(int argc, char *argv[]) {
   configThread.join();
   rtspThread.join();
 
+  // Nova: stop a virtual display (and the app on it) before the input task pool goes away.
+  display_follow::shutdown();
+
   task_pool.stop();
   task_pool.join();
 

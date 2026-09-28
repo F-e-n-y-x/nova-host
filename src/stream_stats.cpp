@@ -524,6 +524,18 @@ namespace stream_stats {
     j["fps_actual"] = s.fps_actual;
     j["codec"] = codec_name(s.info.video_format);
     j["hdr"] = s.info.hdr;
+    // Nova: where the stream comes from: the desktop, or a virtual display made for this device.
+    if (s.info.virtual_display.empty()) {
+      j["display"] = {{"kind", "desktop"}};
+    } else {
+      j["display"] = {
+        {"kind", "virtual"},
+        {"name", s.info.virtual_display},
+        {"w", s.info.virtual_width},
+        {"h", s.info.virtual_height},
+        {"fps", s.info.virtual_fps},
+      };
+    }
     j["bitrate_kbps"] = s.bitrate_kbps;
     j["latency_ms"] = {
       {"capture", s.capture.avg},
