@@ -1,6 +1,7 @@
 <script setup>
 /**
- * Access for one device: a preset segmented control over the six permission switches.
+ * Access for one device: a preset segmented control over the permission switches. The flags
+ * that control the PC itself (sleep, host commands) sit in their own group below the stream ones.
  * Controlled: v-model is the flag object (flag name → boolean); picking a preset sets the flags,
  * and the preset shown is whatever the flags match ("Custom" when none does).
  */
@@ -8,11 +9,21 @@ import { computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import NvSegmentedControl from '../components/NvSegmentedControl.vue'
 import NvSwitch from '../components/NvSwitch.vue'
-import { PERMISSION_FLAGS, PERMISSION_PRESETS, flagsForPreset, presetForFlags } from './format'
+import { HOST_CONTROL_FLAGS, PERMISSION_FLAGS, PERMISSION_PRESETS, flagsForPreset, presetForFlags } from './format'
 
 const flags = defineModel({ type: Object, required: true })
-defineProps({
+const props = defineProps({
   disabled: { type: Boolean, default: false },
+  /** Names of the host commands defined on this PC; null while unknown. */
+  commandNames: { type: Array, default: null },
+})
+
+const streamFlags = PERMISSION_FLAGS.filter((f) => !HOST_CONTROL_FLAGS.includes(f))
+const commandsHint = computed(() => {
+  if (!props.commandNames) return ''
+  return props.commandNames.length
+    ? t('nova.devices.perm_host_commands_list', { names: props.commandNames.join(', ') })
+    : t('nova.devices.perm_host_commands_none')
 })
 
 const { t } = useI18n()
@@ -47,10 +58,24 @@ function setFlag(flag, value) {
                         :disabled="disabled" class="nv-perm__presets" @update:model-value="choosePreset" />
     <p class="nv-perm__preset-desc" aria-live="polite">{{ t(`nova.devices.preset_${preset}_desc`) }}</p>
     <ul class="nv-perm__flags">
-      <li v-for="flag in PERMISSION_FLAGS" :key="flag" class="nv-perm__flag">
+      <li v-for="flag in streamFlags" :key="flag" class="nv-perm__flag">
         <span class="nv-perm__text">
           <span :id="`${id}-${flag}`" class="nv-perm__label">{{ t(`nova.devices.perm_${flag}`) }}</span>
           <span :id="`${id}-${flag}-desc`" class="nv-perm__desc">{{ t(`nova.devices.perm_${flag}_desc`) }}</span>
+        </span>
+        <NvSwitch :model-value="flags[flag]" :labelledby="`${id}-${flag}`" :describedby="`${id}-${flag}-desc`"
+                  :disabled="disabled" @update:model-value="(value) => setFlag(flag, value)" />
+      </li>
+    </ul>
+    <h3 :id="`${id}-host`" class="nv-perm__group">{{ t('nova.devices.perm_group_host') }}</h3>
+    <ul class="nv-perm__flags" :aria-labelledby="`${id}-host`">
+      <li v-for="flag in HOST_CONTROL_FLAGS" :key="flag" class="nv-perm__flag">
+        <span class="nv-perm__text">
+          <span :id="`${id}-${flag}`" class="nv-perm__label">{{ t(`nova.devices.perm_${flag}`) }}</span>
+          <span :id="`${id}-${flag}-desc`" class="nv-perm__desc">
+            {{ t(`nova.devices.perm_${flag}_desc`) }}
+            <template v-if="flag === 'host_commands' && commandsHint"><br>{{ commandsHint }}</template>
+          </span>
         </span>
         <NvSwitch :model-value="flags[flag]" :labelledby="`${id}-${flag}`" :describedby="`${id}-${flag}-desc`"
                   :disabled="disabled" @update:model-value="(value) => setFlag(flag, value)" />
@@ -78,6 +103,15 @@ function setFlag(flag, value) {
   .nv-perm__preset-desc {
     margin: 0 0 var(--nv-space-1);
     font-size: var(--nv-text-xs);
+    color: var(--nv-text-secondary);
+  }
+
+  .nv-perm__group {
+    margin: var(--nv-space-2) 0 0;
+    font-size: var(--nv-text-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     color: var(--nv-text-secondary);
   }
 

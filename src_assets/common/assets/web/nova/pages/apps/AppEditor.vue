@@ -37,6 +37,7 @@ import AppMetadataPanel from './AppMetadataPanel.vue'
 import AppArtworkPanel from './AppArtworkPanel.vue'
 import PathField from './PathField.vue'
 import PrepCommandList from './PrepCommandList.vue'
+import HostCommandsEditor from '../../../configs/components/HostCommandsEditor.vue'
 import DetachedCommandList from './DetachedCommandList.vue'
 import EnvVarsReference from './EnvVarsReference.vue'
 import FileBrowserDialog from './FileBrowserDialog.vue'
@@ -58,7 +59,7 @@ const emit = defineEmits(['saved', 'close', 'delete', 'artwork-applied'])
 const { t } = useI18n()
 
 /** Field ids, in form order, for focusing the first error. */
-const FIELD_IDS = { name: 'nv-app-name', exitTimeout: 'nv-app-exit-timeout' }
+const FIELD_IDS = { name: 'nv-app-name', exitTimeout: 'nv-app-exit-timeout', menuCmd: 'nv-editor-hostcmd' }
 
 const form = ref(newAppForm())
 const initial = shallowRef('')
@@ -391,6 +392,13 @@ defineExpose({ isDirty, askDiscard, openArtwork })
           </NvSettingRow>
         </div>
         <PrepCommandList v-model="form['prep-cmd']" :platform="platform" @browse="browsePrep" />
+      </section>
+
+      <section v-if="platform === 'linux'" class="nv-editor__section" aria-labelledby="nv-editor-hostcmd">
+        <h3 id="nv-editor-hostcmd" class="nv-editor__heading" tabindex="-1">{{ t('nova.apps.section_host_commands') }}</h3>
+        <p class="nv-editor__desc">{{ t('nova.apps.host_commands_desc') }}</p>
+        <NvAlert v-if="errors.menuCmd" variant="danger">{{ t(errors.menuCmd) }}</NvAlert>
+        <HostCommandsEditor v-model="form['menu-cmd']" :app-index="isNew ? null : index" />
       </section>
 
       <section v-if="!isWindows && form['nova-compat']" class="nv-editor__section" aria-labelledby="nv-editor-compat">

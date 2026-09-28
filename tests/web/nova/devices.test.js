@@ -8,11 +8,11 @@ import Devices from '../../../src_assets/common/assets/web/nova/pages/Devices.vu
 import PermissionEditor from '../../../src_assets/common/assets/web/nova/devices/PermissionEditor.vue'
 import { toasts } from '../../../src_assets/common/assets/web/nova/toast.js'
 import {
-  filterDevices, isValidDeviceName, permissionPreset, relativeTime, shortId, sortDevices,
+  filterDevices, isValidDeviceName, permissionFlags, permissionPreset, presetForFlags, relativeTime, shortId, sortDevices,
 } from '../../../src_assets/common/assets/web/nova/devices/format.js'
 import { mountNova } from './helpers.js'
 
-const FULL = { input_keyboard: true, input_mouse: true, input_controller: true, input_touch_pen: true, clipboard: true, launch_apps: true, preset: 'full' }
+const FULL = { input_keyboard: true, input_mouse: true, input_controller: true, input_touch_pen: true, clipboard: true, launch_apps: true, power: false, host_commands: false, preset: 'standard' }
 
 function device(overrides = {}) {
   return { name: 'Pixel 9 Pro', uuid: 'AAAAAAAA-1111-2222-3333-BBBBBBBBBBBB', enabled: true, permissions: FULL, paired_at: 1790000000, last_connected_at: null, connected: false, ...overrides }
@@ -76,7 +76,7 @@ describe('device formatting', () => {
     expect(isValidDeviceName(' padded')).toBe(false)
     expect(isValidDeviceName('a'.repeat(65))).toBe(false)
     expect(isValidDeviceName('tab\tname')).toBe(false)
-    expect(permissionPreset(undefined)).toBe('full')
+    expect(permissionPreset(undefined)).toBe('standard')
     expect(permissionPreset({ preset: 'weird' })).toBe('custom')
   })
 
@@ -90,30 +90,54 @@ describe('device formatting', () => {
 
 describe('PermissionEditor', () => {
   it('applies a preset or a single flag and shows which preset the flags match', async () => {
-    const { input_keyboard, input_mouse, input_controller, input_touch_pen, clipboard, launch_apps } = FULL
-    let flags = { input_keyboard, input_mouse, input_controller, input_touch_pen, clipboard, launch_apps }
+    const { preset, ...start } = FULL
+    let flags = { ...start }
     const wrapper = mountNova(PermissionEditor, {
       props: { modelValue: flags, 'onUpdate:modelValue': (v) => { flags = v; wrapper.setProps({ modelValue: v }) } },
     })
     const buttons = () => wrapper.findAll('.nv-seg__option')
-    expect(buttons().map((b) => b.text())).toEqual(['Full access', 'Play only', 'View only'])
-    expect(buttons()[0].attributes('aria-pressed')).toBe('true')
+    expect(buttons().map((b) => b.text())).toEqual(['Full control', 'Standard', 'Play only', 'View only'])
+    expect(buttons()[1].attributes('aria-pressed')).toBe('true')
 
-    await buttons()[2].trigger('click')
+    await buttons()[3].trigger('click')
     await flushPromises()
     expect(flags.input_keyboard).toBe(false)
     expect(Object.values(flags).every((v) => v === false)).toBe(true)
-    expect(buttons()[2].attributes('aria-pressed')).toBe('true')
+    expect(buttons()[3].attributes('aria-pressed')).toBe('true')
 
-    await buttons()[0].trigger('click')
+    await buttons()[1].trigger('click')
     await flushPromises()
     const switches = wrapper.findAll('[role="switch"]')
-    expect(switches).toHaveLength(6)
+    expect(switches).toHaveLength(8)
     await switches[4].trigger('click') // clipboard off → matches "play"
     await flushPromises()
     expect(flags.clipboard).toBe(false)
-    expect(buttons()[1].attributes('aria-pressed')).toBe('true')
+    expect(buttons()[2].attributes('aria-pressed')).toBe('true')
+
+    await buttons()[0].trigger('click') // full control turns on sleep and host commands too
+    await flushPromises()
+    expect(flags.power).toBe(true)
+    expect(flags.host_commands).toBe(true)
     wrapper.unmount()
+  })
+
+  it('groups the host-control switches and lists the defined commands', async () => {
+    const { preset, ...start } = FULL
+    const wrapper = mountNova(PermissionEditor, { props: { modelValue: { ...start }, commandNames: ['Restart Steam', 'Lock'] } })
+    expect(wrapper.find('.nv-perm__group').text()).toBe('Control this PC')
+    expect(wrapper.text()).toContain('Sleep this PC')
+    expect(wrapper.text()).toContain('Commands it can run: Restart Steam, Lock')
+    const hostSwitches = wrapper.findAll('.nv-perm__flags')[1].findAll('[role="switch"]')
+    expect(hostSwitches.map((s) => s.attributes('aria-checked'))).toEqual(['false', 'false'])
+    await wrapper.setProps({ commandNames: [] })
+    expect(wrapper.text()).toContain('No host commands are defined yet.')
+    wrapper.unmount()
+  })
+
+  it('treats missing host-control flags as denied and other missing flags as allowed', () => {
+    expect(permissionFlags({ input_mouse: false })).toMatchObject({ input_mouse: false, input_keyboard: true, clipboard: true, power: false, host_commands: false })
+    expect(permissionFlags({ power: true }).power).toBe(true)
+    expect(presetForFlags(permissionFlags({ preset: 'standard' }))).toBe('standard')
   })
 })
 
@@ -148,14 +172,14 @@ describe('Devices page', () => {
       'POST /api/clients/update': () => [400, { status: false, error: 'nope' }],
     })
     const { wrapper } = await mountDevices()
-    expect(wrapper.find('tbody tr').text()).toContain('Full access')
+    expect(wrapper.find('tbody tr').text()).toContain('Standard access')
     await wrapper.find('tbody tr button[aria-haspopup]').trigger('click')
     await flushPromises()
     const block = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.trim() === 'Block device')
     block.click()
     expect(JSON.parse(calls(stub, 'POST /api/clients/update')[0][1].body)).toEqual({ uuid: device().uuid, enabled: false })
     await flushPromises()
-    expect(wrapper.find('tbody tr').text()).toContain('Full access')
+    expect(wrapper.find('tbody tr').text()).toContain('Standard access')
     expect(toasts.at(-1).variant).toBe('danger')
     expect(toasts.at(-1).message).toContain('Pixel 9 Pro')
     wrapper.unmount()

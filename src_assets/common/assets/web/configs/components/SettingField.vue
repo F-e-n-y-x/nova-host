@@ -12,6 +12,7 @@ import ArtSourcesEditor from './ArtSourcesEditor.vue'
 import KeybindingsEditor from './KeybindingsEditor.vue'
 import ModeRemappingEditor from './ModeRemappingEditor.vue'
 import PrepCommandsEditor from './PrepCommandsEditor.vue'
+import HostCommandsEditor from './HostCommandsEditor.vue'
 import SettingControl from './SettingControl.vue'
 import SettingHelp from './SettingHelp.vue'
 import SettingRow from './SettingRow.vue'
@@ -28,7 +29,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update', 'reset', 'touch'])
 
-const EDITORS = { PrepCommandsEditor, KeybindingsEditor, ModeRemappingEditor, ArtSourcesEditor }
+const EDITORS = { PrepCommandsEditor, HostCommandsEditor, KeybindingsEditor, ModeRemappingEditor, ArtSourcesEditor }
 
 const text = useOptionText(toRef(props, 'platform'))
 const option = computed(() => OPTIONS[props.optionKey] || {})
