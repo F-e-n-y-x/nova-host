@@ -323,6 +323,8 @@ list(APPEND PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/linux/graphics.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/misc.h"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/misc.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/linux/nic.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/linux/nic.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/clipboard_linux.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/audio.cpp")
 

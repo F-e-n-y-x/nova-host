@@ -926,6 +926,8 @@ namespace config {
     true,  // system_tray
     {},  // prep commands
     {},  // csrf_allowed_origins
+    "[]",  // host_commands
+    true,  // pcsleep_enabled
   };
 
   /**
@@ -1775,6 +1777,8 @@ namespace config {
 
     string_f(vars, "external_ip", nvhttp.external_ip);
     list_prep_cmd_f(vars, "global_prep_cmd", config::sunshine.prep_cmds);
+    string_f(vars, "host_commands", config::sunshine.host_commands);
+    bool_f(vars, "pcsleep_enabled", config::sunshine.pcsleep_enabled);
 
     string_f(vars, "audio_sink", audio.sink);
     string_f(vars, "virtual_sink", audio.virtual_sink);

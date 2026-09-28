@@ -397,6 +397,9 @@ namespace config {
     // List of allowed origins for CSRF protection (e.g., "https://example.com,https://app.example.com")
     // Comma-separated list of additional origins. Default includes localhost variants and web UI port.
     std::vector<std::string> csrf_allowed_origins;  ///< Additional origins allowed by CSRF validation.
+
+    std::string host_commands;  ///< Nova: global host commands, a JSON array of {id, name, icon, cmd, confirm, timeout}.
+    bool pcsleep_enabled;  ///< Nova: let devices with the `power` permission suspend the host (/pcsleep).
   };
 
   /**

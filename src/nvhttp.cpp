@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,8 @@
 #include "display_device.h"
 #include "file_handler.h"
 #include "globals.h"
+#include "host_commands.h"
+#include "host_power.h"
 #include "httpcommon.h"
 #include "library/library.h"
 #include "logging.h"
@@ -44,6 +47,7 @@
 #include "platform/common.h"
 #include "process.h"
 #include "rtsp.h"
+#include "secure_files.h"
 #include "system_tray.h"
 #include "utility.h"
 #include "uuid.h"
@@ -192,7 +196,7 @@ namespace nvhttp {
     std::string uuid;  ///< Persistent Moonlight client UUID associated with the certificate.
     std::string cert;  ///< Certificate PEM string or path.
     bool enabled = true;  ///< Whether this persisted client entry may connect.
-    client_permissions::mask_t permissions = client_permissions::full;  ///< What the client may do while streaming.
+    client_permissions::mask_t permissions = client_permissions::paired_default;  ///< What the client may do while streaming.
     std::int64_t paired_at = 0;  ///< Unix time (seconds) the client paired; 0 when unknown (paired before tracking).
     std::int64_t last_connected_at = 0;  ///< Unix time (seconds) of the client's last launch or resume; 0 when never.
   };
@@ -424,6 +428,7 @@ namespace nvhttp {
 
     try {
       pt::write_json(config::nvhttp.file_state, root);
+      secure_files::restrict(config::nvhttp.file_state);
     } catch (std::exception &e) {
       BOOST_LOG(error) << "Couldn't write "sv << config::nvhttp.file_state << ": "sv << e.what();
       return;
@@ -558,7 +563,7 @@ namespace nvhttp {
         if (const auto permissions_node = el.get_child_optional("permissions")) {
           client_permissions::mask_t mask = 0;
           for (const auto &[flag_name, flag] : client_permissions::flag_names) {
-            if (permissions_node->get<bool>(std::string {flag_name}, true)) {
+            if (permissions_node->get<bool>(std::string {flag_name}, client_permissions::default_when_missing(flag))) {
               mask |= flag;
             }
           }
@@ -1571,10 +1576,19 @@ namespace nvhttp {
     apps.put("<xmlattr>.status_code", 200);
 
     // Without launch permission a client only sees the running app, which it may resume.
-    const bool can_launch = client_permissions::has(permissions_for_request(request), client_permissions::launch_apps);
+    const auto permissions = permissions_for_request(request);
+    const bool can_launch = client_permissions::has(permissions, client_permissions::launch_apps);
+    const bool can_run_commands = client_permissions::has(permissions, client_permissions::host_commands);
     const auto running_appid = proc::proc.running();
 
-    for (auto &proc : proc::proc.get_apps()) {
+    // Foundation's per-app "SuperCmds" (moonlight-vplus reads it for its in-stream command menu).
+    const auto global_commands = can_run_commands ? host_commands::global() : std::vector<host_commands::command_t> {};
+    const auto apps_tree = can_run_commands ? read_apps_file() : nlohmann::json::object();
+    const auto *app_entries = apps_tree.contains("apps") && apps_tree["apps"].is_array() ? &apps_tree["apps"] : nullptr;
+
+    const auto &procs = proc::proc.get_apps();
+    for (std::size_t i = 0; i < procs.size(); ++i) {
+      const auto &proc = procs[i];
       if (!can_launch && util::from_view(proc.id) != running_appid) {
         continue;
       }
@@ -1583,6 +1597,12 @@ namespace nvhttp {
       app.put("IsHdrSupported"s, video::active_hevc_mode >= 3 ? 1 : 0);
       app.put("AppTitle"s, proc.name);
       app.put("ID", proc.id);
+      if (can_run_commands) {
+        const auto app_commands = app_entries && i < app_entries->size() ? host_commands::for_app((*app_entries)[i]) : std::vector<host_commands::command_t> {};
+        app.put("SuperCmds"s, host_commands::super_cmds_json(app_commands, global_commands));
+      } else {
+        app.put("SuperCmds"s, "[]"s);
+      }
 
       apps.push_back(std::make_pair("App", std::move(app)));
     }
@@ -1888,6 +1908,15 @@ namespace nvhttp {
       response->close_connection_after_response = true;
     });
 
+    // Quitting ends the app for everyone, so it needs the same right as starting one.
+    if (!client_permissions::has(permissions_for_request(request), client_permissions::launch_apps)) {
+      BOOST_LOG(info) << "Quit request from "sv << verified_peer_for(request).name << " refused: no launch_apps permission"sv;
+      tree.put("root.cancel", 0);
+      tree.put("root.<xmlattr>.status_code", 403);
+      tree.put("root.<xmlattr>.status_message", "This device isn't allowed to quit apps.");
+      return;
+    }
+
     tree.put("root.cancel", 1);
     tree.put("root.<xmlattr>.status_code", 200);
 
@@ -1911,7 +1940,14 @@ namespace nvhttp {
     print_req<SunshineHTTPS>(request);
 
     auto args = request->parse_query_string();
-    auto app_image = proc::proc.get_app_image((int) util::from_view(get_arg(args, "appid")));
+    const auto appid = (int) util::from_view(get_arg(args, "appid", "0"));
+    // Devices that can't launch only see the running app (as in /applist).
+    if (!client_permissions::has(permissions_for_request(request), client_permissions::launch_apps) && appid != proc::proc.running()) {
+      response->write(SimpleWeb::StatusCode::client_error_not_found);
+      response->close_connection_after_response = true;
+      return;
+    }
+    auto app_image = proc::proc.get_app_image(appid);
 
     std::ifstream in(app_image, std::ios::binary);
     SimpleWeb::CaseInsensitiveMultimap headers;
@@ -2100,12 +2136,191 @@ namespace nvhttp {
    * @param response HTTPS response.
    * @param request HTTPS request.
    */
+  nova_api::host_features_t host_features();
+  void end_streams_for_sleep();
+
   void nova_capabilities(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
     if (!nova_require_device(response, request)) {
       return;
     }
-    nova_json(response, SimpleWeb::StatusCode::success_ok, {{"nova", true}, {"version", PROJECT_VERSION}, {"features", {"apps", "art", "details", "display_mode", "bitrate", "sessions"}}});
+    nova_json(response, SimpleWeb::StatusCode::success_ok, nova_api::capabilities(PROJECT_VERSION, host_features(), permissions_for_request(request)));
+  }
+
+  /**
+   * @brief Whether any host command is defined, globally or on an app.
+   * @return True when /supercmd has something to run.
+   */
+  bool any_host_command() {
+    if (!host_commands::global().empty()) {
+      return true;
+    }
+    const auto tree = read_apps_file();
+    if (!tree.contains("apps") || !tree["apps"].is_array()) {
+      return false;
+    }
+    for (const auto &app : tree["apps"]) {
+      if (!host_commands::for_app(app).empty()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  nova_api::host_features_t host_features() {
+    return {
+#ifdef SUNSHINE_BUILD_PIPEWIRE_MIC
+      .mic = config::audio.mic_enabled,
+#else
+      .mic = false,
+#endif
+      .clipboard = clipboard::available(),
+      .motion = (platf::get_capabilities() & platf::platform_caps::controller_touch) != 0,
+      .pcsleep = config::sunshine.pcsleep_enabled,
+      .commands = any_host_command(),
+    };
+  }
+
+  /**
+   * @brief Write a GameStream XML reply `<root status_code=…><tag>value</tag></root>`.
+   *
+   * @param response HTTPS response.
+   * @param tag Result element name.
+   * @param refusal Failure to report, or nullopt for success (`<tag>1</tag>`, status 200).
+   */
+  void write_result_xml(const resp_https_t &response, const std::string &tag, const std::optional<nova_api::refusal_t> &refusal) {
+    pt::ptree tree;
+    tree.put("root." + tag, refusal ? 0 : 1);
+    tree.put("root.<xmlattr>.status_code", refusal ? refusal->status : 200);
+    if (refusal) {
+      tree.put("root.<xmlattr>.status_message", refusal->message);
+    }
+    std::ostringstream data;
+    pt::write_xml(data, tree);
+    response->write(data.str());
+    response->close_connection_after_response = true;
+  }
+
+  /**
+   * @brief GET /pcsleep: suspend the host (Foundation-compatible, moonlight-vplus `NvHTTP.pcSleep`).
+   *
+   * Needs the `power` permission; refused while another device streams. The reply goes out first,
+   * then the streams end cleanly and logind suspends the machine.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void pcsleep(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    const auto peer = verified_peer_for(request);
+    const int own = !peer.cert.empty() && rtsp_stream::has_session_for_cert(peer.cert) ? 1 : 0;
+    const int others = std::max(0, rtsp_stream::session_count() - own);
+    auto refusal = nova_api::pcsleep_refusal(config::sunshine.pcsleep_enabled, permissions_for_request(request), others);
+    if (refusal) {
+      BOOST_LOG(info) << "Sleep request from "sv << (peer.name.empty() ? "unknown device"s : peer.name) << " refused: "sv << refusal->message;
+      write_result_xml(response, "pcsleep", refusal);
+      return;
+    }
+
+    BOOST_LOG(info) << "Sleep requested by "sv << peer.name << "; ending streams and suspending"sv;
+    write_result_xml(response, "pcsleep", std::nullopt);
+    std::thread([]() {
+      // Let the reply leave before the stream and the network go away.
+      std::this_thread::sleep_for(500ms);
+      end_streams_for_sleep();
+      if (const auto failure = host_power::suspend(); !failure.empty()) {
+        BOOST_LOG(error) << "Sleep failed: "sv << failure;
+      }
+    }).detach();
+  }
+
+  void end_streams_for_sleep() {
+    if (rtsp_stream::session_count() == 0) {
+      return;
+    }
+    rtsp_stream::terminate_sessions();
+    for (int i = 0; i < 20 && rtsp_stream::session_count() > 0; ++i) {
+      std::this_thread::sleep_for(100ms);
+    }
+  }
+
+  /**
+   * @brief GET /supercmd?cmdId=<id>: run an admin-defined host command (Foundation-compatible).
+   *
+   * Needs the `host_commands` permission. The client sends only the id; the running app's commands
+   * are searched first, then the global ones. The command runs in the background.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void supercmd(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    const auto peer = verified_peer_for(request);
+    const auto device = peer.name.empty() ? "unknown device"s : peer.name;
+    if (!client_permissions::has(permissions_for_request(request), client_permissions::host_commands)) {
+      BOOST_LOG(info) << "Host command request from "sv << device << " refused: no host_commands permission"sv;
+      write_result_xml(response, "supercmd", nova_api::refusal_t {403, "This device isn't allowed to run host commands. Allow \"Host commands\" for it on the Devices page."});
+      return;
+    }
+    const auto args = request->parse_query_string();
+    const auto id = get_arg(args, "cmdId", "");
+    if (!host_commands::valid_id(id)) {
+      write_result_xml(response, "supercmd", nova_api::refusal_t {400, "Missing or malformed command id."});
+      return;
+    }
+
+    std::vector<host_commands::command_t> app_commands;
+    std::string app_name;
+    if (const auto running = nova_running_index()) {
+      const auto tree = read_apps_file();
+      if (tree.contains("apps") && tree["apps"].is_array() && *running < tree["apps"].size()) {
+        app_commands = host_commands::for_app(tree["apps"][*running]);
+        app_name = tree["apps"][*running].value("name", ""s);
+      }
+    }
+    const auto found = host_commands::resolve(id, app_commands, host_commands::global());
+    if (!found) {
+      BOOST_LOG(info) << "Host command ["sv << id << "] from "sv << device << " not found"sv;
+      write_result_xml(response, "supercmd", nova_api::refusal_t {404, "No such command on this host."});
+      return;
+    }
+
+    std::map<std::string, std::string> extra {
+      {"NOVA_COMMAND_ID", found->first.id},
+      {"NOVA_COMMAND_NAME", found->first.name},
+      {"SUNSHINE_CLIENT_NAME", device},
+    };
+    if (const auto running_id = proc::proc.running(); running_id > 0) {
+      extra["SUNSHINE_APP_ID"] = std::to_string(running_id);
+      extra["SUNSHINE_APP_NAME"] = app_name;
+    }
+    switch (host_commands::start_async(found->first, host_commands::build_env(extra), device)) {
+      case host_commands::start_e::started:
+        write_result_xml(response, "supercmd", std::nullopt);
+        return;
+      case host_commands::start_e::already_running:
+        write_result_xml(response, "supercmd", nova_api::refusal_t {409, "That command is still running."});
+        return;
+      case host_commands::start_e::busy:
+        write_result_xml(response, "supercmd", nova_api::refusal_t {409, "Too many host commands are running; try again shortly."});
+        return;
+    }
+  }
+
+  /**
+   * @brief GET /nova/v1/commands: the host commands this device may run, with their state.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void nova_commands(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    const auto permissions = permissions_for_request(request);
+    const auto tree = read_apps_file();
+    nova_json(response, SimpleWeb::StatusCode::success_ok, nova_api::commands_list(client_permissions::has(permissions, client_permissions::host_commands), host_commands::global(), tree.contains("apps") ? tree["apps"] : nlohmann::json::array(), client_permissions::has(permissions, client_permissions::launch_apps), nova_running_index()));
   }
 
   /**
@@ -2387,7 +2602,10 @@ namespace nvhttp {
     };
     https_server.resource["^/cancel$"]["GET"] = cancel;
     https_server.resource["^/bitrate$"]["GET"] = bitrate;
+    https_server.resource["^/pcsleep$"]["GET"] = pcsleep;
+    https_server.resource["^/supercmd$"]["GET"] = supercmd;
     https_server.resource["^/nova/v1/capabilities$"]["GET"] = nova_capabilities;
+    https_server.resource["^/nova/v1/commands$"]["GET"] = nova_commands;
     https_server.resource["^/nova/v1/apps$"]["GET"] = nova_apps;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/art/(poster|hero|logo|icon|background)$"]["GET"] = nova_app_art;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/details$"]["GET"] = nova_app_details;
@@ -2399,6 +2617,8 @@ namespace nvhttp {
     https_server.config.reuse_address = true;
     https_server.config.address = net::get_bind_address(address_family);
     https_server.config.port = port_https;
+    // Bound what a client can make the host buffer: clipboard blobs are the largest body (50 MiB).
+    https_server.config.max_request_streambuf_size = clipboard::kMaxBlobBytes + 1024 * 1024;
 
     http_server.default_resource["GET"] = not_found<SimpleWeb::HTTP>;
     http_server.resource["^/serverinfo$"]["GET"] = serverinfo<SimpleWeb::HTTP>;
@@ -2409,6 +2629,8 @@ namespace nvhttp {
     http_server.config.reuse_address = true;
     http_server.config.address = net::get_bind_address(address_family);
     http_server.config.port = port_http;
+    // Plain HTTP only serves /serverinfo and pairing, which carry no body worth more than this.
+    http_server.config.max_request_streambuf_size = 64 * 1024;
 
     auto accept_and_run = [&](auto *http_server) {
       try {
@@ -2578,7 +2800,7 @@ namespace nvhttp {
 
   client_permissions::mask_t get_client_permissions(const std::string_view cert_pem) {
     if (cert_pem.empty()) {
-      return client_permissions::full;
+      return client_permissions::paired_default;
     }
     std::lock_guard lock {client_auth_mutex()};
     for (const auto &named_cert : client_root.named_devices) {
