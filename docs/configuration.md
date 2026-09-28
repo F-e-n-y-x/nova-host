@@ -897,6 +897,55 @@ a message naming the file instead of streaming a desktop while the game silently
     </tr>
 </table>
 
+### gamepad_motion_profile
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Nova: which virtual controller to build when a client gamepad reports a gyroscope or
+            accelerometer (its own, or the phone's when Nebula uses the phone as gyro source).
+            DualSense and DualShock 4 carry motion to Steam Input and SDL games; the Xbox profiles
+            have no motion sensors. When the virtual controller has motion sensors, Nova asks the
+            client to start sending gyro and accelerometer samples (100 Hz) and forwards them.
+            <br>
+            <br>
+            This check runs before the client-reported controller type, so an Xbox-style pad with
+            gyro gets a DualSense. Pads without motion keep the usual choice.
+            @hint{Only applies when gamepad is set to auto. Linux uses uhid and the kernel's
+            hid-playstation driver; the motion sensors show up as a separate
+            "... Motion Sensors" event device.}
+        </td>
+    </tr>
+    <tr>
+        <td rowspan="4">Choices</td>
+        <td>auto</td>
+        <td>DualSense when the client gamepad has motion sensors.</td>
+    </tr>
+    <tr>
+        <td>ds5</td>
+        <td>DualSense when the client gamepad has motion sensors (same as auto).</td>
+    </tr>
+    <tr>
+        <td>ds4</td>
+        <td>DualShock 4 when the client gamepad has motion sensors.</td>
+    </tr>
+    <tr>
+        <td>off</td>
+        <td>Choose by the client-reported type only (then motion_as_ds4 applies to pads of unknown type).</td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}auto@endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            gamepad_motion_profile = ds4
+            @endcode</td>
+    </tr>
+</table>
+
 ### motion_as_ds4
 
 <table>

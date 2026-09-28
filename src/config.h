@@ -304,6 +304,7 @@ namespace config {
     std::string gamepad_driver;  ///< Windows virtual gamepad driver policy, or empty until the user chooses one.
     bool ds4_back_as_touchpad_click;  ///< Map Back/Select to touchpad click for PlayStation-style gamepads.
     bool motion_as_ds4;  ///< Prefer PlayStation-style emulation for client gamepads with motion controls.
+    std::string gamepad_motion_profile;  ///< Nova: "auto" (DualSense when the client gamepad has gyro/accel, even if it reports an Xbox or Nintendo type), "ds5", "ds4" or "off" (type-based choice only).
     bool touchpad_as_ds4;  ///< Prefer PlayStation-style emulation for client gamepads with touchpad input.
     bool virtualhid_randomize_mac;  ///< Randomize the libvirtualhid virtual controller MAC address.
 

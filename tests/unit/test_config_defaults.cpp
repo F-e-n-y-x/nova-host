@@ -31,6 +31,7 @@ TEST(ConfigDefaults, GamepadDriverIsUnsetByDefault) {
 TEST(ConfigDefaults, GamepadBoolsMatchDocumentedDefaults) {
   EXPECT_TRUE(config::input.ds4_back_as_touchpad_click);
   EXPECT_TRUE(config::input.motion_as_ds4);
+  EXPECT_EQ(config::input.gamepad_motion_profile, "auto");
   EXPECT_TRUE(config::input.touchpad_as_ds4);
   EXPECT_TRUE(config::input.virtualhid_randomize_mac);
 }

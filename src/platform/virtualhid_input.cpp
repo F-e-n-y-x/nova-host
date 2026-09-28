@@ -116,9 +116,39 @@ namespace platf::virtualhid {
       return gamepad_profiles[3];  // Xbox Series.
     }
 
+    /**
+     * @brief Nova: the motion-capable profile for a client gamepad that reports gyro or accelerometer.
+     *
+     * Checked before the client-reported type, so an Xbox-type pad whose gyro comes from the phone
+     * (or a pad with its own IMU) still gets a virtual controller that games and Steam Input can read
+     * motion from. `gamepad_motion_profile = off` keeps the type-based choice.
+     *
+     * @param metadata Client-reported controller metadata.
+     * @return The profile to use, or `nullptr` to fall through to type-based selection.
+     */
+    const gamepad_profile_t *motion_profile_for_metadata(const gamepad_arrival_t &metadata) {
+      if (!(metadata.capabilities & (LI_CCAP_ACCEL | LI_CCAP_GYRO))) {
+        return nullptr;
+      }
+      const std::string_view choice = config::input.gamepad_motion_profile;
+      if (choice == "off"sv) {
+        return nullptr;
+      }
+      if (choice == "ds4"sv) {
+        BOOST_LOG(info) << "Gamepad will be DualShock 4 controller (client gamepad has motion sensors; gamepad_motion_profile = ds4)"sv;
+        return &profile_for_name("ds4"sv);
+      }
+      BOOST_LOG(info) << "Gamepad will be DualSense controller (client gamepad has motion sensors; gamepad_motion_profile = "sv << (choice == "ds5"sv ? "ds5"sv : "auto"sv) << ')';
+      return &profile_for_name("ds5"sv);
+    }
+
     const gamepad_profile_t &profile_for_metadata(const gamepad_arrival_t &metadata) {
       if (config::input.gamepad != "auto"sv) {
         return profile_for_name(config::input.gamepad);
+      }
+
+      if (const auto *motion = motion_profile_for_metadata(metadata)) {
+        return *motion;
       }
 
       if (metadata.type == LI_CTYPE_PS) {
@@ -691,6 +721,7 @@ namespace platf::virtualhid {
     warn_unsupported_client_features(id.globalIndex, metadata, support);
     warn_missing_client_features(id.globalIndex, metadata, support);
     if (support.supports_motion) {
+      BOOST_LOG(info) << "Gamepad "sv << id.globalIndex << ": asking the client for gyro and accelerometer at 100 Hz"sv;
       raise_feedback(gamepad, gamepad_feedback_msg_t::make_motion_event_state(id.clientRelativeIndex, LI_MOTION_TYPE_ACCEL, 100));
       raise_feedback(gamepad, gamepad_feedback_msg_t::make_motion_event_state(id.clientRelativeIndex, LI_MOTION_TYPE_GYRO, 100));
     }

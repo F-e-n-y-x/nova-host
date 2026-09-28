@@ -279,6 +279,10 @@ export const OPTIONS = {
         .map((g) => ({ value: g, label: `config.gamepad_${g}` })),
     ],
   },
+  gamepad_motion_profile: {
+    type: 'choice', platforms: ['linux'], when: (c) => controllerOn(c) && c.gamepad === 'auto',
+    choices: ['auto', 'ds5', 'ds4', 'off'].map((value) => ({ value, label: `nova.settings.choices.gamepad_motion_profile_${value}` })),
+  },
   motion_as_ds4: { type: 'bool', platforms: ['windows', 'linux'], when: (c) => controllerOn(c) && c.gamepad === 'auto' },
   touchpad_as_ds4: { type: 'bool', platforms: ['windows', 'linux'], when: (c) => controllerOn(c) && c.gamepad === 'auto' },
   ds4_back_as_touchpad_click: {
@@ -452,7 +456,7 @@ export const SECTIONS = [
   { id: 'audio', options: ['stream_audio', 'audio_sink', 'virtual_sink', 'install_steam_audio_drivers', 'mic_enabled'] },
   {
     id: 'input',
-    options: ['controller', 'gamepad_driver', 'gamepad', 'motion_as_ds4', 'touchpad_as_ds4', 'ds4_back_as_touchpad_click',
+    options: ['controller', 'gamepad_driver', 'gamepad', 'gamepad_motion_profile', 'motion_as_ds4', 'touchpad_as_ds4', 'ds4_back_as_touchpad_click',
       'virtualhid_randomize_mac', 'back_button_timeout', 'keyboard', 'key_repeat_delay', 'key_repeat_frequency',
       'always_send_scancodes', 'key_rightalt_to_key_win', 'keybindings', 'mouse', 'high_resolution_scrolling',
       'native_pen_touch', 'clipboard_sync'],
