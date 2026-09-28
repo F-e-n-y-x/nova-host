@@ -97,6 +97,11 @@ namespace {
    */
   std::string capture(const vd::target_t &t, int frames) {
     vd::set_capture_target(t);
+    // As Nova does (video.cpp enumerates before it opens a display): this also loads CUDA and the
+    // NvFBC entry points, which nvfbc_display() alone does not.
+    if (platf::nvfbc_display_names() != std::vector<std::string> {"0"}) {
+      return "no headless NvFBC screen";
+    }
     auto disp = platf::nvfbc_display(platf::mem_type_e::cuda, "0", {t.width, t.height, 60, 12000, 20000, 1, 1, 1, 1, 0, 0, 0});
     if (!disp) {
       return "no display";
