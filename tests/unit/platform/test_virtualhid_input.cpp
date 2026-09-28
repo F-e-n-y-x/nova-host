@@ -449,12 +449,89 @@ INSTANTIATE_TEST_SUITE_P(
     auto_profile_case_t {"Xbox", LI_CTYPE_XBOX, 0, lvh::GamepadProfileKind::xbox_series},
     auto_profile_case_t {"UnknownMotion", LI_CTYPE_UNKNOWN, LI_CCAP_ACCEL, lvh::GamepadProfileKind::dualsense},
     auto_profile_case_t {"UnknownTouchpad", LI_CTYPE_UNKNOWN, LI_CCAP_TOUCHPAD, lvh::GamepadProfileKind::dualsense},
-    auto_profile_case_t {"UnknownDefault", LI_CTYPE_UNKNOWN, 0, lvh::GamepadProfileKind::xbox_series}
+    auto_profile_case_t {"UnknownDefault", LI_CTYPE_UNKNOWN, 0, lvh::GamepadProfileKind::xbox_series},
+    // Nova: motion beats the reported type, so an Xbox pad with phone or pad gyro gets a DualSense.
+    auto_profile_case_t {"XboxWithGyro", LI_CTYPE_XBOX, LI_CCAP_GYRO, lvh::GamepadProfileKind::dualsense},
+    auto_profile_case_t {"XboxWithAccel", LI_CTYPE_XBOX, LI_CCAP_ACCEL, lvh::GamepadProfileKind::dualsense},
+    auto_profile_case_t {"NintendoWithMotion", LI_CTYPE_NINTENDO, LI_CCAP_GYRO | LI_CCAP_ACCEL, lvh::GamepadProfileKind::dualsense}
   ),
   [](const ::testing::TestParamInfo<auto_profile_case_t> &info) {
     return info.param.name;
   }
 );
+
+namespace {
+  /**
+   * @brief gamepad_motion_profile scenario for a client-reported gamepad.
+   */
+  struct motion_profile_case_t {
+    const char *name;  ///< Stable parameter name.
+    const char *setting;  ///< gamepad_motion_profile value.
+    std::uint8_t type;  ///< Client-reported controller type.
+    std::uint16_t capabilities;  ///< Client-reported capability flags.
+    lvh::GamepadProfileKind expected;  ///< Expected libvirtualhid profile.
+  };
+
+  /**
+   * @brief Parameterized fixture for gamepad_motion_profile.
+   */
+  class VirtualHidMotionProfileTest:
+      public VirtualHidDeviceTest,
+      public ::testing::WithParamInterface<motion_profile_case_t> {};
+}  // namespace
+
+TEST_P(VirtualHidMotionProfileTest, SelectsMotionProfile) {
+  const auto &test_case = GetParam();
+  config::input.gamepad_motion_profile = test_case.setting;
+  auto *adapter = allocate_gamepad("auto"sv, test_case.type, test_case.capabilities);
+  ASSERT_NE(adapter, nullptr);
+  ASSERT_NE(adapter->gamepad(), nullptr);
+  EXPECT_EQ(adapter->gamepad()->profile().gamepad_kind, test_case.expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  GamepadMotionProfile,
+  VirtualHidMotionProfileTest,
+  ::testing::Values(
+    motion_profile_case_t {"AutoXboxGyro", "auto", LI_CTYPE_XBOX, LI_CCAP_GYRO | LI_CCAP_ACCEL, lvh::GamepadProfileKind::dualsense},
+    motion_profile_case_t {"Ds5XboxGyro", "ds5", LI_CTYPE_XBOX, LI_CCAP_GYRO, lvh::GamepadProfileKind::dualsense},
+    motion_profile_case_t {"Ds4XboxGyro", "ds4", LI_CTYPE_XBOX, LI_CCAP_GYRO, lvh::GamepadProfileKind::dualshock4},
+    motion_profile_case_t {"Ds4PlayStationGyro", "ds4", LI_CTYPE_PS, LI_CCAP_GYRO, lvh::GamepadProfileKind::dualshock4},
+    motion_profile_case_t {"OffXboxGyroKeepsXbox", "off", LI_CTYPE_XBOX, LI_CCAP_GYRO, lvh::GamepadProfileKind::xbox_series},
+    motion_profile_case_t {"OffUnknownGyroKeepsLegacyChoice", "off", LI_CTYPE_UNKNOWN, LI_CCAP_GYRO, lvh::GamepadProfileKind::dualsense},
+    motion_profile_case_t {"AutoXboxNoMotionKeepsXbox", "auto", LI_CTYPE_XBOX, 0, lvh::GamepadProfileKind::xbox_series},
+    motion_profile_case_t {"Ds4NoMotionKeepsXbox", "ds4", LI_CTYPE_XBOX, 0, lvh::GamepadProfileKind::xbox_series}
+  ),
+  [](const ::testing::TestParamInfo<motion_profile_case_t> &info) {
+    return info.param.name;
+  }
+);
+
+TEST_F(VirtualHidDeviceTest, XboxPadWithGyroIsAskedForMotion) {
+  auto *adapter = allocate_gamepad("auto"sv, LI_CTYPE_XBOX, LI_CCAP_GYRO | LI_CCAP_ACCEL, 0, 2);
+  ASSERT_NE(adapter, nullptr);
+  EXPECT_TRUE(adapter->support().supports_motion);
+  bool accel = false;
+  bool gyro = false;
+  while (auto message = feedback_queue()->pop(0ms)) {
+    if (message->type == platf::gamepad_feedback_e::set_motion_event_state) {
+      EXPECT_EQ(message->id, 2);
+      EXPECT_EQ(message->data.motion_event_state.report_rate, 100);
+      accel |= message->data.motion_event_state.motion_type == LI_MOTION_TYPE_ACCEL;
+      gyro |= message->data.motion_event_state.motion_type == LI_MOTION_TYPE_GYRO;
+    }
+  }
+  EXPECT_TRUE(accel);
+  EXPECT_TRUE(gyro);
+
+  // Samples reach the virtual DualSense.
+  platf::virtualhid::gamepad_motion(*context(), {{0, 2}, LI_MOTION_TYPE_GYRO, 10.0F, -20.0F, 30.0F});
+  ASSERT_TRUE(adapter->state().gyroscope);
+  EXPECT_FLOAT_EQ(adapter->state().gyroscope->x, 10.0F);
+  EXPECT_FLOAT_EQ(adapter->state().gyroscope->y, -20.0F);
+  EXPECT_FLOAT_EQ(adapter->state().gyroscope->z, 30.0F);
+  platf::virtualhid::free_gamepad(*context(), 0);
+}
 
 TEST_F(VirtualHidDeviceTest, FallsBackForUnknownManualProfileAndRandomizesPlayStationIdentity) {
   auto *fallback = allocate_gamepad("not-a-profile"sv, LI_CTYPE_UNKNOWN, 0, 0);

@@ -875,6 +875,7 @@ namespace config {
     .gamepad_driver = {},  // unset until the user chooses a Windows driver policy
     .ds4_back_as_touchpad_click = true,
     .motion_as_ds4 = true,
+    .gamepad_motion_profile = "auto",  // Nova
     .touchpad_as_ds4 = true,
     .virtualhid_randomize_mac = true,
 
@@ -1889,6 +1890,7 @@ namespace config {
 #endif
     bool_f(vars, "ds4_back_as_touchpad_click", input.ds4_back_as_touchpad_click);
     bool_f(vars, "motion_as_ds4", input.motion_as_ds4);
+    string_restricted_f(vars, "gamepad_motion_profile", input.gamepad_motion_profile, {"auto"sv, "ds5"sv, "ds4"sv, "off"sv});
     bool_f(vars, "touchpad_as_ds4", input.touchpad_as_ds4);
     bool_f(vars, "virtualhid_randomize_mac", input.virtualhid_randomize_mac);
 

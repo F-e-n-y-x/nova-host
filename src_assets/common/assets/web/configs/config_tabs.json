@@ -38,6 +38,7 @@
       "gamepad_driver": "",
       "gamepad": "auto",
       "ds4_back_as_touchpad_click": "enabled",
+      "gamepad_motion_profile": "auto",
       "motion_as_ds4": "enabled",
       "touchpad_as_ds4": "enabled",
       "virtualhid_randomize_mac": "enabled",
