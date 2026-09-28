@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <regex>
@@ -116,19 +117,26 @@ TEST(VirtualDisplayLive, HeadlessNvidiaServerCaptureCapAndResize) {
     GTEST_SKIP() << "set NOVA_VD_LIVE=1 to start a real headless X server";
   }
   const fs::path state = fs::temp_directory_path() / "nova-vd-live";
+  // The test harness captures stdout; the measurements also go to a report file for the record.
+  std::ofstream report {fs::temp_directory_path() / "nova-vd-live-report.txt"};
+  auto note = [&report](const std::string &line) {
+    std::cout << "[live] " << line << std::endl;
+    report << line << std::endl;
+  };
   vd::x_server_t server {state, "openbox", vd::default_ops()};
   const auto started = std::chrono::steady_clock::now();
   auto target = server.start({2340, 1080, 120});
   ASSERT_TRUE(target) << "see " << (state / "Xorg.failed.log");
-  std::cout << "[live] " << target->display << " up in "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count() << " ms" << std::endl;
+  note(target->display + " up in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count()) + " ms");
   auto stop = util::fail_guard([&]() {
     vd::set_capture_target(std::nullopt);
     server.stop();
   });
 
   EXPECT_EQ(dimensions(*target), "2340x1080");
-  std::cout << "[live] glxinfo: " << shell_output(x_env(*target) + "glxinfo -B 2>/dev/null | grep -E 'direct rendering|renderer string'");
+  note("xdpyinfo dimensions: " + dimensions(*target));
+  note("glxinfo: " + shell_output(x_env(*target) + "glxinfo -B 2>/dev/null | grep -E 'direct rendering|renderer string' | tr '\\n' ' '"));
+  note("xrandr: " + shell_output(x_env(*target) + "xrandr --current 2>/dev/null | head -1"));
 
   // Capture through Nova's NvFBC code with the DISPLAY scope and the headless name fallback.
   vd::set_capture_target(*target);
@@ -149,25 +157,28 @@ TEST(VirtualDisplayLive, HeadlessNvidiaServerCaptureCapAndResize) {
   EXPECT_EQ(disp->height, 1080);
   const double rate = capture_rate(disp, 600);
   disp.reset();
-  std::cout << "[live] NvFBC (Nova display_t) capture: " << rate << " fps at 2340x1080" << std::endl;
+  note("NvFBC display names on " + target->display + ": [" + names[0] + "]");
+  note("NvFBC (Nova display_t) capture: " + std::to_string(rate) + " fps at 2340x1080 (600 frames)");
   EXPECT_GT(rate, 100.0);
 
   const double capped = gears.get();
-  std::cout << "[live] glxgears with Nova's frame cap (120): " << capped << " FPS" << std::endl;
+  note("glxgears with Nova's frame cap (120): " + std::to_string(capped) + " FPS");
   EXPECT_GT(capped, 90.0);
   EXPECT_LT(capped, 135.0);
 
   const double uncapped = glxgears_fps(*target, {{"DISPLAY", target->display}, {"XAUTHORITY", target->xauthority}}, 6);
-  std::cout << "[live] glxgears uncapped: " << uncapped << " FPS" << std::endl;
+  note("glxgears uncapped: " + std::to_string(uncapped) + " FPS");
 
   // Reconnect at another size.
   ASSERT_TRUE(server.resize({3120, 1440, 60}));
   EXPECT_EQ(dimensions(*server.target()), "3120x1440");
+  note("after resize: " + dimensions(*server.target()));
   vd::set_capture_target(*server.target());
   disp = platf::nvfbc_display(platf::mem_type_e::cuda, "0", {3120, 1440, 60, 12000, 20000, 1, 1, 1, 1, 0, 0, 0});
   ASSERT_TRUE(disp);
   EXPECT_EQ(disp->width, 3120);
   EXPECT_EQ(disp->height, 1440);
+  note("NvFBC after resize: " + std::to_string(disp->width) + "x" + std::to_string(disp->height));
   disp.reset();
 
   const auto display = target->display;
@@ -176,5 +187,6 @@ TEST(VirtualDisplayLive, HeadlessNvidiaServerCaptureCapAndResize) {
   stop.disable();
   EXPECT_FALSE(fs::exists("/tmp/.X11-unix/X" + display.substr(1))) << "socket removed";
   EXPECT_FALSE(fs::exists(server.marker()));
+  note("stopped; socket gone: " + std::string(fs::exists("/tmp/.X11-unix/X" + display.substr(1)) ? "no" : "yes"));
 }
 #endif
