@@ -14,6 +14,8 @@ Use the native usages (Z/Rz, Simulation Brake/Accelerator) in the UHID
 descriptor and the same evdev codes on the uinput fallback. Byte layout
 is unchanged, so HIDAPI consumers are unaffected.
 
+Also tests Wine/Proton's XInput view (SDL3 HIDAPI descriptor parse + winebus).
+
 Applied by Nova at configure time (cmake/compile_definitions/common.cmake).
 ---
 diff --git a/src/platform/linux/uhid_backend.cpp b/src/platform/linux/uhid_backend.cpp
@@ -278,7 +280,7 @@ index 0111bb2..0e3fa69 100644
      return prefers_uhid_gamepad_profile(kind);
    }
 diff --git a/tests/unit/test_linux_backend.cpp b/tests/unit/test_linux_backend.cpp
-index 5f39285..cb40829 100644
+index 5f39285..fb7b6fc 100644
 --- a/tests/unit/test_linux_backend.cpp
 +++ b/tests/unit/test_linux_backend.cpp
 @@ -6,12 +6,16 @@
@@ -345,7 +347,7 @@ index 5f39285..cb40829 100644
      for (const auto code : feedback_codes) {
        EXPECT_EQ(find_code(gamepad, EV_FF, code) != nullptr, expected_profile->capabilities.supports_rumble);
      }
-@@ -1471,3 +1495,289 @@ TEST_F(LinuxBackendTest, PlatformRuntimeReportsUnavailableDeviceCreationWhenNode
+@@ -1471,3 +1495,405 @@ TEST_F(LinuxBackendTest, PlatformRuntimeReportsUnavailableDeviceCreationWhenNode
      EXPECT_EQ(mouse.status.code(), lvh::ErrorCode::backend_unavailable);
    }
  }
@@ -588,6 +590,122 @@ index 5f39285..cb40829 100644
 +      EXPECT_NEAR(actual.right_y, expected.right_y, tolerance) << context << ": standard right stick Y";
 +      EXPECT_NEAR(actual.left_trigger, expected.left_trigger, tolerance) << context << ": standard LT";
 +      EXPECT_NEAR(actual.right_trigger, expected.right_trigger, tolerance) << context << ": standard RT";
++    }
++  }
++}
++
++namespace {
++  /**
++   * @brief XInput view of one report, as Wine/Proton builds it from SDL3's Xbox HIDAPI driver.
++   */
++  struct XInputState {
++    int left_x;  ///< sThumbLX.
++    int left_y;  ///< sThumbLY (up is positive).
++    int right_x;  ///< sThumbRX.
++    int right_y;  ///< sThumbRY (up is positive).
++    int left_trigger;  ///< bLeftTrigger, 0-255.
++    int right_trigger;  ///< bRightTrigger, 0-255.
++  };
++
++  /**
++   * @brief Read a report the way SDL3's HIDAPI Xbox driver does on Linux, then convert it the way
++   * Wine's SDL bus and XInput do.
++   *
++   * SDL3 (src/joystick/hidapi/SDL_hidapi_xboxone.c, HIDAPI_DriverXboxOne_HandleDescriptorReport)
++   * reads Xbox Bluetooth reports through the HID descriptor: X/Y are the left stick; Z and Rz are
++   * the right stick when 16-bit and the triggers when 10-bit; Rx/Ry are the right stick; Brake and
++   * Accelerator are the triggers. Proton's winebus (bus_sdl.c) feeds SDL's gamepad axes to XInput,
++   * flipping Y (-value - 1) to the XUSB convention.
++   */
++  XInputState wine_xinput_from_sdl_hidapi(const std::vector<std::uint8_t> &descriptor, const std::vector<std::uint8_t> &report) {
++    int sdl_left_x = 0;
++    int sdl_left_y = 0;
++    int sdl_right_x = 0;
++    int sdl_right_y = 0;
++    int sdl_left_trigger = 0;
++    int sdl_right_trigger = 0;
++    for (const auto &field : kernel_abs_fields(descriptor, report.front())) {
++      std::uint64_t raw = 0;
++      for (std::size_t bit = 0; bit < field.bit_size; ++bit) {
++        const auto absolute_bit = field.bit_offset + bit;
++        const auto byte = 1U + (absolute_bit / 8U);
++        if (byte < report.size() && (report[byte] >> (absolute_bit % 8U)) & 0x01U) {
++          raw |= std::uint64_t {1} << bit;
++        }
++      }
++      const auto axis = static_cast<int>(raw) - 32768;  // SDL: 16-bit unsigned stick to signed
++      const auto trigger = static_cast<int>((raw * 32767U) / 1023U);  // SDL: 10-bit trigger to 0..32767
++      switch (field.code) {
++        case ABS_X: sdl_left_x = axis; break;
++        case ABS_Y: sdl_left_y = axis; break;
++        case ABS_RX: sdl_right_x = axis; break;
++        case ABS_RY: sdl_right_y = axis; break;
++        case ABS_Z: (field.bit_size == 16 ? sdl_right_x : sdl_left_trigger) = field.bit_size == 16 ? axis : trigger; break;
++        case ABS_RZ: (field.bit_size == 16 ? sdl_right_y : sdl_right_trigger) = field.bit_size == 16 ? axis : trigger; break;
++        case ABS_BRAKE: sdl_left_trigger = trigger; break;
++        case ABS_GAS: sdl_right_trigger = trigger; break;
++        default: break;
++      }
++    }
++    const auto clamp16 = [](int value) {
++      return std::clamp(value, -32768, 32767);
++    };
++    return {
++      .left_x = clamp16(sdl_left_x),
++      .left_y = clamp16(-sdl_left_y - 1),
++      .right_x = clamp16(sdl_right_x),
++      .right_y = clamp16(-sdl_right_y - 1),
++      .left_trigger = (sdl_left_trigger * 255) / 32767,
++      .right_trigger = (sdl_right_trigger * 255) / 32767,
++    };
++  }
++}  // namespace
++
++TEST_F(LinuxBackendTest, XboxBluetoothUhidMovesOnlyTheMatchingWineXInputAxis) {
++  using enum lvh::GamepadProfileKind;
++
++  struct AxisCase {
++    std::string_view name;  ///< Logical input.
++    lvh::GamepadState state;  ///< State with only that input moved.
++    XInputState expected;  ///< XInput view of that state.
++  };
++  const auto with = [](auto mutate) {
++    lvh::GamepadState state;
++    mutate(state);
++    return state;
++  };
++  const auto expect = [](auto mutate) {
++    XInputState state {};
++    mutate(state);
++    return state;
++  };
++  const std::array cases {
++    AxisCase {"rest", lvh::GamepadState {}, XInputState {}},
++    AxisCase {"left stick right", with([](auto &s) { s.left_stick.x = 1.0F; }), expect([](auto &x) { x.left_x = 32767; })},
++    AxisCase {"left stick left", with([](auto &s) { s.left_stick.x = -1.0F; }), expect([](auto &x) { x.left_x = -32768; })},
++    AxisCase {"left stick up", with([](auto &s) { s.left_stick.y = 1.0F; }), expect([](auto &x) { x.left_y = 32767; })},
++    AxisCase {"right stick right", with([](auto &s) { s.right_stick.x = 1.0F; }), expect([](auto &x) { x.right_x = 32767; })},
++    AxisCase {"right stick up", with([](auto &s) { s.right_stick.y = 1.0F; }), expect([](auto &x) { x.right_y = 32767; })},
++    AxisCase {"right stick down", with([](auto &s) { s.right_stick.y = -1.0F; }), expect([](auto &x) { x.right_y = -32768; })},
++    AxisCase {"left trigger", with([](auto &s) { s.left_trigger = 1.0F; }), expect([](auto &x) { x.left_trigger = 255; })},
++    AxisCase {"right trigger", with([](auto &s) { s.right_trigger = 1.0F; }), expect([](auto &x) { x.right_trigger = 255; })},
++  };
++
++  // Stick centres differ by one count between the report and XInput; triggers must be exact.
++  constexpr int stick_tolerance = 2;
++  for (const auto kind : {xbox_one, xbox_series}) {
++    for (const auto &[name, state, expected] : cases) {
++      const auto wire = lvh::detail::test::linux_xbox_bluetooth_uhid_wire(kind, state);
++      ASSERT_TRUE(wire.status.ok()) << wire.status.message();
++      ASSERT_FALSE(wire.input_report.empty()) << name;
++      const auto actual = wine_xinput_from_sdl_hidapi(wire.descriptor, wire.input_report);
++      const auto context = std::format("profile {} input '{}'", static_cast<int>(std::to_underlying(kind)), name);
++      EXPECT_NEAR(actual.left_x, expected.left_x, stick_tolerance) << context << ": sThumbLX";
++      EXPECT_NEAR(actual.left_y, expected.left_y, stick_tolerance) << context << ": sThumbLY";
++      EXPECT_NEAR(actual.right_x, expected.right_x, stick_tolerance) << context << ": sThumbRX";
++      EXPECT_NEAR(actual.right_y, expected.right_y, stick_tolerance) << context << ": sThumbRY";
++      EXPECT_EQ(actual.left_trigger, expected.left_trigger) << context << ": bLeftTrigger";
++      EXPECT_EQ(actual.right_trigger, expected.right_trigger) << context << ": bRightTrigger";
 +    }
 +  }
 +}

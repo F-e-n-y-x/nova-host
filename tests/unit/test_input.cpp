@@ -282,6 +282,94 @@ TEST_F(InputGamepadSessionTest, ReusesGamepadsAcrossPauseAndDestroysThemOnTermin
   EXPECT_NE(replacement, resumed);
 }
 
+TEST_F(InputGamepadSessionTest, AnnouncedControllerGetsAPadOnlyOnItsFirstRealInput) {
+  auto stream_input = input::alloc(std::make_shared<safe::mail_raw_t>(), "lazy-pad-client");
+  ASSERT_NE(stream_input, nullptr);
+  const auto devices_before = runtime().active_device_count();
+
+  // Arrival events are followed by an all-zero state: neither creates a pad.
+  input::testing::send_controller_arrival(stream_input, 0, LI_CTYPE_XBOX, LI_CCAP_ANALOG_TRIGGERS);
+  input::testing::send_controller_state(stream_input, 0, 0x1, 0);
+  // Stick noise below 1/8 doesn't either.
+  input::testing::send_controller_state(stream_input, 0, 0x1, 0, 0, 0, 1200, -900);
+  EXPECT_EQ(input::testing::gamepad_id(stream_input, 0), -1);
+  EXPECT_EQ(runtime().active_device_count(), devices_before);
+
+  input::testing::send_controller_state(stream_input, 0, 0x1, platf::A);
+  EXPECT_EQ(input::testing::gamepad_id(stream_input, 0), 0);
+  EXPECT_EQ(runtime().active_device_count(), devices_before + 1);
+}
+
+TEST_F(InputGamepadSessionTest, PhantomArrivalDoesNotTakePlayerOneFromThePlayedPad) {
+  auto stream_input = input::alloc(std::make_shared<safe::mail_raw_t>(), "phantom-client");
+  ASSERT_NE(stream_input, nullptr);
+  const auto devices_before = runtime().active_device_count();
+
+  // A client announces two controllers (one of them a phantom) but only plays controller 1.
+  input::testing::send_controller_arrival(stream_input, 0, LI_CTYPE_UNKNOWN, 0);
+  input::testing::send_controller_state(stream_input, 0, 0x3, 0);
+  input::testing::send_controller_arrival(stream_input, 1, LI_CTYPE_XBOX, LI_CCAP_ANALOG_TRIGGERS);
+  input::testing::send_controller_state(stream_input, 1, 0x3, 0, 0, 0, 20000, 0);
+
+  EXPECT_EQ(input::testing::gamepad_id(stream_input, 0), -1);
+  EXPECT_EQ(input::testing::gamepad_id(stream_input, 1), 0) << "the played pad must be the first virtual pad (XInput player 1)";
+  EXPECT_EQ(runtime().active_device_count(), devices_before + 1);
+}
+
+TEST_F(InputGamepadSessionTest, ReconnectFromTheSameDeviceReusesItsPadInsteadOfAddingAGhost) {
+  const std::string session_id = "same-device-certificate";
+  auto first = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  const auto devices_before = runtime().active_device_count();
+  input::testing::send_controller_arrival(first, 0, LI_CTYPE_XBOX, 0);
+  input::testing::send_controller_state(first, 0, 0x1, platf::A);
+  ASSERT_EQ(input::testing::gamepad_id(first, 0), 0);
+  first.reset();  // session A ends; its input state is retained for a resume
+
+  auto second = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  input::testing::send_controller_arrival(second, 0, LI_CTYPE_XBOX, 0);
+  input::testing::send_controller_state(second, 0, 0x1, platf::B);
+  input::testing::release_stale_gamepads(second);  // the grace period passes
+
+  EXPECT_EQ(input::testing::gamepad_id(second, 0), 0);
+  EXPECT_EQ(runtime().active_device_count(), devices_before + 1) << "exactly one virtual pad";
+}
+
+TEST_F(InputGamepadSessionTest, ReconnectUsingAnotherControllerNumberTakesOverTheLeftoverPad) {
+  const std::string session_id = "renumbered-device-certificate";
+  auto first = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  const auto devices_before = runtime().active_device_count();
+  input::testing::send_controller_state(first, 0, 0x1, platf::A);
+  ASSERT_EQ(input::testing::gamepad_id(first, 0), 0);
+  first.reset();
+
+  auto second = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  input::testing::send_controller_arrival(second, 2, LI_CTYPE_XBOX, 0);
+  input::testing::send_controller_state(second, 2, 0x4, platf::A);
+  input::testing::release_stale_gamepads(second);
+
+  EXPECT_EQ(input::testing::gamepad_id(second, 0), -1);
+  EXPECT_EQ(input::testing::gamepad_id(second, 2), 0) << "the leftover pad keeps player 1";
+  EXPECT_EQ(runtime().active_device_count(), devices_before + 1);
+}
+
+TEST_F(InputGamepadSessionTest, LeftoverPadsTheReconnectedClientNeverUsesAreRemoved) {
+  const std::string session_id = "ghost-device-certificate";
+  auto first = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  const auto devices_before = runtime().active_device_count();
+  input::testing::send_controller_state(first, 0, 0x3, platf::A);
+  input::testing::send_controller_state(first, 1, 0x3, platf::A);
+  ASSERT_EQ(runtime().active_device_count(), devices_before + 2);
+  first.reset();
+
+  auto second = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  input::testing::send_controller_state(second, 1, 0x2, platf::X);
+  input::testing::release_stale_gamepads(second);
+
+  EXPECT_EQ(input::testing::gamepad_id(second, 0), -1);
+  EXPECT_EQ(input::testing::gamepad_id(second, 1), 1);
+  EXPECT_EQ(runtime().active_device_count(), devices_before + 1) << "the unused leftover pad is gone";
+}
+
 TEST_F(InputGamepadSessionTest, RefreshesSharedVirtualInputAfterLicenseStateChanges) {
   ASSERT_NE(context().keyboard, nullptr);
   ASSERT_NE(context().mouse, nullptr);

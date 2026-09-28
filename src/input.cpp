@@ -13,11 +13,13 @@ extern "C" {
 #include <bitset>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <list>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -234,6 +236,20 @@ namespace input {
     // Sunshine forces the button to be in a specific state until the gamepad state matches that of
     // Moonlight once more.
     button_state_e back_button_state;  ///< Back button state.
+
+    /**
+     * Nova: the client announced this controller but it hasn't sent any input yet. The virtual
+     * device is only created on its first real input, so an announced-but-unused controller
+     * (a client's phantom arrival) never takes a player slot ahead of the pad that is played.
+     */
+    std::optional<platf::gamepad_arrival_t> pending_arrival;
+
+    /**
+     * Nova: a virtual pad kept from an earlier connection of the same device that this
+     * connection hasn't claimed yet. The first controller this connection uses takes it over
+     * (keeping its player slot); unclaimed ones are destroyed after a grace period.
+     */
+    bool stale = false;
   };
 
   /**
@@ -299,6 +315,7 @@ namespace input {
     std::chrono::steady_clock::time_point last_pen_activity {};  ///< Last time a pen packet arrived; while recent, the pen owns the pointer and absolute mouse moves are dropped.
 
     std::vector<gamepad_t> gamepads;  ///< Virtual gamepad slots tracked for the stream.
+    std::uint64_t connection_generation = 0;  ///< Nova: bumped on every resume; guards the stale-pad cleanup.
     std::unique_ptr<platf::client_input_t> client_context;  ///< Client context.
 
     safe::mail_raw_t::event_t<input::touch_port_t> touch_port_event;  ///< Touch port event.
@@ -404,6 +421,14 @@ namespace input {
   }
 
   /**
+   * @brief How long a reconnected client has to use a pad kept from its previous connection
+   * before Nova removes it as a leftover.
+   */
+  constexpr auto stale_gamepad_grace = 15s;
+
+  void release_stale_gamepads(input_t &input);
+
+  /**
    * @brief Rebind retained input state to a resumed stream mailbox.
    *
    * @param input Retained input state.
@@ -412,9 +437,12 @@ namespace input {
   void rebind_input(const std::shared_ptr<input_t> &input, const safe::mail_t &mail) {
     input->touch_port_event = mail->event<input::touch_port_t>(mail::touch_port);
     input->feedback_queue = mail->queue<platf::gamepad_feedback_msg_t>(mail::gamepad_feedback);
+    const auto generation = ++input->connection_generation;
 
+    bool any_retained = false;
     for (int client_index = 0; client_index < input->gamepads.size(); ++client_index) {
       auto &gamepad = input->gamepads[client_index];
+      gamepad.pending_arrival.reset();
       if (gamepad.id < 0) {
         continue;
       }
@@ -422,7 +450,21 @@ namespace input {
       if (platf::rebind_gamepad(platf_input, {gamepad.id, static_cast<std::uint8_t>(client_index)}, input->feedback_queue) != 0) {
         free_id(gamepadMask, gamepad.id);
         gamepad.id = -1;
+        continue;
       }
+      // Nova: until this connection uses it, it is a leftover of the previous one.
+      gamepad.stale = true;
+      any_retained = true;
+    }
+
+    if (any_retained) {
+      const std::weak_ptr<input_t> weak = input;
+      task_pool.pushDelayed([weak, generation]() {
+        if (const auto retained = weak.lock(); retained && retained->connection_generation == generation) {
+          release_stale_gamepads(*retained);
+        }
+      },
+                            stale_gamepad_grace);
     }
   }
 
@@ -1290,6 +1332,92 @@ namespace input {
   }
 
   /**
+   * @brief Whether a controller packet carries input a player made, rather than an idle state.
+   *
+   * Small stick values are ignored so drift or rounding can't create a pad.
+   *
+   * @param packet Controller state packet.
+   * @return `true` for any button, a trigger past its first steps, or a stick past 1/8.
+   */
+  bool has_real_input(PNV_MULTI_CONTROLLER_PACKET packet) {
+    constexpr int stick_threshold = 4096;
+    constexpr int trigger_threshold = 16;
+    const auto stick = [](std::int16_t value) {
+      return std::abs(static_cast<int>(value)) >= stick_threshold;
+    };
+    return packet->buttonFlags != 0 || packet->buttonFlags2 != 0 || packet->leftTrigger >= trigger_threshold ||
+           packet->rightTrigger >= trigger_threshold || stick(packet->leftStickX) || stick(packet->leftStickY) ||
+           stick(packet->rightStickX) || stick(packet->rightStickY);
+  }
+
+  /**
+   * @brief Move an unclaimed pad kept from the previous connection to a controller number.
+   *
+   * The pad with the lowest global slot is taken, so the first controller used after a
+   * reconnect keeps player 1.
+   *
+   * @param input Stream input state.
+   * @param client_index Controller number that needs a pad.
+   * @return The claimed global slot, or -1 when there is no stale pad.
+   */
+  int claim_stale_gamepad(input_t &input, int client_index) {
+    int best = -1;
+    for (int index = 0; index < input.gamepads.size(); ++index) {
+      const auto &candidate = input.gamepads[index];
+      if (index != client_index && candidate.stale && candidate.id >= 0 && (best < 0 || candidate.id < input.gamepads[best].id)) {
+        best = index;
+      }
+    }
+    if (best < 0) {
+      return -1;
+    }
+
+    auto &from = input.gamepads[best];
+    auto &to = input.gamepads[client_index];
+    const auto id = from.id;
+    if (platf::rebind_gamepad(platf_input, {id, static_cast<std::uint8_t>(client_index)}, input.feedback_queue) != 0) {
+      return -1;
+    }
+    if (from.back_timeout_id) {
+      task_pool.cancel(from.back_timeout_id);
+      from.back_timeout_id = nullptr;
+    }
+    to.id = id;
+    to.stale = false;
+    to.gamepad_state = {};
+    to.back_button_state = button_state_e::NONE;
+    from.id = -1;
+    from.stale = false;
+    from.gamepad_state = {};
+    from.back_button_state = button_state_e::NONE;
+    BOOST_LOG(info) << "Gamepad "sv << id << " from the previous connection now serves controller "sv << client_index;
+    return id;
+  }
+
+  /**
+   * @brief Destroy pads kept from the previous connection that this connection never used.
+   *
+   * @param input Stream input state.
+   */
+  void release_stale_gamepads(input_t &input) {
+    for (auto &gamepad : input.gamepads) {
+      if (!gamepad.stale || gamepad.id < 0) {
+        continue;
+      }
+      BOOST_LOG(info) << "Removing gamepad "sv << gamepad.id << ": the reconnected client no longer uses it"sv;
+      if (gamepad.back_timeout_id) {
+        task_pool.cancel(gamepad.back_timeout_id);
+        gamepad.back_timeout_id = nullptr;
+      }
+      ::input::free_gamepad(platf_input, gamepad.id);
+      gamepad.id = -1;
+      gamepad.stale = false;
+      gamepad.gamepad_state = {};
+      gamepad.back_button_state = button_state_e::NONE;
+    }
+  }
+
+  /**
    * @brief Allocate a virtual gamepad for a client-relative controller slot.
    *
    * @param input Stream input state.
@@ -1304,9 +1432,21 @@ namespace input {
     }
 
     auto &gamepad = input->gamepads[client_index];
+    gamepad.pending_arrival.reset();
     if (gamepad.id >= 0) {
+      if (gamepad.stale) {
+        // The same controller number as on the previous connection: reuse its pad.
+        gamepad.stale = false;
+        return gamepad.id;
+      }
       BOOST_LOG(warning) << "ControllerNumber already allocated ["sv << client_index << ']';
       return gamepad.id;
+    }
+
+    // Nova: take over a pad the previous connection of this device left behind, so the
+    // controller keeps its player slot and no ghost pad stays in front of it.
+    if (const auto claimed = claim_stale_gamepad(*input, client_index); claimed >= 0) {
+      return claimed;
     }
 
     const auto id = alloc_id(gamepadMask);
@@ -1338,7 +1478,19 @@ namespace input {
       util::endian::little(packet->capabilities),
       util::endian::little(packet->supportedButtonFlags),
     };
-    static_cast<void>(alloc_gamepad(input, packet->controllerNumber, arrival));
+    if (packet->controllerNumber >= input->gamepads.size()) {
+      BOOST_LOG(warning) << "ControllerNumber out of range ["sv << (int) packet->controllerNumber << ']';
+      return;
+    }
+    auto &gamepad = input->gamepads[packet->controllerNumber];
+    if (gamepad.id >= 0) {
+      // Already has a pad (this connection's, or one retained from the previous connection).
+      static_cast<void>(alloc_gamepad(input, packet->controllerNumber, arrival));
+      return;
+    }
+    // Nova: create the virtual pad on the controller's first real input (see gamepad_t).
+    gamepad.pending_arrival = arrival;
+    BOOST_LOG(debug) << "Controller "sv << (int) packet->controllerNumber << " announced; its virtual pad is created on first input"sv;
   }
 
   /**
@@ -1605,9 +1757,21 @@ namespace input {
     // If this is an event for a new gamepad, create the gamepad now. Ideally, the client would
     // send a controller arrival instead of this but it's still supported for legacy clients.
     if ((packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.id < 0) {
-      if (alloc_gamepad(input, packet->controllerNumber, {}) < 0) {
+      // Nova: a pad appears with its first real input, not with an announcement or an idle
+      // packet (arrival events are followed by an all-zero state).
+      if (!has_real_input(packet)) {
         return;
       }
+      const auto arrival = gamepad.pending_arrival.value_or(platf::gamepad_arrival_t {});
+      if (alloc_gamepad(input, packet->controllerNumber, arrival) < 0) {
+        return;
+      }
+    } else if ((packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.stale) {
+      // The previous connection's pad at this number: it is in use again.
+      gamepad.stale = false;
+    } else if (!(packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.id < 0) {
+      gamepad.pending_arrival.reset();
+      return;
     } else if (!(packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.id >= 0) {
       // If this is the final event for a gamepad being removed, free the gamepad and return.
       ::input::free_gamepad(platf_input, gamepad.id);
@@ -2463,6 +2627,48 @@ namespace input {
 
       // Keyboard packets are never batched, so this matches passthrough_next_message().
       ::input::passthrough(input, &packet);
+    }
+
+    void send_controller_arrival(std::shared_ptr<input_t> &input, std::uint8_t controller_number, std::uint8_t type, std::uint16_t capabilities) {
+      SS_CONTROLLER_ARRIVAL_PACKET packet {};
+      packet.header.size = util::endian::big<std::uint32_t>(sizeof(packet) - sizeof(packet.header.size));
+      packet.header.magic = util::endian::little<std::uint32_t>(SS_CONTROLLER_ARRIVAL_MAGIC);
+      packet.controllerNumber = controller_number;
+      packet.type = type;
+      packet.capabilities = util::endian::little(capabilities);
+      packet.supportedButtonFlags = util::endian::little<std::uint32_t>(0xFFFF);
+      ::input::passthrough(input, &packet);
+    }
+
+    void send_controller_state(
+      std::shared_ptr<input_t> &input,
+      std::uint8_t controller_number,
+      std::uint16_t active_mask,
+      std::uint16_t buttons,
+      std::uint8_t left_trigger,
+      std::uint8_t right_trigger,
+      std::int16_t left_x,
+      std::int16_t left_y,
+      std::int16_t right_x,
+      std::int16_t right_y
+    ) {
+      NV_MULTI_CONTROLLER_PACKET packet {};
+      packet.header.size = util::endian::big<std::uint32_t>(sizeof(packet) - sizeof(packet.header.size));
+      packet.header.magic = util::endian::little<std::uint32_t>(MULTI_CONTROLLER_MAGIC_GEN5);
+      packet.controllerNumber = controller_number;
+      packet.activeGamepadMask = static_cast<short>(active_mask);
+      packet.buttonFlags = static_cast<short>(buttons);
+      packet.leftTrigger = left_trigger;
+      packet.rightTrigger = right_trigger;
+      packet.leftStickX = left_x;
+      packet.leftStickY = left_y;
+      packet.rightStickX = right_x;
+      packet.rightStickY = right_y;
+      ::input::passthrough(input, &packet);
+    }
+
+    void release_stale_gamepads(std::shared_ptr<input_t> &input) {
+      ::input::release_stale_gamepads(*input);
     }
 
     void reset_keyboard_state() {
