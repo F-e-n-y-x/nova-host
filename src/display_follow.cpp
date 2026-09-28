@@ -7,9 +7,11 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <stop_token>
 #include <thread>
+#include <tuple>
 
 // lib includes
 #include <nlohmann/json.hpp>
@@ -21,6 +23,7 @@
 #include "audio.h"
 #include "config.h"
 #include "display_follow.h"
+#include "display_modeset.h"
 #include "input.h"
 #include "logging.h"
 #include "platform/common.h"
@@ -157,12 +160,13 @@ namespace display_follow {
     std::jthread thread_;
   };
 
-  controller_t::controller_t(runner_t runner, std::filesystem::path marker, std::shared_ptr<virtual_backend_t> backend, virtual_hooks_t hooks, scheduler_t scheduler):
+  controller_t::controller_t(runner_t runner, std::filesystem::path marker, std::shared_ptr<virtual_backend_t> backend, virtual_hooks_t hooks, scheduler_t scheduler, std::shared_ptr<mirror_backend_t> native):
       runner_ {std::move(runner)},
       marker_ {std::move(marker)},
       backend_ {std::move(backend)},
       hooks_ {std::move(hooks)},
-      scheduler_ {std::move(scheduler)} {
+      scheduler_ {std::move(scheduler)},
+      native_ {std::move(native)} {
     if (!scheduler_.schedule || !scheduler_.cancel) {
       timer_ = std::make_unique<linger_timer_t>();
       scheduler_.schedule = [timer = timer_.get()](std::chrono::milliseconds delay, std::function<void()> fn) {
@@ -225,7 +229,7 @@ namespace display_follow {
         }
         stop_virtual_locked();
       }
-      if (active_ && !cmd.empty()) {
+      if (active_ && (native_active_ || !cmd.empty())) {
         restore_locked(cmd);  // a Mirror switch of the desktop is not needed any more
       }
       BOOST_LOG(info) << "Display follow: virtual display "sv << request.width << 'x' << request.height << '@' << request.fps
@@ -243,6 +247,32 @@ namespace display_follow {
         hooks_.up(*virtual_);
       }
       return outcome_e::virtual_started;
+    }
+
+    // Portrait Mirror: the script can't rotate, so the native switcher turns the desktop output.
+    if (request.rotation != 0 && native_) {
+      if (legacy_prep) {
+        BOOST_LOG(info) << "Display follow: ["sv << request.app_name << "] switches the display with its own prep command, skipping"sv;
+        return outcome_e::skipped_legacy;
+      }
+      if (other_sessions) {
+        BOOST_LOG(info) << "Display follow: another device is streaming, keeping the current display mode"sv;
+        return outcome_e::skipped_busy;
+      }
+      std::lock_guard lg {mutex_};
+      if (virtual_) {
+        stop_virtual_locked();
+      }
+      if (active_ && !native_active_ && !cmd.empty()) {
+        restore_locked(cmd);  // the script's landscape switch first, so the saved original is the real one
+      }
+      BOOST_LOG(info) << "Display follow: portrait "sv << request.width << 'x' << request.height << '@' << request.fps << " (rotation "sv << request.rotation
+                      << ") for "sv << request.client_name << " ["sv << request.app_name << ']';
+      if (!native_->set(request)) {
+        return outcome_e::failed;
+      }
+      mark_native_locked();
+      return outcome_e::switched;
     }
 
     if (cmd.empty()) {
@@ -266,6 +296,9 @@ namespace display_follow {
       // Left running by a Virtual display stream that just ended; this one mirrors the desktop.
       stop_virtual_locked();
     }
+    if (active_ && native_active_) {
+      restore_locked(cmd);  // turned to portrait natively before (e.g. a live rotation back to landscape)
+    }
     BOOST_LOG(info) << "Display follow: "sv << request.width << 'x' << request.height << '@' << request.fps
                     << " for "sv << request.client_name << " ["sv << request.app_name << ']';
     const int ret = runner_(cmd, "set", make_env(request));
@@ -280,7 +313,26 @@ namespace display_follow {
     return outcome_e::switched;
   }
 
+  void controller_t::mark_native_locked() {
+    active_ = true;
+    native_active_ = true;
+    std::error_code ec;
+    std::filesystem::create_directories(marker_.parent_path(), ec);
+    std::ofstream {marker_} << native_marker << '\n';
+  }
+
   bool controller_t::restore_locked(const std::string &cmd) {
+    if (native_active_) {
+      const bool ok = native_ && native_->restore();
+      std::error_code ec;
+      std::filesystem::remove(marker_, ec);
+      active_ = false;
+      native_active_ = false;
+      if (ok) {
+        BOOST_LOG(info) << "Display follow: display restored (rotation undone)"sv;
+      }
+      return ok;
+    }
     const int ret = runner_(cmd, "restore", {});
     std::error_code ec;
     std::filesystem::remove(marker_, ec);
@@ -314,7 +366,7 @@ namespace display_follow {
       stop_virtual_locked();
       done = true;
     }
-    if (!active_ || cmd.empty()) {
+    if (!active_ || (cmd.empty() && !native_active_)) {
       return done;
     }
     return restore_locked(cmd) || done;
@@ -379,17 +431,62 @@ namespace display_follow {
     return virtual_;
   }
 
+  bool controller_t::rotate(const int angle) {
+    if (!display_modeset::valid_rotation(angle)) {
+      return false;
+    }
+    std::lock_guard lg {mutex_};
+    if (virtual_ && backend_) {
+      // A headless screen has no output to rotate: it is resized to the turned size instead.
+      request_t request;
+      std::tie(request.width, request.height) = display_modeset::size_for_rotation(virtual_->width, virtual_->height, angle);
+      request.fps = virtual_->fps;
+      request.mode = "virtual";
+      const int scale = virtual_->scale;
+      auto resized = backend_->resize(request);
+      if (!resized) {
+        BOOST_LOG(error) << "Display follow: couldn't turn the virtual display to "sv << angle << " degrees"sv;
+        return false;
+      }
+      virtual_ = std::move(resized);
+      virtual_->scale = scale;
+      if (hooks_.up) {
+        hooks_.up(*virtual_);
+      }
+      BOOST_LOG(info) << "Display follow: virtual display turned to "sv << virtual_->width << 'x' << virtual_->height;
+      return true;
+    }
+    if (!native_) {
+      return false;
+    }
+    if (active_ && !native_active_) {
+      BOOST_LOG(warning) << "Display follow: the display was switched by display_follow_cmd, which can't rotate"sv;
+      return false;
+    }
+    if (!native_->rotate(angle)) {
+      return false;
+    }
+    mark_native_locked();
+    return true;
+  }
+
   bool controller_t::recover(const std::string &cmd) {
     std::lock_guard lg {mutex_};
     if (backend_) {
       backend_->recover();
     }
+    // The native switcher keeps its own state file, written before it switches.
+    const bool native_restored = native_ && native_->recover();
     std::error_code ec;
     if (!std::filesystem::exists(marker_, ec)) {
-      return false;
+      return native_restored;
     }
     std::string recorded;
     std::getline(std::ifstream {marker_}, recorded);
+    if (recorded == native_marker) {
+      std::filesystem::remove(marker_, ec);
+      return native_restored;
+    }
     const std::string &use = recorded.empty() ? cmd : recorded;
     if (use.empty() || !command_available(use)) {
       std::filesystem::remove(marker_, ec);
@@ -553,14 +650,58 @@ namespace display_follow {
     }
   }  // namespace
 
+  namespace {
+    /**
+     * @brief The native Mirror switcher, bound to the desktop display this process started on.
+     */
+    std::shared_ptr<display_modeset::switcher_t> &native_switcher() {
+#ifdef _WIN32
+      static std::shared_ptr<display_modeset::switcher_t> switcher;
+#else
+      // DISPLAY is read once, before any virtual display exists (capture overrides it briefly).
+      static std::shared_ptr<display_modeset::switcher_t> switcher = []() {
+        const char *display = std::getenv("DISPLAY");
+        const char *xauthority = std::getenv("XAUTHORITY");
+        const char *runtime = std::getenv("XDG_RUNTIME_DIR");
+        const std::filesystem::path legacy = std::filesystem::path {runtime && *runtime ? runtime : "/tmp"} / "sunshine-resolution.metamode";
+        return std::make_shared<display_modeset::switcher_t>(
+          display_modeset::default_runner(display && *display ? display : ":0", xauthority ? xauthority : ""),
+          platf::appdata() / "display_modeset.json",
+          []() {
+            return std::string {"auto"};
+          },
+          legacy
+        );
+      }();
+#endif
+      return switcher;
+    }
+  }  // namespace
+
   controller_t &instance() {
 #ifdef _WIN32
     std::shared_ptr<virtual_backend_t> backend;
 #else
     auto backend = std::make_shared<x_backend_t>(platf::appdata() / "virtual-display");
 #endif
-    static controller_t controller {run_command, platf::appdata() / "display_follow.active", std::move(backend), process_hooks()};
+    static controller_t controller {run_command, platf::appdata() / "display_follow.active", std::move(backend), process_hooks(), {}, native_switcher()};
     return controller;
+  }
+
+  bool rotate(const int angle) {
+    return instance().rotate(angle);
+  }
+
+  nlohmann::json displays_json() {
+    std::vector<display_modeset::output_t> outputs;
+    std::string mirror;
+    if (const auto &switcher = native_switcher()) {
+      outputs = switcher->outputs();
+      if (const auto *picked = display_modeset::pick_output(outputs, "auto")) {
+        mirror = picked->name;
+      }
+    }
+    return display_modeset::displays_json(outputs, mirror, virtual_target());
   }
 
   namespace {

@@ -648,3 +648,171 @@ TEST(DisplayScaleStore, DeviceKeyIsStable) {
   EXPECT_NE(key, display_follow::device_key("-----BEGIN CERTIFICATE-----\nabd\n-----END CERTIFICATE-----\n"));
   EXPECT_EQ(display_follow::device_key("a"), "af63dc4c8601ec8c");  // FNV-1a 64 test vector
 }
+
+namespace {
+  /**
+   * @brief Fake native Mirror switcher that records what the controller asked for.
+   */
+  class fake_mirror_t: public display_follow::mirror_backend_t {
+  public:
+    bool set(const display_follow::request_t &request) override {
+      log.push_back("set " + std::to_string(request.width) + "x" + std::to_string(request.height) + " r" + std::to_string(request.rotation));
+      return !fail;
+    }
+
+    bool rotate(int angle) override {
+      log.push_back("rotate " + std::to_string(angle));
+      return !fail;
+    }
+
+    bool restore() override {
+      log.push_back("restore");
+      return true;
+    }
+
+    bool recover() override {
+      log.push_back("recover");
+      return left_switched;
+    }
+
+    std::vector<std::string> log;  ///< Calls in order.
+    bool fail = false;  ///< Make set() and rotate() fail.
+    bool left_switched = false;  ///< recover() finds a switch from a previous run.
+  };
+
+  /**
+   * @brief Fixture with the native (portrait) Mirror switcher and the virtual display backend.
+   */
+  class DisplayFollowPortraitTest: public DisplayFollowVirtualTest {
+  protected:
+    display_follow::controller_t make_native() {
+      mirror = std::make_shared<fake_mirror_t>();
+      backend = std::make_shared<fake_backend_t>();
+      display_follow::virtual_hooks_t hooks;
+      hooks.up = [this](const virtual_display::target_t &target) {
+        backend->log.push_back("up " + std::to_string(target.width) + "x" + std::to_string(target.height));
+      };
+      return display_follow::controller_t {
+        [this](const std::string &cmd, const std::string &action, const display_follow::env_t &) {
+          calls.push_back({cmd, action, {}});
+          return 0;
+        },
+        marker,
+        backend,
+        hooks,
+        fake_scheduler(),
+        mirror
+      };
+    }
+
+    static display_follow::request_t portrait(const std::string &mode) {
+      auto r = phone(mode);
+      r.width = 1080;
+      r.height = 2340;
+      r.rotation = 90;
+      return r;
+    }
+
+    std::shared_ptr<fake_mirror_t> mirror;  ///< Native switcher of the last make_native().
+  };
+}  // namespace
+
+TEST_F(DisplayFollowPortraitTest, PortraitMirrorRotatesNativelyAndRestores) {
+  auto controller = make_native();
+  EXPECT_EQ(controller.on_stream_request("virtual", script, portrait("mirror"), false, false, "headless_x"), display_follow::outcome_e::switched);
+  EXPECT_EQ(mirror->log, (std::vector<std::string> {"set 1080x2340 r90"}));
+  EXPECT_TRUE(calls.empty());
+  std::string recorded;
+  std::getline(std::ifstream {marker}, recorded);
+  EXPECT_EQ(recorded, "native");
+
+  EXPECT_TRUE(controller.on_last_session_end(script));
+  EXPECT_EQ(mirror->log.back(), "restore");
+  EXPECT_FALSE(controller.active());
+  EXPECT_FALSE(fs::exists(marker));
+  EXPECT_TRUE(calls.empty());
+}
+
+TEST_F(DisplayFollowPortraitTest, LandscapeStillUsesTheScript) {
+  auto controller = make_native();
+  EXPECT_EQ(controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x"), display_follow::outcome_e::switched);
+  EXPECT_TRUE(mirror->log.empty());
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_EQ(calls[0].action, "set");
+}
+
+TEST_F(DisplayFollowPortraitTest, LiveRotationSwitchesBetweenScriptAndNative) {
+  auto controller = make_native();
+  controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x");
+  // Nebula turns to portrait: disconnect, linger, /resume at 1080x2340.
+  controller.on_last_session_end(script, std::chrono::seconds {30});
+  EXPECT_EQ(controller.on_stream_request("virtual", script, portrait("mirror"), false, false, "headless_x"), display_follow::outcome_e::switched);
+  ASSERT_EQ(calls.size(), 2u);
+  EXPECT_EQ(calls[1].action, "restore");  // the script's switch is undone first
+  EXPECT_EQ(mirror->log, (std::vector<std::string> {"set 1080x2340 r90"}));
+  // And back to landscape: the rotation is undone before the script switches again.
+  EXPECT_EQ(controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x"), display_follow::outcome_e::switched);
+  EXPECT_EQ(mirror->log.back(), "restore");
+  ASSERT_EQ(calls.size(), 3u);
+  EXPECT_EQ(calls[2].action, "set");
+}
+
+TEST_F(DisplayFollowPortraitTest, PortraitWorksWithoutAScriptAndKeepsTheRules) {
+  auto controller = make_native();
+  EXPECT_EQ(controller.on_stream_request("virtual", "", portrait("mirror"), true, false, "headless_x"), display_follow::outcome_e::skipped_legacy);
+  EXPECT_EQ(controller.on_stream_request("virtual", "", portrait("mirror"), false, true, "headless_x"), display_follow::outcome_e::skipped_busy);
+  mirror->fail = true;
+  EXPECT_EQ(controller.on_stream_request("virtual", "", portrait("mirror"), false, false, "headless_x"), display_follow::outcome_e::failed);
+  EXPECT_FALSE(controller.active());
+  mirror->fail = false;
+  EXPECT_EQ(controller.on_stream_request("virtual", "", portrait("mirror"), false, false, "headless_x"), display_follow::outcome_e::switched);
+  EXPECT_TRUE(controller.end_now(""));  // a native rotation is undone even without a script
+  EXPECT_EQ(mirror->log.back(), "restore");
+}
+
+TEST_F(DisplayFollowPortraitTest, PortraitVirtualDisplayIsMadePortraitNotRotated) {
+  auto controller = make_native();
+  EXPECT_EQ(controller.on_stream_request("virtual", script, portrait("virtual"), false, false, "headless_x"), display_follow::outcome_e::virtual_started);
+  EXPECT_EQ(backend->log.at(0), "start 1080x2340");
+  EXPECT_TRUE(mirror->log.empty());
+  // A live rotation back to landscape reuses the display at the new size.
+  controller.on_last_session_end(script, std::chrono::seconds {30});
+  EXPECT_EQ(controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x"), display_follow::outcome_e::virtual_reused);
+  EXPECT_EQ(controller.virtual_target()->width, 3120);
+}
+
+TEST_F(DisplayFollowPortraitTest, RotateDisplayTurnsTheVirtualDisplayOrTheDesktop) {
+  auto controller = make_native();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  EXPECT_TRUE(controller.rotate(90));
+  EXPECT_EQ(controller.virtual_target()->width, 1440);
+  EXPECT_EQ(controller.virtual_target()->height, 3120);
+  backend->fail_resize = true;
+  EXPECT_FALSE(controller.rotate(0));
+  EXPECT_EQ(controller.virtual_target()->width, 1440);
+  EXPECT_FALSE(controller.rotate(45));
+  EXPECT_TRUE(controller.end_now(script));
+
+  EXPECT_TRUE(controller.rotate(90));  // no virtual display: the desktop output turns
+  EXPECT_EQ(mirror->log, (std::vector<std::string> {"rotate 90"}));
+  EXPECT_TRUE(controller.active());
+  EXPECT_TRUE(controller.end_now(script));
+  EXPECT_EQ(mirror->log.back(), "restore");
+
+  controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x");
+  EXPECT_FALSE(controller.rotate(90));  // the script's switch can't be rotated
+}
+
+TEST_F(DisplayFollowPortraitTest, StartupRecoveryUndoesANativeRotation) {
+  {
+    auto crashed = make_native();
+    crashed.on_stream_request("virtual", script, portrait("mirror"), false, false, "headless_x");
+  }
+  ASSERT_TRUE(fs::exists(marker));
+  auto restarted = make_native();
+  mirror->left_switched = true;
+  EXPECT_TRUE(restarted.recover(script));
+  EXPECT_EQ(mirror->log, (std::vector<std::string> {"recover"}));
+  EXPECT_TRUE(calls.empty());
+  EXPECT_FALSE(fs::exists(marker));
+}
