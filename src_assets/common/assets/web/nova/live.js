@@ -8,6 +8,7 @@
  * Session shape (host contract):
  *   { id, client_uuid, client_name, app_name, started_at (unix s), resolution: { w, h }, fps_actual,
  *     fps_requested?, codec, bitrate_kbps, latency_ms: { capture, encode, send, total }, loss_pct,
+ *     display: { kind: "desktop" } | { kind: "virtual", name: ":20", w, h, fps },
  *     samples?: [{ t, bitrate_kbps, fps, latency_ms, loss_pct }] }
  *
  * Usage (inside setup): `const live = useLiveSession()` → `live.current`, `live.active`, `live.state`.

@@ -2809,8 +2809,10 @@ a message naming the file instead of streaming a desktop while the game silently
             Switch the host display to the connecting device's resolution and refresh rate on every
             stream start (Nova) — launching or resuming an app, including when another device or a new
             resolution joins an app that is already running — and restore it after the last device
-            disconnects. Runs `display_follow_cmd`. A stream in Mirror mode
-            (Nebula's "Play on desktop", or the app's `nova-display-mode`) leaves the desktop as it is.
+            disconnects. Runs `display_follow_cmd` for Mirror streams (Nebula's "Play on desktop",
+            or the app's `nova-display-mode`) and for clients that don't choose a mode. A stream in
+            Virtual display mode gets its own screen instead and leaves the desktop as it is (see
+            `virtual_display`).
             While another device is streaming, the current mode is kept. Apps whose own prep command
             still runs the same script are skipped on launch to avoid switching twice.
             @note{Applies to Linux and FreeBSD.}
@@ -2862,6 +2864,110 @@ a message naming the file instead of streaming a desktop while the game silently
         <td>Example</td>
         <td colspan="2">@code{}
             display_follow_cmd = /home/me/bin/set-display.sh
+            @endcode</td>
+    </tr>
+</table>
+
+### virtual_display
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            What a stream in Virtual display mode (Nebula's "Virtual display", or an app's
+            `nova-display-mode = virtual`) gets (Nova). With `headless_x`, Nova starts a separate
+            X server for it (`Xorg :N -seat seat-nova`, the first free display from `:20`) on the
+            NVIDIA GPU, with no outputs and a screen at exactly the device's resolution. The app is
+            launched there (`DISPLAY=:N`, `PULSE_SINK` set to Nova's capture sink, and the frame cap
+            below), NvFBC captures only that screen, and Nova's keyboard, mouse, touch and pen are
+            moved to it. The desktop on `:0` keeps its resolution, windows, pointer and default
+            audio output. The screen is removed when the last device disconnects, which also ends
+            the app on it; a crashed run's screen is cleaned up at the next start.
+            One virtual display runs at a time: a second device that connects while it runs joins
+            the same stream.
+            Requires the NVIDIA proprietary driver with NvFBC (`capture = nvfbc`), Xorg
+            (`/usr/lib/xorg/Xorg`) and xrandr; the input seat needs the packaged udev rule
+            `61-nova-host-vd-seat.rules` (without it, input is disabled for the stream so it can't
+            reach the desktop). Apps started through an already running Steam client open where
+            Steam runs, not on the virtual display.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            virtual_display = headless_x
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            virtual_display = off
+            @endcode</td>
+    </tr>
+    <tr>
+        <td rowspan="2">Choices</td>
+        <td>headless_x</td>
+        <td>A separate headless X server per Virtual display session.</td>
+    </tr>
+    <tr>
+        <td>off</td>
+        <td>Virtual display runs `display_follow_cmd` like Mirror (resizes the desktop).</td>
+    </tr>
+</table>
+
+### virtual_display_wm
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Window manager Nova starts on the virtual display (Nova), run through `/bin/sh -c`.
+            It gives windows focus, fullscreen and decorations. A second desktop session for the
+            same user (such as Cinnamon) is not recommended, because it shares D-Bus and settings
+            with the live desktop. `none` starts no window manager.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            virtual_display_wm = openbox
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            virtual_display_wm = none
+            @endcode</td>
+    </tr>
+</table>
+
+### virtual_display_fps_cap
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Frame cap for apps launched on the virtual display (Nova). The screen has no refresh of
+            its own, so an uncapped game renders as fast as the GPU allows. Nova sets
+            `DXVK_FRAME_RATE`, `VKD3D_FRAME_RATE` and `__GL_SYNC_TO_VBLANK=0`, and when MangoHud is
+            installed, `MANGOHUD=1` with `MANGOHUD_CONFIG=fps_limit=<fps>,no_display` and its OpenGL
+            library in `LD_PRELOAD`. `0` caps at the device's frame rate, `-1` sets no cap, any other
+            value caps at that rate.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            virtual_display_fps_cap = 0
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            virtual_display_fps_cap = 60
             @endcode</td>
     </tr>
 </table>

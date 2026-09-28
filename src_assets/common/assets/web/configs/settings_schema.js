@@ -157,6 +157,19 @@ export const OPTIONS = {
     type: 'text', mono: true, platforms: ['linux', 'freebsd'], placeholder: { default: '/usr/local/bin/sunshine-resolution.sh' },
     when: (c) => c.display_follow !== 'off',
   },
+  virtual_display: {
+    type: 'choice', platforms: ['linux'],
+    choices: ['headless_x', 'off'].map((value) => ({ value, label: `nova.settings.choices.virtual_display_${value}` })),
+    when: (c) => c.display_follow !== 'off',
+  },
+  virtual_display_wm: {
+    type: 'text', mono: true, platforms: ['linux'], placeholder: { default: 'openbox' },
+    when: (c) => c.display_follow !== 'off' && c.virtual_display !== 'off',
+  },
+  virtual_display_fps_cap: {
+    type: 'number', unit: 'fps', min: -1, max: 1000, integer: true, platforms: ['linux'],
+    when: (c) => c.display_follow !== 'off' && c.virtual_display !== 'off',
+  },
   adapter_name: {
     type: 'text', mono: true, hideOn: ['macos'],
     placeholder: { windows: 'Radeon RX 580 Series', default: '/dev/dri/renderD128' },
@@ -421,7 +434,8 @@ export const SECTIONS = [
   { id: 'compat', options: ['windows_launcher', 'proton_auto_update', 'windows_exe_launcher'] },
   {
     id: 'display',
-    options: ['capture', 'capture_pacing', 'display_follow', 'display_follow_cmd', 'adapter_name', 'output_name', 'max_bitrate', 'minimum_fps_target', 'max_fps_target',
+    options: ['capture', 'capture_pacing', 'display_follow', 'display_follow_cmd', 'virtual_display', 'virtual_display_wm',
+      'virtual_display_fps_cap', 'adapter_name', 'output_name', 'max_bitrate', 'minimum_fps_target', 'max_fps_target',
       'dd_configuration_option', 'dd_resolution_option', 'dd_manual_resolution', 'dd_refresh_rate_option', 'dd_manual_refresh_rate',
       'dd_hdr_option', 'dd_wa_hdr_toggle_delay', 'dd_config_revert_delay', 'dd_config_revert_on_disconnect', 'dd_mode_remapping'],
   },

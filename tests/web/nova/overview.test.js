@@ -130,6 +130,15 @@ describe('overview cards', () => {
     w.unmount()
   })
 
+  it('stream bar names the virtual display a stream captures', () => {
+    const desk = mountNova(StreamBar, { props: { session: { ...SESSION, display: { kind: 'desktop' } } } })
+    expect(desk.text()).not.toContain('Virtual display')
+    desk.unmount()
+    const vd = mountNova(StreamBar, { props: { session: { ...SESSION, display: { kind: 'virtual', name: ':20', w: 2340, h: 1080, fps: 120 } } } })
+    expect(vd.find('.nv-sbar__vd').text()).toBe('Virtual display :20 2340×1080@120')
+    vd.unmount()
+  })
+
   it('devices card orders streaming first and states status in text', () => {
     const w = mountNova(DevicesCard, { props: { devices: [
       { uuid: 'x', name: 'Tablet', enabled: false },

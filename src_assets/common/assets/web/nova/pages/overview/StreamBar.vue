@@ -35,6 +35,13 @@ const resolution = computed(() => {
   const r = props.session.resolution
   return r?.w && r?.h ? `${r.w}×${r.h}` : '—'
 })
+/** "Virtual display :20 2340×1080@120" when the stream captures a Nova virtual display. */
+const virtualDisplay = computed(() => {
+  const d = props.session.display
+  if (d?.kind !== 'virtual' || !d.name) return ''
+  const mode = d.w && d.h ? `${d.w}×${d.h}${d.fps ? `@${d.fps}` : ''}` : ''
+  return t('nova.overview.virtual_display', { name: d.name, mode }).trim()
+})
 const fps = computed(() => (Number.isFinite(props.session.fps_actual) ? `${Math.round(props.session.fps_actual)} fps` : '—'))
 const series = computed(() => bitrateSeries(props.session))
 const latest = computed(() => {
@@ -55,6 +62,7 @@ const sparkLabel = computed(() => (latest.value === null
     <div class="nv-sbar__who">
       <span class="nv-sbar__live"><span class="nv-sbar__dot" aria-hidden="true"></span>{{ t('nova.overview.live_for', { time: elapsed }) }}</span>
       <h2 id="nv-sbar-title" class="nv-sbar__title">{{ t('nova.live.title', { app, device }) }}</h2>
+      <span v-if="virtualDisplay" class="nv-sbar__vd nv-mono" :title="t('nova.overview.virtual_display_hint')">{{ virtualDisplay }}</span>
       <span v-if="more > 0" class="nv-sbar__more">{{ t('nova.overview.more_streams', { n: more }, more) }}</span>
     </div>
     <dl class="nv-sbar__stats">
@@ -144,6 +152,14 @@ const sparkLabel = computed(() => (latest.value === null
   .nv-sbar__more {
     font-size: var(--nv-text-xs);
     color: var(--nv-text-muted);
+  }
+
+  .nv-sbar__vd {
+    font-size: var(--nv-text-xs);
+    color: var(--nv-text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .nv-sbar__stats {
