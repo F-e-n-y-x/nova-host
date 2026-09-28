@@ -13,6 +13,7 @@
 #   NOVA_COMPAT_FPS         frame rate cap (DXVK)
 #   NOVA_COMPAT_MANGOHUD    1 = MangoHud overlay
 #   NOVA_COMPAT_ENV         extra KEY=VALUE lines
+#   NOVA_PROTON_NATIVE_SONY 1 = keep PlayStation pads as native Sony HID (default: map them to XInput)
 set -u
 
 EXE="${1:-}"
@@ -115,6 +116,14 @@ fi
 while IFS= read -r kv; do
     [ -n "$kv" ] && export "${kv?}"
 done <<< "${NOVA_COMPAT_ENV:-}"
+
+# Controllers: Nova's DualSense/DualShock pads (gamepad_motion_profile) reach Wine as raw Sony
+# HID devices, which XInput-only games (most Windows games, e.g. GTA V) don't see at all. Have
+# GE-Proton map Sony pads to XInput. Set NOVA_PROTON_NATIVE_SONY=1 for a game that supports
+# PlayStation controllers natively (and wants their touchpad, gyro or adaptive triggers).
+if [ "${NOVA_PROTON_NATIVE_SONY:-0}" != "1" ]; then
+    export PROTON_SONY_HIDRAW_XINPUT="${PROTON_SONY_HIDRAW_XINPUT:-1}"
+fi
 
 cd "$(dirname "$EXE")" || exit 2
 

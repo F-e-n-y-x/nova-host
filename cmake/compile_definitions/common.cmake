@@ -69,33 +69,48 @@ endif()
 
 # libvirtualhid
 # Nova carries local libvirtualhid fixes in third-party/patches/libvirtualhid until they land
-# upstream. Each patch is applied once to the submodule; a patch that neither applies nor is
-# already applied stops the configure so a submodule bump can't silently drop a fix.
+# upstream. When the submodule doesn't hold exactly this patch set (a fresh checkout, or an older
+# version of a patch applied by an earlier configure), its tracked files are reset and every patch
+# is applied again. A patch that doesn't apply to the pinned submodule stops the configure, so a
+# submodule bump can't silently drop a fix.
 set(NOVA_LIBVIRTUALHID_DIR "${CMAKE_SOURCE_DIR}/third-party/libvirtualhid")
 file(GLOB NOVA_LIBVIRTUALHID_PATCHES "${CMAKE_SOURCE_DIR}/third-party/patches/libvirtualhid/*.patch")
 list(SORT NOVA_LIBVIRTUALHID_PATCHES)
 if(NOVA_LIBVIRTUALHID_PATCHES)
     find_package(Git REQUIRED)
+    set(nova_patches_present TRUE)
+    foreach(nova_patch IN LISTS NOVA_LIBVIRTUALHID_PATCHES)
+        execute_process(
+                COMMAND "${GIT_EXECUTABLE}" apply --reverse --check "${nova_patch}"
+                WORKING_DIRECTORY "${NOVA_LIBVIRTUALHID_DIR}"
+                RESULT_VARIABLE nova_patch_applied
+                OUTPUT_QUIET ERROR_QUIET)
+        if(NOT nova_patch_applied EQUAL 0)
+            set(nova_patches_present FALSE)
+        endif()
+    endforeach()
+    if(NOT nova_patches_present)
+        execute_process(
+                COMMAND "${GIT_EXECUTABLE}" checkout -- .
+                WORKING_DIRECTORY "${NOVA_LIBVIRTUALHID_DIR}"
+                RESULT_VARIABLE nova_reset_result
+                ERROR_VARIABLE nova_reset_error)
+        if(NOT nova_reset_result EQUAL 0)
+            message(FATAL_ERROR "Failed to reset libvirtualhid before applying Nova's patches:\n${nova_reset_error}")
+        endif()
+        foreach(nova_patch IN LISTS NOVA_LIBVIRTUALHID_PATCHES)
+            execute_process(
+                    COMMAND "${GIT_EXECUTABLE}" apply "${nova_patch}"
+                    WORKING_DIRECTORY "${NOVA_LIBVIRTUALHID_DIR}"
+                    RESULT_VARIABLE nova_patch_result
+                    ERROR_VARIABLE nova_patch_error)
+            if(NOT nova_patch_result EQUAL 0)
+                message(FATAL_ERROR "Failed to apply ${nova_patch} to libvirtualhid:\n${nova_patch_error}")
+            endif()
+            message(STATUS "Applied libvirtualhid patch: ${nova_patch}")
+        endforeach()
+    endif()
 endif()
-foreach(nova_patch IN LISTS NOVA_LIBVIRTUALHID_PATCHES)
-    execute_process(
-            COMMAND "${GIT_EXECUTABLE}" apply --reverse --check "${nova_patch}"
-            WORKING_DIRECTORY "${NOVA_LIBVIRTUALHID_DIR}"
-            RESULT_VARIABLE nova_patch_applied
-            OUTPUT_QUIET ERROR_QUIET)
-    if(nova_patch_applied EQUAL 0)
-        continue()
-    endif()
-    execute_process(
-            COMMAND "${GIT_EXECUTABLE}" apply "${nova_patch}"
-            WORKING_DIRECTORY "${NOVA_LIBVIRTUALHID_DIR}"
-            RESULT_VARIABLE nova_patch_result
-            ERROR_VARIABLE nova_patch_error)
-    if(NOT nova_patch_result EQUAL 0)
-        message(FATAL_ERROR "Failed to apply ${nova_patch} to libvirtualhid:\n${nova_patch_error}")
-    endif()
-    message(STATUS "Applied libvirtualhid patch: ${nova_patch}")
-endforeach()
 add_subdirectory("${NOVA_LIBVIRTUALHID_DIR}")
 list(APPEND SUNSHINE_EXTERNAL_LIBRARIES libvirtualhid::libvirtualhid)
 list(APPEND PLATFORM_TARGET_FILES

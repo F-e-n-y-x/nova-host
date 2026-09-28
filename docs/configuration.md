@@ -912,6 +912,12 @@ a message naming the file instead of streaming a desktop while the game silently
             <br>
             This check runs before the client-reported controller type, so an Xbox-style pad with
             gyro gets a DualSense. Pads without motion keep the usual choice.
+            <br>
+            <br>
+            Windows games run through Nova's GE-Proton launcher see these PlayStation pads as
+            XInput controllers (`nova-proton-run` sets `PROTON_SONY_HIDRAW_XINPUT=1`), because most
+            Windows games, such as GTA V, only read XInput. Put `NOVA_PROTON_NATIVE_SONY=1` in a
+            game's extra environment to keep the native DualSense for games that support it.
             @hint{Only applies when gamepad is set to auto. Linux uses uhid and the kernel's
             hid-playstation driver; the motion sensors show up as a separate
             "... Motion Sensors" event device.}

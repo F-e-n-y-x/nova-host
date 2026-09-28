@@ -181,6 +181,50 @@ namespace input {
     void reset_keyboard_state();
 
     /**
+     * @brief Pass a controller arrival packet through the stream input path synchronously.
+     *
+     * @param input Stream input state.
+     * @param controller_number Client-relative controller number.
+     * @param type Client controller type (LI_CTYPE_*).
+     * @param capabilities Client capability flags (LI_CCAP_*).
+     */
+    void send_controller_arrival(std::shared_ptr<input_t> &input, std::uint8_t controller_number, std::uint8_t type, std::uint16_t capabilities);
+
+    /**
+     * @brief Pass a controller state (MULTI_CONTROLLER) packet through the stream input path synchronously.
+     *
+     * @param input Stream input state.
+     * @param controller_number Client-relative controller number.
+     * @param active_mask Active gamepad mask; the controller's bit must be set for it to stay connected.
+     * @param buttons Button flags.
+     * @param left_trigger Left trigger, 0-255.
+     * @param right_trigger Right trigger, 0-255.
+     * @param left_x Left stick X.
+     * @param left_y Left stick Y.
+     * @param right_x Right stick X.
+     * @param right_y Right stick Y.
+     */
+    void send_controller_state(
+      std::shared_ptr<input_t> &input,
+      std::uint8_t controller_number,
+      std::uint16_t active_mask,
+      std::uint16_t buttons,
+      std::uint8_t left_trigger = 0,
+      std::uint8_t right_trigger = 0,
+      std::int16_t left_x = 0,
+      std::int16_t left_y = 0,
+      std::int16_t right_x = 0,
+      std::int16_t right_y = 0
+    );
+
+    /**
+     * @brief Run the stale-pad cleanup now instead of after the grace period.
+     *
+     * @param input Stream input state.
+     */
+    void release_stale_gamepads(std::shared_ptr<input_t> &input);
+
+    /**
      * @brief Release every key Sunshine tracks as pressed, as a disconnect does.
      */
     void release_held_keys();
