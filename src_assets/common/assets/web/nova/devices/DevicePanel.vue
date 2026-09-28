@@ -16,6 +16,7 @@ import {
   PERMISSION_FLAGS, absoluteTime, isValidDeviceName, permissionFlags, presetForFlags, relativeTime, shortId,
 } from './format'
 import { sessionSummary } from '../live'
+import { fetchJson } from '../api'
 
 const props = defineProps({
   device: { type: Object, default: null },
@@ -33,7 +34,23 @@ const draftFlags = shallowRef(permissionFlags(null))
 const nameError = shallowRef('')
 const confirmUnpair = shallowRef(false)
 const confirmDiscard = shallowRef(false)
+const commandNames = shallowRef(null)
 let resolveDiscard = null
+
+/** Names of the host commands defined on this PC, shown next to the Host commands switch. */
+async function loadCommandNames() {
+  try {
+    const body = await fetchJson('./api/host-commands')
+    const names = [...(body.global || []), ...(body.apps || []).flatMap((a) => a.commands || [])].map((c) => c.name)
+    commandNames.value = [...new Set(names)]
+  } catch {
+    commandNames.value = null
+  }
+}
+
+watch(open, (isOpen) => {
+  if (isOpen && commandNames.value === null) loadCommandNames()
+}, { immediate: true })
 
 const name = computed(() => props.device?.name || t('nova.devices.unnamed'))
 const live = computed(() => !!(props.session || props.device?.connected))
@@ -153,7 +170,7 @@ watch(confirmDiscard, (isOpen) => {
           </span>
           <NvSwitch v-model="draftEnabled" labelledby="nv-dpanel-allow" describedby="nv-dpanel-allow-desc" :disabled="busy" />
         </div>
-        <PermissionEditor v-model="draftFlags" :disabled="busy" />
+        <PermissionEditor v-model="draftFlags" :disabled="busy" :command-names="commandNames" />
         <p class="nv-dpanel__note">{{ t('nova.devices.permissions_intro', { name }) }}</p>
       </section>
       <button type="submit" hidden tabindex="-1" aria-hidden="true"></button>

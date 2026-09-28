@@ -108,6 +108,10 @@ export const OPTIONS = {
   system_tray: { type: 'bool' },
   global_prep_cmd: { type: 'PrepCommandsEditor' },
 
+  // Host control (Nova)
+  pcsleep_enabled: { type: 'bool', platforms: ['linux'] },
+  host_commands: { type: 'HostCommandsEditor', platforms: ['linux'] },
+
   // Windows games (Linux)
   windows_launcher: { type: 'choice', hideOn: ['windows', 'macos'], choices: named('windows_launcher', ['proton', 'wine', 'custom']) },
   proton_auto_update: { type: 'bool', hideOn: ['windows', 'macos'], when: (c) => (c.windows_launcher || 'proton') === 'proton' },
@@ -454,6 +458,7 @@ export const SECTIONS = [
   },
   { id: 'encoder', options: ['encoder', 'hevc_mode', 'av1_mode'], encoders: true },
   { id: 'audio', options: ['stream_audio', 'audio_sink', 'virtual_sink', 'install_steam_audio_drivers', 'mic_enabled'] },
+  { id: 'host', options: ['pcsleep_enabled', 'host_commands'] },
   {
     id: 'input',
     options: ['controller', 'gamepad_driver', 'gamepad', 'gamepad_motion_profile', 'motion_as_ds4', 'touchpad_as_ds4', 'ds4_back_as_touchpad_click',

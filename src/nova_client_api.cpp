@@ -1008,4 +1008,87 @@ namespace nova_api {
       }
     }).detach();
   }
+
+  nlohmann::json capabilities(const std::string &version, const host_features_t &features, const client_permissions::mask_t permissions) {
+    nlohmann::json list = {"apps", "art", "details", "display_mode", "bitrate", "sessions", "display_scale", "portrait", "rotate", "wol", "rumble", "trigger_rumble"};
+    if (features.pcsleep) {
+      list.push_back("pcsleep");
+    }
+    if (features.commands) {
+      list.push_back("commands");
+      list.push_back("supercmd");
+    }
+    if (features.mic) {
+      list.push_back("mic");
+    }
+    if (features.clipboard) {
+      list.push_back("clipboard");
+    }
+    if (features.motion) {
+      list.push_back("motion");
+    }
+    nlohmann::json granted = nlohmann::json::array();
+    for (const auto &[name, flag] : client_permissions::flag_names) {
+      if (client_permissions::has(permissions, flag)) {
+        granted.push_back(std::string {name});
+      }
+    }
+    return {{"nova", true}, {"version", version}, {"features", std::move(list)}, {"permissions", std::move(granted)}};
+  }
+
+  std::optional<refusal_t> pcsleep_refusal(const bool enabled, const client_permissions::mask_t permissions, const int other_sessions) {
+    if (!client_permissions::has(permissions, client_permissions::power)) {
+      return refusal_t {403, "This device isn't allowed to put the host to sleep. Allow \"Sleep this PC\" for it on the Devices page."};
+    }
+    if (!enabled) {
+      return refusal_t {503, "Sleep is turned off on this host (pcsleep_enabled)."};
+    }
+    if (other_sessions > 0) {
+      return refusal_t {409, "Another device is streaming from this host."};
+    }
+    return std::nullopt;
+  }
+
+  nlohmann::json commands_list(const bool allowed, const std::vector<host_commands::command_t> &global, const nlohmann::json &apps, const bool can_see_all, const std::optional<std::size_t> running) {
+    nlohmann::json list = nlohmann::json::array();
+    if (!allowed) {
+      return {{"allowed", false}, {"commands", std::move(list)}};
+    }
+    const auto entry = [](const host_commands::command_t &command, const nlohmann::json &app, const bool runnable) {
+      nlohmann::json last = nullptr;
+      bool is_running = false;
+      if (const auto run = host_commands::last_run(command.id)) {
+        is_running = run->running;
+        if (!run->running) {
+          last = {{"at", run->started_at}, {"exit_code", run->result.exit_code}, {"ok", run->result.ok()}, {"timed_out", run->result.timed_out}};
+        }
+      }
+      return nlohmann::json {
+        {"id", command.id},
+        {"name", command.name},
+        {"icon", command.icon.empty() ? nlohmann::json(nullptr) : nlohmann::json(command.icon)},
+        {"confirm", command.confirm},
+        {"scope", app.is_null() ? "global" : "app"},
+        {"app", app},
+        {"runnable", runnable},
+        {"running", is_running},
+        {"last_run", last},
+      };
+    };
+    if (apps.is_array()) {
+      for (std::size_t i = 0; i < apps.size(); ++i) {
+        const bool is_running_app = running && *running == i;
+        if (!can_see_all && !is_running_app) {
+          continue;
+        }
+        for (const auto &command : host_commands::for_app(apps[i])) {
+          list.push_back(entry(command, nlohmann::json(app_id(apps[i])), is_running_app));
+        }
+      }
+    }
+    for (const auto &command : global) {
+      list.push_back(entry(command, nlohmann::json(nullptr), true));
+    }
+    return {{"allowed", true}, {"commands", std::move(list)}};
+  }
 }  // namespace nova_api

@@ -43,7 +43,7 @@ const rows = computed(() => (props.devices || []).map((d) => {
     sub = d.last_connected_at
       ? t('nova.overview.last_connected', { when: relativeTime(d.last_connected_at, locale.value) })
       : t('nova.overview.never_connected')
-    if (preset !== 'full') sub += ` · ${t(`nova.overview.preset_${preset}`)}`
+    if (preset !== 'standard') sub += ` · ${t(`nova.overview.preset_${preset}`)}`
   }
   return { ...d, streaming, sub, tone, title: absoluteTime(d.last_connected_at, locale.value) }
 }).sort((a, b) => Number(b.streaming) - Number(a.streaming)))

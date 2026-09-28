@@ -35,23 +35,47 @@ namespace client_permissions {
   constexpr mask_t input_touch_pen = 1u << 3;  ///< Touchscreen and pen input.
   constexpr mask_t clipboard = 1u << 4;  ///< Clipboard sync and file transfer in both directions.
   constexpr mask_t launch_apps = 1u << 5;  ///< See every app and start one; without it only the running app can be resumed.
+  constexpr mask_t power = 1u << 6;  ///< Put the host to sleep (/pcsleep).
+  constexpr mask_t host_commands = 1u << 7;  ///< Run admin-defined host commands (/supercmd).
 
   constexpr mask_t input_all = input_keyboard | input_mouse | input_controller | input_touch_pen;  ///< Every input kind.
-  constexpr mask_t full = input_all | clipboard | launch_apps;  ///< Preset: everything (the default for every client).
+  constexpr mask_t full = input_all | clipboard | launch_apps | power | host_commands;  ///< Preset: everything, including sleep and host commands.
+  constexpr mask_t standard = input_all | clipboard | launch_apps;  ///< Preset: stream, launch and clipboard; no host control (the default for new devices).
   constexpr mask_t play = input_all | launch_apps;  ///< Preset: launch apps and use all input, no clipboard.
   constexpr mask_t view_only = 0;  ///< Preset: watch the running app; no input, no launching, no clipboard.
+  constexpr mask_t paired_default = standard;  ///< What a newly paired device gets.
+
+  /**
+   * @brief Flags that control the host rather than the stream.
+   *
+   * State files written before a flag existed have no key for it; these default to off there,
+   * the others to on (see default_when_missing()).
+   */
+  constexpr mask_t host_control = power | host_commands;
 
   /**
    * @brief JSON key for each flag, in display order.
    */
-  constexpr std::array<std::pair<std::string_view, mask_t>, 6> flag_names {{
+  constexpr std::array<std::pair<std::string_view, mask_t>, 8> flag_names {{
     {"input_keyboard", input_keyboard},
     {"input_mouse", input_mouse},
     {"input_controller", input_controller},
     {"input_touch_pen", input_touch_pen},
     {"clipboard", clipboard},
     {"launch_apps", launch_apps},
+    {"power", power},
+    {"host_commands", host_commands},
   }};
+
+  /**
+   * @brief Value to assume for a flag a stored permission object doesn't mention.
+   *
+   * @param flag Flag.
+   * @return False for host-control flags (so an upgrade never grants them), true otherwise.
+   */
+  constexpr bool default_when_missing(const mask_t flag) {
+    return (flag & host_control) == 0;
+  }
 
   /**
    * @brief Test whether a mask grants a flag.
@@ -78,12 +102,14 @@ namespace client_permissions {
    * @brief Name of the preset a mask matches.
    *
    * @param mask Permission mask.
-   * @return "full", "play", "view_only", or "custom".
+   * @return "full", "standard", "play", "view_only", or "custom".
    */
   constexpr std::string_view preset_name(const mask_t mask) {
     switch (sanitize(mask)) {
       case full:
         return "full";
+      case standard:
+        return "standard";
       case play:
         return "play";
       case view_only:
@@ -96,12 +122,15 @@ namespace client_permissions {
   /**
    * @brief Mask for a preset name.
    *
-   * @param name "full", "play" or "view_only".
+   * @param name "full", "standard", "play" or "view_only".
    * @return The preset mask, or `std::nullopt` for an unknown name.
    */
   constexpr std::optional<mask_t> preset_mask(const std::string_view name) {
     if (name == "full") {
       return full;
+    }
+    if (name == "standard") {
+      return standard;
     }
     if (name == "play") {
       return play;

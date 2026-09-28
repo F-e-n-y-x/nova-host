@@ -65,7 +65,9 @@ TEST(ClientPermissionsTest, JsonRoundTripListsEveryFlagAndThePreset) {
 
 TEST(ClientPermissionsTest, JsonUpdatesApplyPresetThenFlags) {
   EXPECT_EQ(perm::apply_json(perm::full, {{"preset", "view_only"}}), perm::view_only);
-  EXPECT_EQ(perm::apply_json(perm::full, {{"clipboard", false}}), perm::play);
+  EXPECT_EQ(perm::apply_json(perm::standard, {{"clipboard", false}}), perm::play);
+  EXPECT_EQ(perm::apply_json(perm::full, {{"power", false}, {"host_commands", false}}), perm::standard);
+  EXPECT_EQ(perm::apply_json(perm::play, {{"preset", "standard"}, {"power", true}}), perm::standard | perm::power);
   EXPECT_EQ(
     perm::apply_json(perm::full, {{"preset", "view_only"}, {"input_mouse", true}}),
     perm::input_mouse
@@ -115,4 +117,18 @@ TEST(ClientPermissionsTest, UnknownAndShortPackets) {
   // Too short to classify: let passthrough() reject it as malformed.
   const std::vector<std::uint8_t> runt {0x01, 0x02};
   EXPECT_TRUE(input::is_packet_permitted(runt, perm::view_only));
+}
+
+TEST(ClientPermissionsTest, HostControlFlagsArePresetsAndDefaultOff) {
+  EXPECT_EQ(perm::preset_name(perm::standard), "standard");
+  EXPECT_EQ(perm::preset_mask("standard"), perm::standard);
+  EXPECT_EQ(perm::paired_default, perm::standard);
+  EXPECT_FALSE(perm::has(perm::paired_default, perm::power));
+  EXPECT_FALSE(perm::has(perm::paired_default, perm::host_commands));
+  EXPECT_FALSE(perm::has(perm::play, perm::host_commands));
+  EXPECT_TRUE(perm::has(perm::full, perm::power | perm::host_commands));
+  EXPECT_FALSE(perm::default_when_missing(perm::power));
+  EXPECT_FALSE(perm::default_when_missing(perm::host_commands));
+  EXPECT_TRUE(perm::default_when_missing(perm::clipboard));
+  EXPECT_EQ(perm::preset_name(perm::standard | perm::power), "custom");
 }

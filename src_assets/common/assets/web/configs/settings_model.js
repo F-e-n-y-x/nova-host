@@ -20,7 +20,7 @@ export function clone(value) {
 export const RESPONSE_ONLY_KEYS = ['platform', 'status', 'version', 'username']
 
 /** Options stored as JSON text in the config file. */
-export const JSON_OPTIONS = ['dd_mode_remapping', 'global_prep_cmd']
+export const JSON_OPTIONS = ['dd_mode_remapping', 'global_prep_cmd', 'host_commands']
 
 /** Defaults for every option, from config_tabs.json. */
 export const DEFAULTS = Object.freeze(Object.fromEntries(

@@ -218,19 +218,21 @@ namespace {
   }
 }  // namespace
 
-TEST_F(ClientAuthorizationTest, NewClientsGetFullAccessAndAPairingTime) {
+TEST_F(ClientAuthorizationTest, NewClientsGetStandardAccessAndAPairingTime) {
   const auto credentials = crypto::gen_creds("Sunshine Permissions Client", 2048);
   const auto uuid = nvhttp::test_support::add_client("phone", credentials.x509, true);
   ASSERT_FALSE(uuid.empty());
 
   const auto client = listed_client(uuid);
   ASSERT_FALSE(client.is_null());
-  EXPECT_EQ(client.at("permissions").at("preset"), "full");
+  EXPECT_EQ(client.at("permissions").at("preset"), "standard");
+  EXPECT_FALSE(client.at("permissions").at("power").get<bool>());
+  EXPECT_FALSE(client.at("permissions").at("host_commands").get<bool>());
   EXPECT_TRUE(client.at("paired_at").is_number_integer());
   EXPECT_GT(client.at("paired_at").get<std::int64_t>(), 0);
   EXPECT_TRUE(client.at("last_connected_at").is_null());
   EXPECT_FALSE(client.at("connected").get<bool>());
-  EXPECT_EQ(nvhttp::get_client_permissions(credentials.x509), client_permissions::full);
+  EXPECT_EQ(nvhttp::get_client_permissions(credentials.x509), client_permissions::standard);
 }
 
 TEST_F(ClientAuthorizationTest, PermissionsNamesAndConnectionTimesPersist) {
@@ -261,7 +263,7 @@ TEST_F(ClientAuthorizationTest, UnknownClientsCannotBeUpdatedAndGetNoPermissions
   EXPECT_FALSE(nvhttp::set_client_name("no-such-uuid", "Phone"));
   EXPECT_FALSE(nvhttp::get_client_permissions_by_uuid("no-such-uuid").has_value());
   EXPECT_EQ(nvhttp::get_client_permissions(unknown.x509), client_permissions::view_only);
-  EXPECT_EQ(nvhttp::get_client_permissions(""), client_permissions::full);
+  EXPECT_EQ(nvhttp::get_client_permissions(""), client_permissions::paired_default);
 }
 
 TEST_F(ClientAuthorizationTest, PermissionsFollowTheConnectionNotTheLatestHandshake) {
@@ -284,7 +286,7 @@ TEST_F(ClientAuthorizationTest, PermissionsFollowTheConnectionNotTheLatestHandsh
 
   EXPECT_EQ(nvhttp::verified_cert_for(restricted_conn), restricted.x509);
   EXPECT_EQ(nvhttp::permissions_for_peer(restricted_conn), client_permissions::view_only);
-  EXPECT_EQ(nvhttp::permissions_for_peer(trusted_conn), client_permissions::full);
+  EXPECT_EQ(nvhttp::permissions_for_peer(trusted_conn), client_permissions::paired_default);
 }
 
 TEST_F(ClientAuthorizationTest, UnknownConnectionsGetNoPermissions) {
@@ -311,7 +313,7 @@ TEST_F(ClientAuthorizationTest, DeviceNamesAreValidated) {
   EXPECT_EQ(listed_client(uuid).at("name"), "before");
 }
 
-TEST_F(ClientAuthorizationTest, StateFilesWithoutNewFieldsKeepFullAccess) {
+TEST_F(ClientAuthorizationTest, StateFilesWithoutNewFieldsKeepStreamingAccess) {
   const auto credentials = crypto::gen_creds("Sunshine Legacy Client", 2048);
   const nlohmann::json legacy {
     {"root", {
@@ -331,8 +333,40 @@ TEST_F(ClientAuthorizationTest, StateFilesWithoutNewFieldsKeepFullAccess) {
   const auto client = listed_client("LEGACY-UUID");
   ASSERT_FALSE(client.is_null());
   EXPECT_EQ(client.at("name"), "old laptop");
-  EXPECT_EQ(client.at("permissions").at("preset"), "full");
+  EXPECT_EQ(client.at("permissions").at("preset"), "standard");
   EXPECT_TRUE(client.at("paired_at").is_null());
   EXPECT_TRUE(client.at("last_connected_at").is_null());
   EXPECT_TRUE(nvhttp::test_support::authorize_client_certificate(credentials.x509));
+}
+
+TEST_F(ClientAuthorizationTest, UpgradedPermissionNodesNeverGainHostControl) {
+  // A device saved by 0.2 with every flag of that version on: the new host-control flags are
+  // absent from its node and must stay off, while the old flags keep their stored values.
+  const auto credentials = crypto::gen_creds("Sunshine Upgraded Client", 2048);
+  const nlohmann::json state {
+    {"root", {
+               {"uniqueid", "0123456789ABCDEF"},
+               {"named_devices", nlohmann::json::array({
+                                   {{"name", "phone"}, {"cert", credentials.x509}, {"uuid", "UPGRADED-UUID"}, {"enabled", "true"}, {"permissions", {{"input_keyboard", "true"}, {"input_mouse", "true"}, {"input_controller", "true"}, {"input_touch_pen", "true"}, {"clipboard", "false"}, {"launch_apps", "true"}}}},
+                                 })},
+             }},
+  };
+  {
+    std::ofstream file {config::nvhttp.file_state};
+    file << state.dump(2);
+  }
+
+  nvhttp::test_support::reload_client_state();
+
+  EXPECT_EQ(nvhttp::get_client_permissions(credentials.x509), client_permissions::play);
+  const auto client = listed_client("UPGRADED-UUID");
+  ASSERT_FALSE(client.is_null());
+  EXPECT_FALSE(client.at("permissions").at("power").get<bool>());
+  EXPECT_FALSE(client.at("permissions").at("host_commands").get<bool>());
+
+  // Granting them explicitly persists.
+  ASSERT_TRUE(nvhttp::set_client_permissions("UPGRADED-UUID", client_permissions::full));
+  nvhttp::test_support::reset_client_state();
+  nvhttp::test_support::reload_client_state();
+  EXPECT_EQ(nvhttp::get_client_permissions(credentials.x509), client_permissions::full);
 }

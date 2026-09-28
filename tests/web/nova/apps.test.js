@@ -41,9 +41,10 @@ const STORED = {
 }
 
 describe('appForm', () => {
-  it('new form carries every field the previous editor sent, plus working-dir', () => {
+  it('new form carries every field the previous editor sent, plus working-dir and host commands', () => {
     const form = newAppForm()
-    expect(Object.keys(form).sort()).toEqual([...Object.keys(OLD_NEW_APP), 'working-dir'].sort())
+    expect(Object.keys(form).sort()).toEqual([...Object.keys(OLD_NEW_APP), 'working-dir', 'menu-cmd'].sort())
+    expect(form['menu-cmd']).toEqual([])
     for (const [k, v] of Object.entries(OLD_NEW_APP)) expect(form[k]).toEqual(v)
   })
 

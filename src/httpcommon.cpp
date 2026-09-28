@@ -23,6 +23,7 @@
 #include "crypto.h"
 #include "file_handler.h"
 #include "httpcommon.h"
+#include "secure_files.h"
 #include "logging.h"
 #include "network.h"
 #include "nvhttp.h"
@@ -105,6 +106,7 @@ namespace http {
       BOOST_LOG(error) << "error writing to the credentials file, perhaps try this again as an administrator? Details: "sv << e.what();
       return -1;
     }
+    secure_files::restrict(file);
 
     BOOST_LOG(info) << "New credentials have been created"sv;
     return 0;
@@ -192,7 +194,7 @@ namespace http {
       return -1;
     }
 
-    fs::permissions(cert_path, fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read | fs::perms::owner_write, fs::perm_options::replace, err_code);
+    fs::permissions(cert_path, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace, err_code);
 
     if (err_code) {
       BOOST_LOG(error) << "Couldn't change permissions of ["sv << config::nvhttp.cert << "] :"sv << err_code.message();

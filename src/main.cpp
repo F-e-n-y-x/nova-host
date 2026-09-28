@@ -35,11 +35,13 @@
 #include "display_follow.h"
 #include "entry_handler.h"
 #include "globals.h"
+#include "host_power.h"
 #include "httpcommon.h"
 #include "logging.h"
 #include "main.h"
 #include "nvhttp.h"
 #include "process.h"
+#include "secure_files.h"
 #include "system_tray.h"
 #include "upnp.h"
 #include "video.h"
@@ -475,6 +477,14 @@ int main(int argc, char *argv[]) {
 
     return -1;
   }
+
+  // Nova: the config, paired devices, credentials, keys and host commands are for the owner only.
+  secure_files::harden_all();
+
+  // Nova: end streams cleanly whenever the host is about to sleep, whoever asked for it.
+  const auto sleep_watcher = host_power::start_sleep_watcher([]() {
+    nvhttp::end_streams_for_sleep();
+  });
 
   std::unique_ptr<platf::deinit_t> mDNS;
   auto sync_mDNS = std::async(std::launch::async, [&mDNS]() {

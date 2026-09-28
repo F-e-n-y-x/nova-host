@@ -11,6 +11,7 @@
 #include "mic_write.h"
 
 #include <array>
+#include <chrono>
 #include <mutex>
 #include <vector>
 
@@ -220,10 +221,26 @@ namespace platf::pw_mic {
   };
 
   std::unique_ptr<mic_out_t> create() {
-    auto mic = std::make_unique<pipewire_mic_t>();
-    if (!mic->init()) {
+    // The caller retries on every mic datagram (50/s) while creation fails.
+    // Without a back-off a host lacking PipeWire would spin up and tear down a
+    // PipeWire thread loop and log an error for each packet.
+    static std::mutex retry_mutex;
+    static std::chrono::steady_clock::time_point next_attempt {};
+    constexpr auto kRetryDelay = 10s;
+
+    std::lock_guard lock(retry_mutex);
+    const auto now = std::chrono::steady_clock::now();
+    if (now < next_attempt) {
       return nullptr;
     }
+
+    auto mic = std::make_unique<pipewire_mic_t>();
+    if (!mic->init()) {
+      next_attempt = now + kRetryDelay;
+      BOOST_LOG(warning) << "nova-mic: virtual source unavailable; retrying in "sv << kRetryDelay.count() << " s"sv;
+      return nullptr;
+    }
+    next_attempt = {};
     return mic;
   }
 

@@ -30,6 +30,7 @@
 #include <src/confighttp.h>
 #include <src/crypto.h>
 #include <src/httpcommon.h>
+#include <src/login_guard.h>
 #include <src/network.h>
 #include <src/nvhttp.h>
 #include <src/utility.h>
@@ -111,6 +112,8 @@ protected:
 
   void SetUp() override {
     BaseTest::SetUp();
+    // The sign-in limiter is process-wide; start every test with a clean slate.
+    login_guard::web_ui().reset();
     nvhttp::expire_pair_sessions(std::chrono::steady_clock::time_point::max());
     confighttp::set_virtual_input_license_status_provider_for_testing([]() {
       lvh::LicenseStatus license;
@@ -764,6 +767,60 @@ TEST_F(ConfigHttpTest, AuthenticateRejectsInvalidPassword) {
 
   const auto response = client->request("GET", "/auth-test", "", headers);
   ASSERT_EQ(response->status_code, "401 Unauthorized");
+}
+
+// Test: repeated wrong passwords lock the source out with 429 + Retry-After, even for the right one
+TEST_F(ConfigHttpTest, AuthenticateLocksOutAfterRepeatedFailures) {
+  for (int i = 0; i < 4; ++i) {
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Authorization", create_auth_header("testuser", std::format("guess{}", i)));
+    ASSERT_EQ(client->request("GET", "/auth-test", "", headers)->status_code, "401 Unauthorized") << i;
+  }
+
+  SimpleWeb::CaseInsensitiveMultimap fifth;
+  fifth.emplace("Authorization", create_auth_header("testuser", "guess5"));
+  const auto locked = client->request("GET", "/auth-test", "", fifth);
+  ASSERT_EQ(locked->status_code, "429 Too Many Requests");
+  const auto retry = locked->header.find("Retry-After");
+  ASSERT_NE(retry, locked->header.end());
+  EXPECT_GE(std::stoi(retry->second), 29);
+  EXPECT_EQ(locked->header.find("WWW-Authenticate"), locked->header.end());
+
+  SimpleWeb::CaseInsensitiveMultimap good;
+  good.emplace("Authorization", create_auth_header("testuser", "testpass"));
+  EXPECT_EQ(client->request("GET", "/auth-test", "", good)->status_code, "429 Too Many Requests");
+
+  login_guard::web_ui().reset();
+  EXPECT_EQ(client->request("GET", "/auth-test", "", good)->status_code, "200 OK");
+}
+
+// Test: a stale browser tab replaying one wrong password doesn't lock the owner out
+TEST_F(ConfigHttpTest, AuthenticateCountsARepeatedWrongPasswordOnce) {
+  SimpleWeb::CaseInsensitiveMultimap stale;
+  stale.emplace("Authorization", create_auth_header("testuser", "oldpass"));
+  for (int i = 0; i < 12; ++i) {
+    ASSERT_EQ(client->request("GET", "/auth-test", "", stale)->status_code, "401 Unauthorized") << i;
+  }
+  SimpleWeb::CaseInsensitiveMultimap good;
+  good.emplace("Authorization", create_auth_header("testuser", "testpass"));
+  EXPECT_EQ(client->request("GET", "/auth-test", "", good)->status_code, "200 OK");
+}
+
+// Test: requests without credentials (the browser's first request) never count as failures
+TEST_F(ConfigHttpTest, AuthenticateWithoutCredentialsIsNotAFailure) {
+  for (int i = 0; i < 10; ++i) {
+    ASSERT_EQ(client->request("GET", "/auth-test")->status_code, "401 Unauthorized");
+  }
+  EXPECT_EQ(login_guard::web_ui().failures("127.0.0.1"), 0);
+}
+
+// Test: a malformed Authorization header counts as a failure and doesn't crash
+TEST_F(ConfigHttpTest, AuthenticateRejectsMalformedAuthorization) {
+  for (const auto *value : {"Basic", "Bearer abc", "Basic !!!", "Basic dXNlcg=="}) {
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Authorization", value);
+    EXPECT_EQ(client->request("GET", "/auth-test", "", headers)->status_code, "401 Unauthorized") << value;
+  }
 }
 
 // Test: confighttp::authenticate() is case-insensitive for username

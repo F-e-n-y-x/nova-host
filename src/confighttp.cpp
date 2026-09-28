@@ -48,6 +48,7 @@
 #include "display_follow.h"
 #include "file_handler.h"
 #include "globals.h"
+#include "host_commands.h"
 #include "host_info.h"
 #include "httpcommon.h"
 #include "input.h"
@@ -59,6 +60,7 @@
 #include "library/title.h"
 #include "library/url_fetch.h"
 #include "logging.h"
+#include "login_guard.h"
 #include "network.h"
 #include "nova_client_api.h"
 #include "nvhttp.h"
@@ -657,12 +659,20 @@ namespace confighttp {
    * @param request The HTTP request object.
    * @return True if the user is authenticated, false otherwise.
    */
-  bool authenticate(const resp_https_t &response, const req_https_t &request) {
-    auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
-
+  bool origin_allowed(const resp_https_t &response, const req_https_t &request) {
+    const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
     if (const auto ip_type = net::from_address(address); ip_type > http::origin_web_ui_allowed) {
       BOOST_LOG(info) << "Web UI: ["sv << address << "] -- denied"sv;
       response->write(SimpleWeb::StatusCode::client_error_forbidden);
+      return false;
+    }
+    return true;
+  }
+
+  bool authenticate(const resp_https_t &response, const req_https_t &request) {
+    auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+
+    if (!origin_allowed(response, request)) {
       return false;
     }
 
@@ -672,32 +682,77 @@ namespace confighttp {
       return false;
     }
 
-    auto fg = util::fail_guard([&]() {
-      send_unauthorized(response, request);
-    });
-
     const auto auth = request->header.find("authorization");
     if (auth == request->header.end()) {
+      // No credentials yet: the browser shows its sign-in prompt. Not a failed attempt.
+      send_unauthorized(response, request);
+      return false;
+    }
+
+    // Too many wrong passwords from this source: refuse without even checking, so guessing
+    // stays slow whatever the password.
+    const auto source = login_guard::source_key(address);
+    const auto now = login_guard::limiter_t::clock::now();
+    if (const auto wait = login_guard::web_ui().locked_for(source, now); wait.count() > 0) {
+      send_locked_out(response, request, wait);
       return false;
     }
 
     const auto &rawAuth = auth->second;
+    const auto fail = [&]() {
+      // Fingerprint the attempt so a stale browser tab repeating one wrong password counts once.
+      const auto fingerprint = util::hex(crypto::hash(rawAuth + config::sunshine.salt)).to_string();
+      if (const auto lockout = login_guard::web_ui().record_failure(source, fingerprint, now); lockout.count() > 0) {
+        BOOST_LOG(warning) << "Web UI: ["sv << address << "] -- "sv << login_guard::web_ui().failures(source) << " failed sign-ins, locked out for "sv << lockout.count() << " s"sv;
+        send_locked_out(response, request, lockout);
+      } else {
+        send_unauthorized(response, request);
+      }
+      return false;
+    };
+
+    if (rawAuth.size() <= "Basic "sv.length() || !boost::istarts_with(rawAuth, "Basic "sv)) {
+      return fail();
+    }
     auto authData = SimpleWeb::Crypto::Base64::decode(rawAuth.substr("Basic "sv.length()));
 
-    const auto index = static_cast<int>(authData.find(':'));
-    if (index >= authData.size() - 1) {
-      return false;
+    const auto index = authData.find(':');
+    if (index == std::string::npos || index + 1 >= authData.size()) {
+      return fail();
     }
 
     const auto username = authData.substr(0, index);
     const auto password = authData.substr(index + 1);
 
     if (const auto hash = util::hex(crypto::hash(password + config::sunshine.salt)).to_string(); !boost::iequals(username, config::sunshine.username) || hash != config::sunshine.password) {
-      return false;
+      return fail();
     }
 
-    fg.disable();
+    login_guard::web_ui().record_success(source);
     return true;
+  }
+
+  void send_locked_out(const resp_https_t &response, const req_https_t &request, const std::chrono::seconds wait) {
+    const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+    BOOST_LOG(info) << "Web UI: ["sv << address << "] -- locked out for another "sv << wait.count() << " s"sv;
+
+    const auto message = std::format("Too many failed sign-in attempts. Try again in {} seconds.", wait.count());
+    const bool wants_json = request->path.starts_with("/api/"sv);
+    nlohmann::json tree;
+    tree["status_code"] = 429;
+    tree["status"] = false;
+    tree["error"] = message;
+    tree["retry_after"] = wait.count();
+
+    const SimpleWeb::CaseInsensitiveMultimap headers {
+      {"Content-Type", wants_json ? "application/json" : "text/html; charset=utf-8"},
+      {"Retry-After", std::to_string(wait.count())},
+      {"Cache-Control", "no-store"},
+      {"X-Frame-Options", "DENY"},
+      {"Content-Security-Policy", "frame-ancestors 'none';"}
+    };
+    const auto body = wants_json ? tree.dump() : std::format("<!doctype html><meta charset=\"utf-8\"><title>Nova</title><p style=\"font:16px system-ui;margin:3rem\">{}</p>", message);
+    response->write(SimpleWeb::StatusCode::client_error_too_many_requests, body, headers);
   }
 
   /**
@@ -1243,8 +1298,22 @@ namespace confighttp {
       nlohmann::json input_tree = nlohmann::json::parse(ss);
       std::scoped_lock apps_lock(library::apps_file_mutex());
       std::string file = file_handler::read_file(config::stream.file_apps.c_str());
-      BOOST_LOG(info) << file;
       nlohmann::json file_tree = nlohmann::json::parse(file);
+
+      // Host commands the web UI edits for this app (Foundation's "menu-cmd" key).
+      if (const auto it = input_tree.find("menu-cmd"); it != input_tree.end()) {
+        std::vector<std::string> errors;
+        auto normalized = host_commands::normalize(*it, &errors);
+        if (!errors.empty()) {
+          bad_request(response, request, "Host commands: " + errors.front());
+          return;
+        }
+        if (normalized.empty()) {
+          input_tree.erase("menu-cmd");
+        } else {
+          *it = std::move(normalized);
+        }
+      }
 
       if (input_tree["prep-cmd"].empty()) {
         input_tree.erase("prep-cmd");
@@ -1804,6 +1873,16 @@ namespace confighttp {
       nlohmann::json input_tree = nlohmann::json::parse(ss);
       // The Web UI sends the placeholder back unchanged when the user didn't edit a secret.
       restore_secret_config(input_tree, config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str())));
+      if (const auto it = input_tree.find("host_commands"); it != input_tree.end() && !it->is_null()) {
+        const auto list = it->is_string() ? nlohmann::json::parse(it->get<std::string>().empty() ? "[]"s : it->get<std::string>()) : *it;
+        std::vector<std::string> errors;
+        auto normalized = host_commands::normalize(list, &errors);
+        if (!errors.empty()) {
+          bad_request(response, request, "Host commands: " + errors.front());
+          return;
+        }
+        *it = normalized.empty() ? nlohmann::json(nullptr) : nlohmann::json(normalized.dump());
+      }
       for (const auto &[k, v] : input_tree.items()) {
         if (v.is_null() || (v.is_string() && v.get<std::string>().empty())) {
           continue;
@@ -1811,7 +1890,13 @@ namespace confighttp {
 
         // v.dump() will dump valid json, which we do not want for strings in the config, right now
         // we should migrate the config file to straight JSON and get rid of all this nonsense
-        config_stream << k << " = " << (v.is_string() ? v.get<std::string>() : v.dump()) << std::endl;
+        const auto value = v.is_string() ? v.get<std::string>() : v.dump();
+        // One setting per line: a newline in a key or value would smuggle in another setting.
+        if (k.empty() || k.find_first_of("=\r\n# ") != std::string::npos || value.find_first_of("\r\n") != std::string::npos) {
+          bad_request(response, request, "Invalid setting: " + k);
+          return;
+        }
+        config_stream << k << " = " << value << std::endl;
       }
       file_handler::write_file(config::sunshine.config_file.c_str(), config_stream.str());
       output_tree["status"] = true;
@@ -1908,6 +1993,9 @@ namespace confighttp {
     if (!authenticate(response, request)) {
       return;
     }
+    if (!validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
 
     std::stringstream ss;
     ss << request->content.rdbuf();
@@ -1993,7 +2081,9 @@ namespace confighttp {
     if (!check_content_type(response, request, "application/json")) {
       return;
     }
-    if (!config::sunshine.username.empty() && !authenticate(response, request)) {
+    // Before the first account exists there is nothing to authenticate against, but the
+    // origin policy still applies: otherwise anyone who can reach the port claims the host.
+    if (config::sunshine.username.empty() ? !origin_allowed(response, request) : !authenticate(response, request)) {
       return;
     }
 
@@ -3460,6 +3550,102 @@ namespace confighttp {
   /**
    * @brief Start the HTTPS configuration server.
    */
+  /**
+   * @brief GET /api/host-commands: the saved global and per-app host commands.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   */
+  void getHostCommands(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    nlohmann::json global = nlohmann::json::array();
+    for (const auto &command : host_commands::global()) {
+      global.push_back(host_commands::to_json(command));
+    }
+    nlohmann::json apps = nlohmann::json::array();
+    try {
+      const auto tree = nlohmann::json::parse(file_handler::read_file(config::stream.file_apps.c_str()));
+      if (tree.contains("apps") && tree["apps"].is_array()) {
+        for (std::size_t i = 0; i < tree["apps"].size(); ++i) {
+          nlohmann::json commands = nlohmann::json::array();
+          for (const auto &command : host_commands::for_app(tree["apps"][i])) {
+            commands.push_back(host_commands::to_json(command));
+          }
+          if (!commands.empty()) {
+            apps.push_back({{"index", i}, {"name", tree["apps"][i].value("name", ""s)}, {"commands", std::move(commands)}});
+          }
+        }
+      }
+    } catch (const std::exception &) {
+      // An unreadable apps.json just means no per-app commands.
+    }
+    send_response(response, {{"status", true}, {"global", std::move(global)}, {"apps", std::move(apps)}});
+  }
+
+  /**
+   * @brief GET /api/host-commands/runs: the last run of every host command, with its output.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   */
+  void getHostCommandRuns(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    nlohmann::json runs = nlohmann::json::array();
+    for (const auto &record : host_commands::all_runs()) {
+      runs.push_back(host_commands::run_to_json(record));
+    }
+    send_response(response, {{"status", true}, {"runs", std::move(runs)}});
+  }
+
+  /**
+   * @brief POST /api/host-commands/run `{"id", "app": <index>|null}`: run a saved host command now.
+   *
+   * Only saved commands run (by id), exactly as a device would run them; the output shows up in
+   * /api/host-commands/runs.
+   *
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   */
+  void postHostCommandRun(const resp_https_t &response, const req_https_t &request) {
+    if (!check_content_type(response, request, "application/json")) {
+      return;
+    }
+    if (!authenticate(response, request)) {
+      return;
+    }
+    if (!validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    print_req(request);
+    try {
+      const auto input = nlohmann::json::parse(request->content.string());
+      const auto id = input.value("id", ""s);
+      std::vector<host_commands::command_t> app_commands;
+      if (const auto app = input.find("app"); app != input.end() && app->is_number_integer()) {
+        const auto tree = nlohmann::json::parse(file_handler::read_file(config::stream.file_apps.c_str()));
+        const auto index = app->get<long long>();
+        if (index < 0 || !tree.contains("apps") || index >= static_cast<long long>(tree["apps"].size())) {
+          bad_request(response, request, "No such app");
+          return;
+        }
+        app_commands = host_commands::for_app(tree["apps"][static_cast<std::size_t>(index)]);
+      }
+      const auto found = host_commands::resolve(id, app_commands, app_commands.empty() ? host_commands::global() : std::vector<host_commands::command_t> {});
+      if (!found) {
+        not_found(response, request, "No saved host command with that id");
+        return;
+      }
+      const auto started = host_commands::start_async(found->first, host_commands::build_env({{"NOVA_COMMAND_ID", found->first.id}, {"NOVA_COMMAND_NAME", found->first.name}, {"SUNSHINE_CLIENT_NAME", "web UI"}}), "the web UI");
+      send_response(response, {{"status", started == host_commands::start_e::started}, {"started", started == host_commands::start_e::started}, {"error", started == host_commands::start_e::started ? "" : "That command is already running, or too many are."}});
+    } catch (const std::exception &e) {
+      bad_request(response, request, e.what());
+    }
+  }
+
   void start() {
     platf::set_thread_name("confighttp");
     const auto shutdown_event = mail::man->event<bool>(mail::shutdown);
@@ -3546,6 +3732,9 @@ namespace confighttp {
     server.resource["^/api/audio/sinks$"]["GET"] = getAudioSinks;
     server.resource["^/api/preview$"]["GET"] = getPreview;
     server.resource["^/api/health$"]["GET"] = getHealth;
+    server.resource["^/api/host-commands$"]["GET"] = getHostCommands;
+    server.resource["^/api/host-commands/runs$"]["GET"] = getHostCommandRuns;
+    server.resource["^/api/host-commands/run$"]["POST"] = postHostCommandRun;
 
     // static/dynamic resources
     server.resource["^/images/sunshine.ico$"]["GET"] = getFaviconImage;
@@ -3555,6 +3744,8 @@ namespace confighttp {
     server.config.reuse_address = true;
     server.config.address = net::get_bind_address(address_family);
     server.config.port = port_https;
+    // Bodies are buffered before authentication; custom artwork uploads are the largest legitimate ones.
+    server.config.max_request_streambuf_size = 64 * 1024 * 1024;
 
     const auto display_addr = net::get_bind_address_url_host();
 

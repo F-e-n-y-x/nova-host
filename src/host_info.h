@@ -74,6 +74,15 @@ namespace host_info {
     std::vector<platf::capture_output_t> outputs;  ///< Display outputs.
     std::optional<bool> nvidia_drm_modeset;  ///< `nvidia-drm` modeset state; empty when not loaded.
     std::string origin_web_ui_allowed;  ///< `origin_web_ui_allowed` setting.
+    bool check_wake_on_lan = false;  ///< Whether the Wake-on-LAN check applies on this platform.
+    std::string wol_interface;  ///< Physical NIC that receives magic packets; empty when none was found.
+    std::string wol_mac;  ///< Its MAC (what /serverinfo reports).
+    bool ethtool_found = false;  ///< Whether `ethtool` is on PATH.
+    std::optional<bool> wol_supported;  ///< NIC supports magic-packet wake; empty when unknown.
+    std::optional<bool> wol_enabled;  ///< Magic-packet wake is enabled; empty when unknown.
+    bool pcsleep_enabled = false;  ///< `pcsleep_enabled` setting.
+    std::string can_suspend;  ///< logind CanSuspend: yes, challenge, no, na or unknown; empty when not checked.
+    std::vector<std::string> exposed_files;  ///< Private files or folders readable by other users.
   };
 
   /**

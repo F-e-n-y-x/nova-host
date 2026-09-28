@@ -75,6 +75,14 @@ namespace clipboard {
    */
   std::optional<frame_t> decode(const std::uint8_t *data, std::size_t size);
 
+  /**
+   * @brief Extract the blob id from a kind=3 ref payload.
+   * @param payload JSON bytes such as {"type":"ref","id":"<uuid>","mime":...,"size":...}.
+   * @return The id, or an empty string when the JSON is malformed, the id is
+   *         not a string, or it has characters outside [0-9a-fA-F-] (max 64).
+   */
+  std::string ref_id(const std::vector<std::uint8_t> &payload);
+
   // ---- Host-side sync engine -------------------------------------------
 
   /**

@@ -3,34 +3,39 @@
  */
 
 /** Permission flags in display order, matching the host's JSON keys. */
-export const PERMISSION_FLAGS = ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'clipboard', 'launch_apps']
+export const PERMISSION_FLAGS = ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'clipboard', 'launch_apps', 'power', 'host_commands']
+
+/** Flags that control the host itself; off unless granted, even for devices saved before they existed. */
+export const HOST_CONTROL_FLAGS = ['power', 'host_commands']
 
 /** Presets the host understands, in display order. */
-export const PERMISSION_PRESETS = ['full', 'play', 'view_only']
+export const PERMISSION_PRESETS = ['full', 'standard', 'play', 'view_only']
 
 /** Flags each preset turns on; the rest are off. */
 export const PRESET_FLAGS = {
   full: PERMISSION_FLAGS,
+  standard: ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'clipboard', 'launch_apps'],
   play: ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'launch_apps'],
   view_only: [],
 }
 
 /**
- * Permission flags as booleans (a missing flag counts as allowed, like the host does).
+ * Permission flags as booleans. A missing flag counts as allowed, like the host does, except the
+ * host-control flags, which count as denied.
  *
  * @param {object|undefined} permissions Permission object from the host.
  * @returns {Record<string, boolean>} Flag name → allowed.
  */
 export function permissionFlags(permissions) {
   const source = permissions || {}
-  return Object.fromEntries(PERMISSION_FLAGS.map((flag) => [flag, source[flag] !== false]))
+  return Object.fromEntries(PERMISSION_FLAGS.map((flag) => [flag, HOST_CONTROL_FLAGS.includes(flag) ? source[flag] === true : source[flag] !== false]))
 }
 
 /**
  * The preset a set of flags matches.
  *
  * @param {Record<string, boolean>} flags Flag name → allowed.
- * @returns {'full'|'play'|'view_only'|'custom'} Preset name.
+ * @returns {'full'|'standard'|'play'|'view_only'|'custom'} Preset name.
  */
 export function presetForFlags(flags) {
   const on = PERMISSION_FLAGS.filter((f) => flags[f])
@@ -102,11 +107,11 @@ export function absoluteTime(unixSeconds, locale) {
  * The preset a permission object matches.
  *
  * @param {object|undefined} permissions Permission object from the host.
- * @returns {'full'|'play'|'view_only'|'custom'} Preset name; missing data counts as full access,
- *   which is what the host applies to devices without stored permissions.
+ * @returns {'full'|'standard'|'play'|'view_only'|'custom'} Preset name; missing data counts as
+ *   standard access, which is what the host applies to devices without stored permissions.
  */
 export function permissionPreset(permissions) {
-  if (!permissions) return 'full'
+  if (!permissions) return 'standard'
   if (PERMISSION_PRESETS.includes(permissions.preset)) return permissions.preset
   return 'custom'
 }

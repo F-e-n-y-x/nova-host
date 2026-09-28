@@ -9,7 +9,6 @@
 #include <deque>
 #include <filesystem>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
 
 // lib includes
@@ -159,6 +158,10 @@ namespace clipboard {
       } else {
         auto size = bytes.size();
         auto id = blob::put(is_text ? "text/plain; charset=utf-8" : "image/png", std::move(bytes));
+        if (id.empty()) {
+          BOOST_LOG(warning) << "clipboard: blob store full; not offering a "sv << size << " byte local change"sv;
+          return;
+        }
         nlohmann::json ref {{"id", id}, {"mime", is_text ? "text/plain; charset=utf-8" : "image/png"}, {"size", size}};
         auto text = ref.dump();
         frame.kind = kind_e::ref;
@@ -182,6 +185,23 @@ namespace clipboard {
       }
     }
   }  // namespace
+
+  std::string ref_id(const std::vector<std::uint8_t> &payload) {
+    auto ref = nlohmann::json::parse(payload.begin(), payload.end(), nullptr, false);
+    if (ref.is_discarded() || !ref.is_object()) {
+      return {};
+    }
+    auto it = ref.find("id");
+    if (it == ref.end() || !it->is_string()) {
+      return {};
+    }
+    auto id = it->get<std::string>();
+    // Same alphabet the blob routes accept ([a-fA-F0-9-]+), bounded.
+    if (id.empty() || id.size() > 64 || id.find_first_not_of("0123456789abcdefABCDEF-") != std::string::npos) {
+      return {};
+    }
+    return id;
+  }
 
   std::vector<std::uint8_t> encode(const frame_t &frame) {
     std::vector<std::uint8_t> out;
@@ -276,21 +296,20 @@ namespace clipboard {
         break;
       case kind_e::ref:
         {
-          auto ref = nlohmann::json::parse(frame->payload.begin(), frame->payload.end(), nullptr, false);
-          if (ref.is_discarded() || !ref.contains("id")) {
+          // A non-string id must not throw: this runs on the control-stream thread.
+          auto id = ref_id(frame->payload);
+          if (id.empty()) {
+            BOOST_LOG(warning) << "clipboard: dropping malformed blob ref"sv;
             break;
           }
-          // The client uploads the blob before (or right after) sending the
-          // ref; a short grace period covers the race.
-          auto id = ref["id"].get<std::string>();
-          for (int attempt = 0; attempt < 10; ++attempt) {
-            if (auto blob = blob::take(id)) {
-              apply_local(blob->first, std::move(blob->second));
-              return;
-            }
-            std::this_thread::sleep_for(200ms);
+          // The id only exists once the client's POST /api/v1/clipboard/blob
+          // has returned, so the blob is either here now or never will be.
+          // Never wait: this runs on the latency-critical control thread.
+          if (auto blob = blob::take(id)) {
+            apply_local(blob->first, std::move(blob->second));
+          } else {
+            BOOST_LOG(warning) << "clipboard: blob ref "sv << id << " is unknown, expired or already taken"sv;
           }
-          BOOST_LOG(warning) << "clipboard: blob ref "sv << id << " never arrived"sv;
         }
         break;
       case kind_e::file_offer:

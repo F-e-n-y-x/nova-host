@@ -242,6 +242,66 @@ supported on the current platform.
     </tr>
 </table>
 
+### pcsleep_enabled
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Let paired devices put this PC to sleep (`GET /pcsleep`, as sent by Moonlight V+ and Nebula).
+            Only devices with the "Sleep this PC" (`power`) permission may do it, and not while another
+            device streams. Streams end cleanly first, then Nova asks systemd-logind to suspend.
+            The system must allow the Nova user to suspend without a password; run
+            `sudo /usr/share/nova-host/nova-allow-suspend` once if the health check says it can't.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            pcsleep_enabled = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### host_commands
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Commands that paired devices with the "Host commands" (`host_commands`) permission can run
+            from their stream menu (`GET /supercmd?cmdId=<id>`), in every app. Each app can add its own
+            in apps.json as `menu-cmd` with the same fields. A device only sends the id: the command line
+            never comes from the device. Commands run as the Nova user without a shell (the line is split
+            into arguments; write `sh -c '...'` for pipes or variables), are killed after `timeout`
+            seconds (1-600, default 30), and their output is shown in the web UI.
+            Fields: `id` (letters, digits, `-`, `_`; derived from the name when empty), `name`,
+            `icon` (terminal, refresh, power, lock, volume, mic-off, monitor, gamepad, stop, play, folder,
+            settings), `cmd`, `confirm` (ask before running), `timeout`.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            []
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            host_commands = [{"id":"restart-steam","name":"Restart Steam","icon":"refresh","cmd":"sh -c 'steam -shutdown; sleep 3; setsid steam &'","confirm":true,"timeout":20}]
+            @endcode</td>
+    </tr>
+</table>
+
 ### notify_pre_releases
 
 <table>
@@ -2202,6 +2262,10 @@ a message naming the file instead of streaming a desktop while the game silently
         <td>Description</td>
         <td colspan="2">
             The origin of the remote endpoint address that is not denied for HTTPS Web UI.
+            "LAN" covers the private ranges (10/8, 172.16/12, 192.168/16, 169.254/16, fc00::/7,
+            fe80::/64) and Tailscale's 100.64.0.0/10 and fd7a:115c:a1e0::/48, so `lan` keeps the
+            web UI reachable over Tailscale. Repeated failed sign-ins lock the source address out
+            (5 attempts, then 30 s doubling up to 15 min).
         </td>
     </tr>
     <tr>

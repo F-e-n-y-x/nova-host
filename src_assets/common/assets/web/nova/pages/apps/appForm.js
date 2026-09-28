@@ -2,6 +2,17 @@
  * @file Pure helpers for the application editor: defaults, loading an app into an
  * editable form, validation and building the save payload for POST /api/apps.
  */
+import { hasInvalidCommand, newHostCommand } from '../../../configs/components/hostCommands.js'
+
+/**
+ * Host-command rows with anything typed in them (fully empty rows are dropped on save).
+ *
+ * @param {Array<object>|undefined} list Rows.
+ * @returns {Array<object>} Non-blank rows.
+ */
+function dropBlankCommands(list) {
+  return (Array.isArray(list) ? list : []).filter((c) => String(c.name ?? '').trim() || String(c.cmd ?? '').trim())
+}
 
 /**
  * Deep copy of JSON app data. Works on Vue reactive proxies, which structuredClone rejects.
@@ -85,6 +96,7 @@ export function newAppForm() {
     'wait-all': true,
     'exit-timeout': DEFAULT_EXIT_TIMEOUT,
     'prep-cmd': [],
+    'menu-cmd': [],
     detached: [],
     'image-path': '',
   }
@@ -110,6 +122,7 @@ export function formFromApp(app, index, platform) {
   form['prep-cmd'] = (form['prep-cmd'] ?? []).map((c) => ({ ...c, do: c.do ?? '', undo: c.undo ?? '' }))
   form.detached = [...(form.detached ?? [])]
   form['exclude-global-prep-cmd'] = form['exclude-global-prep-cmd'] ?? false
+  form['menu-cmd'] = (Array.isArray(form['menu-cmd']) ? form['menu-cmd'] : []).map((c) => ({ ...newHostCommand(), ...c }))
   if (form.elevated === undefined && platform === 'windows') form.elevated = false
   form['auto-detach'] = form['auto-detach'] ?? true
   form['wait-all'] = form['wait-all'] ?? true
@@ -137,6 +150,7 @@ export function newPrepCmd(platform) {
 export function validateForm(form) {
   const errors = {}
   if (!String(form.name ?? '').trim()) errors.name = 'nova.apps.error_name_required'
+  if (hasInvalidCommand(dropBlankCommands(form['menu-cmd']))) errors.menuCmd = 'nova.apps.error_host_commands'
   const timeout = form['exit-timeout']
   if (timeout !== null && timeout !== undefined && timeout !== '' &&
       (!Number.isInteger(Number(timeout)) || Number(timeout) < 0)) {
@@ -160,6 +174,9 @@ export function buildPayload(form) {
   payload['image-path'] = String(payload['image-path'] ?? '').replaceAll('"', '')
   payload.detached = (payload.detached ?? []).filter((c) => String(c).trim() !== '')
   payload['prep-cmd'] = (payload['prep-cmd'] ?? []).filter((c) => String(c.do ?? '').trim() || String(c.undo ?? '').trim())
+  const commands = dropBlankCommands(payload['menu-cmd']).map((c) => ({ ...c, name: String(c.name ?? '').trim(), cmd: String(c.cmd ?? '').trim() }))
+  if (commands.length) payload['menu-cmd'] = commands
+  else delete payload['menu-cmd']
   const timeout = payload['exit-timeout']
   if (timeout === null || timeout === undefined || timeout === '') {
     delete payload['exit-timeout']

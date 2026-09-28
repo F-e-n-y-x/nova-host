@@ -590,4 +590,8 @@ namespace nvhttp {
     void reload_client_state();
   }  // namespace test_support
 #endif
+  /**
+   * @brief End every stream and wait up to 2 s for the sessions to close; used before sleeping.
+   */
+  void end_streams_for_sleep();
 }  // namespace nvhttp

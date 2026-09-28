@@ -17,6 +17,8 @@
 #include <nlohmann/json.hpp>
 
 // local includes
+#include "client_permissions.h"
+#include "host_commands.h"
 #include "stream_stats.h"
 
 /**
@@ -261,4 +263,54 @@ namespace nova_api {
    * @return Path next to the state file.
    */
   std::filesystem::path metadata_dir();
+  /**
+   * @brief What this host build and config support, for /nova/v1/capabilities.
+   */
+  struct host_features_t {
+    bool mic = false;  ///< Remote microphone accepted (mic_enabled and a PipeWire build).
+    bool clipboard = false;  ///< Clipboard sync available (config on and a clipboard tool present).
+    bool motion = false;  ///< The virtual gamepad has motion sensors and touchpad (featureFlags 0x02).
+    bool pcsleep = false;  ///< /pcsleep enabled in the config.
+    bool commands = false;  ///< At least one host command is defined.
+  };
+
+  /**
+   * @brief Body of GET /nova/v1/capabilities.
+   *
+   * @param version Host version string.
+   * @param features Supported features.
+   * @param permissions The calling device's permission mask.
+   * @return `{"nova":true,"version","features":[…],"permissions":[…]}`.
+   */
+  nlohmann::json capabilities(const std::string &version, const host_features_t &features, client_permissions::mask_t permissions);
+
+  /**
+   * @brief Why a request is refused: GameStream status code and message.
+   */
+  struct refusal_t {
+    int status;  ///< Value for `<root status_code>`.
+    std::string message;  ///< Value for `status_message`.
+  };
+
+  /**
+   * @brief Check a /pcsleep request.
+   *
+   * @param enabled `pcsleep_enabled` setting.
+   * @param permissions Caller's permissions.
+   * @param other_sessions Streams owned by other devices.
+   * @return The refusal, or nullopt when the host may sleep.
+   */
+  std::optional<refusal_t> pcsleep_refusal(bool enabled, client_permissions::mask_t permissions, int other_sessions);
+
+  /**
+   * @brief Body of GET /nova/v1/commands.
+   *
+   * @param allowed Whether the caller has `host_commands`.
+   * @param global Global commands.
+   * @param apps apps.json `apps` array (for per-app `menu-cmd`).
+   * @param can_see_all Whether the caller may see every app (launch permission); otherwise only the running one.
+   * @param running Index of the running app, if any.
+   * @return `{"allowed", "commands":[…]}`; see phase1-wire-contracts.md.
+   */
+  nlohmann::json commands_list(bool allowed, const std::vector<host_commands::command_t> &global, const nlohmann::json &apps, bool can_see_all, std::optional<std::size_t> running);
 }  // namespace nova_api
