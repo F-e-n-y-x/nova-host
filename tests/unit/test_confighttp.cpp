@@ -34,6 +34,7 @@
 #include <src/network.h>
 #include <src/nvhttp.h>
 #include <src/utility.h>
+#include <src/web_session.h>
 
 using namespace std::literals;
 
@@ -153,6 +154,8 @@ protected:
     confighttp::set_portal_token_path_provider_for_testing([this]() {
       return test_web_dir / "portal_token";
     });
+    // Sessions live in the temp dir, never in the real state directory.
+    web_session::web_ui().open(test_web_dir / "web_sessions.json");
 
     // Create the SPA entry document in WEB_DIR, creating parent directories with proper permissions
     std::filesystem::path web_dir_path(WEB_DIR);
@@ -336,6 +339,15 @@ protected:
     server->resource["^/pairing-test$"]["POST"] = confighttp::savePin;
     server->resource["^/portal-token-reset-test$"]["POST"] = confighttp::resetPortalToken;
     server->default_resource["GET"] = confighttp::getFallbackPage;
+    // Sign-in sessions
+    server->resource["^/auth-test$"]["POST"] = server->resource["^/auth-test$"]["GET"];
+    server->resource["^/api/auth/login$"]["POST"] = confighttp::postAuthLogin;
+    server->resource["^/api/auth/logout$"]["POST"] = confighttp::postAuthLogout;
+    server->resource["^/api/auth/session$"]["GET"] = confighttp::getAuthSession;
+    server->resource["^/api/auth/sessions$"]["GET"] = confighttp::getAuthSessions;
+    server->resource["^/api/auth/sessions/revoke$"]["POST"] = confighttp::postAuthSessionsRevoke;
+    server->resource["^/api/password$"]["POST"] = confighttp::savePassword;
+    server->resource["^/api/csrf-token$"]["GET"] = confighttp::getCSRFToken;
 
     // Start server
     server_thread = std::jthread([this]() {
@@ -370,6 +382,7 @@ protected:
     }
     confighttp::reset_virtual_input_license_status_provider_for_testing();
     confighttp::reset_portal_token_path_provider_for_testing();
+    web_session::web_ui().open({});
 
     config::sunshine.username = saved_username;
     config::sunshine.password = saved_password;
@@ -2019,3 +2032,387 @@ TEST_F(BrowseDirectoryTest, GetWindowsDrives_EntriesHaveCorrectFormat) {
   }
 }
 #endif
+
+// ---------------------------------------------------------------------------------------------
+// Sign-in sessions (/api/auth/*, the nova_session cookie)
+// ---------------------------------------------------------------------------------------------
+namespace {
+  using https_response_t = std::shared_ptr<SimpleWeb::Client<SimpleWeb::HTTPS>::Response>;
+
+  std::string header_of(const https_response_t &response, const std::string &name) {
+    const auto it = response->header.find(name);
+    return it == response->header.end() ? std::string {} : it->second;
+  }
+
+  /// The token from a "nova_session=<token>; ..." Set-Cookie value.
+  std::string cookie_token(const https_response_t &response) {
+    const auto set_cookie = header_of(response, "Set-Cookie");
+    const auto prefix = std::string {web_session::cookie_name} + "=";
+    if (!set_cookie.starts_with(prefix)) {
+      return {};
+    }
+    return set_cookie.substr(prefix.size(), set_cookie.find(';') - prefix.size());
+  }
+}  // namespace
+
+class ConfigHttpSessionTest: public ConfigHttpTest {
+protected:
+  https_response_t login(const std::string &username, const std::string &password, const bool remember = false, SimpleWeb::CaseInsensitiveMultimap headers = {}) {
+    headers.emplace("Content-Type", "application/json");
+    const nlohmann::json body {{"username", username}, {"password", password}, {"remember", remember}};
+    return client->request("POST", "/api/auth/login", body.dump(), headers);
+  }
+
+  std::string login_token(const bool remember = false) {
+    const auto response = login("testuser", "testpass", remember);
+    EXPECT_EQ(response->status_code, "200 OK");
+    return cookie_token(response);
+  }
+
+  SimpleWeb::CaseInsensitiveMultimap with_cookie(const std::string &token) const {
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Cookie", std::format("theme=dark; {}={}", web_session::cookie_name, token));
+    return headers;
+  }
+
+  std::string same_origin() const {
+    return std::format("https://localhost:{}", port);
+  }
+};
+
+// Test: sign-in returns a 256-bit token in an HttpOnly, Secure, SameSite=Strict cookie on Path=/
+TEST_F(ConfigHttpSessionTest, LoginSetsHardenedSessionCookie) {
+  const auto response = login("testuser", "testpass");
+  ASSERT_EQ(response->status_code, "200 OK");
+  const auto cookie = header_of(response, "Set-Cookie");
+  EXPECT_NE(cookie.find("; HttpOnly"), std::string::npos) << cookie;
+  EXPECT_NE(cookie.find("; Secure"), std::string::npos) << cookie;
+  EXPECT_NE(cookie.find("; SameSite=Strict"), std::string::npos) << cookie;
+  EXPECT_NE(cookie.find("; Path=/"), std::string::npos) << cookie;
+  EXPECT_EQ(cookie.find("Max-Age"), std::string::npos) << "without Keep me signed in the cookie lasts for the browser session";
+  EXPECT_EQ(cookie_token(response).size(), 64u);  // 32 random bytes, hex
+  EXPECT_EQ(header_of(response, "Cache-Control"), "no-store");
+  EXPECT_EQ(header_of(response, "WWW-Authenticate"), "");
+
+  const auto body = nlohmann::json::parse(response->content.string());
+  EXPECT_TRUE(body.at("status").get<bool>());
+  EXPECT_EQ(body.at("csrf_token").get<std::string>().size(), 64u);
+  EXPECT_EQ(body.find("token"), body.end()) << "the cookie token is never in the body";
+}
+
+// Test: "Keep me signed in" makes the cookie persistent for 30 days
+TEST_F(ConfigHttpSessionTest, RememberedLoginGetsThirtyDayCookie) {
+  const auto response = login("testuser", "testpass", true);
+  ASSERT_EQ(response->status_code, "200 OK");
+  EXPECT_NE(header_of(response, "Set-Cookie").find("Max-Age=2592000"), std::string::npos);
+}
+
+// Test: the session cookie authenticates API and page requests; the store keeps only a hash
+TEST_F(ConfigHttpSessionTest, SessionCookieAuthenticates) {
+  const auto token = login_token();
+  ASSERT_FALSE(token.empty());
+  const auto response = client->request("GET", "/auth-test", "", with_cookie(token));
+  ASSERT_EQ(response->status_code, "200 OK");
+  EXPECT_EQ(response->content.string(), "authenticated");
+
+  std::ifstream in(test_web_dir / "web_sessions.json");
+  const std::string stored {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+  EXPECT_EQ(stored.find(token), std::string::npos) << "the raw token must not be persisted";
+  EXPECT_NE(stored.find(web_session::hash_token(token)), std::string::npos);
+}
+
+// Test: GET /api/auth/session reports the state and the CSRF token, never 401
+TEST_F(ConfigHttpSessionTest, SessionEndpointReportsState) {
+  auto response = client->request("GET", "/api/auth/session");
+  ASSERT_EQ(response->status_code, "200 OK");
+  auto body = nlohmann::json::parse(response->content.string());
+  EXPECT_FALSE(body.at("authenticated").get<bool>());
+  EXPECT_FALSE(body.at("setup_required").get<bool>());
+
+  const auto login_response = login("testuser", "testpass");
+  const auto csrf = nlohmann::json::parse(login_response->content.string()).at("csrf_token").get<std::string>();
+  response = client->request("GET", "/api/auth/session", "", with_cookie(cookie_token(login_response)));
+  body = nlohmann::json::parse(response->content.string());
+  EXPECT_TRUE(body.at("authenticated").get<bool>());
+  EXPECT_EQ(body.at("username").get<std::string>(), "testuser");
+  EXPECT_EQ(body.at("csrf_token").get<std::string>(), csrf);
+
+  // An unknown cookie is reported as signed out and deleted.
+  response = client->request("GET", "/api/auth/session", "", with_cookie(std::string(64, 'a')));
+  EXPECT_FALSE(nlohmann::json::parse(response->content.string()).at("authenticated").get<bool>());
+  EXPECT_NE(header_of(response, "Set-Cookie").find("Max-Age=0"), std::string::npos);
+}
+
+// Test: a wrong password is a 401 without a Basic challenge; a malformed body is a 400
+TEST_F(ConfigHttpSessionTest, LoginRejectsWrongPassword) {
+  const auto response = login("testuser", "nope");
+  ASSERT_EQ(response->status_code, "401 Unauthorized");
+  EXPECT_EQ(header_of(response, "WWW-Authenticate"), "");
+  EXPECT_EQ(header_of(response, "Set-Cookie"), "");
+  EXPECT_EQ(login("someoneelse", "testpass")->status_code, "401 Unauthorized");
+
+  SimpleWeb::CaseInsensitiveMultimap json;
+  json.emplace("Content-Type", "application/json");
+  EXPECT_EQ(client->request("POST", "/api/auth/login", "{\"username\": 1}", json)->status_code, "400 Bad Request");
+  EXPECT_EQ(client->request("POST", "/api/auth/login", "not json", json)->status_code, "400 Bad Request");
+}
+
+// Test: the sign-in lockout (5 wrong -> 429 + Retry-After) applies to /api/auth/login
+TEST_F(ConfigHttpSessionTest, LoginEndpointIsRateLimited) {
+  for (int i = 0; i < 4; ++i) {
+    ASSERT_EQ(login("testuser", std::format("guess{}", i))->status_code, "401 Unauthorized") << i;
+  }
+  const auto locked = login("testuser", "guess5");
+  ASSERT_EQ(locked->status_code, "429 Too Many Requests");
+  EXPECT_GE(std::stoi(header_of(locked, "Retry-After")), 29);
+  EXPECT_GE(nlohmann::json::parse(locked->content.string()).at("retry_after").get<int>(), 29);
+
+  // Even the right password waits, and no session is created.
+  const auto right = login("testuser", "testpass");
+  EXPECT_EQ(right->status_code, "429 Too Many Requests");
+  EXPECT_EQ(header_of(right, "Set-Cookie"), "");
+
+  // The lockout is shared with HTTP Basic.
+  SimpleWeb::CaseInsensitiveMultimap basic;
+  basic.emplace("Authorization", create_auth_header("testuser", "testpass"));
+  EXPECT_EQ(client->request("GET", "/auth-test", "", basic)->status_code, "429 Too Many Requests");
+}
+
+// Test: sign-in from another site is refused (login CSRF)
+TEST_F(ConfigHttpSessionTest, LoginRefusesCrossSiteRequests) {
+  SimpleWeb::CaseInsensitiveMultimap headers;
+  headers.emplace("Origin", "https://evil.example");
+  const auto response = login("testuser", "testpass", false, headers);
+  EXPECT_EQ(response->status_code, "403 Forbidden");
+  EXPECT_EQ(header_of(response, "Set-Cookie"), "");
+
+  SimpleWeb::CaseInsensitiveMultimap same;
+  same.emplace("Origin", same_origin());
+  EXPECT_EQ(login("testuser", "testpass", false, same)->status_code, "200 OK");
+}
+
+// Test: signing in again never keeps the old token (no session fixation)
+TEST_F(ConfigHttpSessionTest, LoginReplacesAnExistingSession) {
+  const auto first = login_token();
+  const auto second = login("testuser", "testpass", false, with_cookie(first));
+  ASSERT_EQ(second->status_code, "200 OK");
+  EXPECT_NE(cookie_token(second), first);
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(first))->status_code, "401 Unauthorized");
+}
+
+// Test: logout revokes the session and deletes the cookie
+TEST_F(ConfigHttpSessionTest, LogoutRevokesSession) {
+  const auto token = login_token();
+  auto headers = with_cookie(token);
+  headers.emplace("Origin", same_origin());
+  const auto response = client->request("POST", "/api/auth/logout", "", headers);
+  ASSERT_EQ(response->status_code, "200 OK");
+  const auto cookie = header_of(response, "Set-Cookie");
+  EXPECT_TRUE(cookie.starts_with("nova_session=;")) << cookie;
+  EXPECT_NE(cookie.find("Max-Age=0"), std::string::npos) << cookie;
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(token))->status_code, "401 Unauthorized");
+}
+
+// Test: sessions stop working when the password changes, including via savePassword
+TEST_F(ConfigHttpSessionTest, PasswordChangeRevokesSessions) {
+  const auto saved_credentials_file = config::sunshine.credentials_file;
+  config::sunshine.credentials_file = (test_web_dir / "credentials.json").string();
+
+  const auto other = login_token(true);
+  const auto mine = login_token();
+  auto headers = with_cookie(mine);
+  headers.emplace("Origin", same_origin());
+  headers.emplace("Content-Type", "application/json");
+  headers.emplace("Sec-Fetch-Site", "same-origin");
+  const nlohmann::json body {{"currentUsername", "testuser"}, {"currentPassword", "testpass"}, {"newPassword", "newpass1"}, {"confirmNewPassword", "newpass1"}};
+  const auto response = client->request("POST", "/api/password", body.dump(), headers);
+  ASSERT_EQ(response->status_code, "200 OK") << response->content.string();
+
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(other))->status_code, "401 Unauthorized");
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(mine))->status_code, "401 Unauthorized");
+  // This browser got a fresh session under the new password.
+  const auto fresh = cookie_token(response);
+  ASSERT_EQ(fresh.size(), 64u);
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(fresh))->status_code, "200 OK");
+  EXPECT_EQ(web_session::web_ui().size(), 1u);
+
+  config::sunshine.credentials_file = saved_credentials_file;
+}
+
+// Test: a session made under other credentials (changed outside the web UI) is void
+TEST_F(ConfigHttpSessionTest, SessionIsBoundToCredentials) {
+  const auto token = login_token();
+  config::sunshine.salt = "othersalt";
+  config::sunshine.password = util::hex(crypto::hash("testpass" + config::sunshine.salt)).to_string();
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(token))->status_code, "401 Unauthorized");
+}
+
+// Test: cookie-authenticated state-changing requests need a same-origin header or the CSRF token
+TEST_F(ConfigHttpSessionTest, CookieRequestsRequireCsrfProof) {
+  const auto login_response = login("testuser", "testpass");
+  const auto token = cookie_token(login_response);
+  const auto csrf = nlohmann::json::parse(login_response->content.string()).at("csrf_token").get<std::string>();
+
+  // No Origin, Referer or token: refused (the cookie alone proves nothing).
+  auto bare = client->request("POST", "/auth-test", "", with_cookie(token));
+  EXPECT_EQ(bare->status_code, "400 Bad Request");
+  EXPECT_NE(bare->content.string().find("Missing CSRF token"), std::string::npos);
+
+  // Cross-site Origin: refused.
+  auto cross = with_cookie(token);
+  cross.emplace("Origin", "https://evil.example");
+  EXPECT_EQ(client->request("POST", "/auth-test", "", cross)->status_code, "400 Bad Request");
+
+  // Cross-site Referer: refused.
+  auto referer = with_cookie(token);
+  referer.emplace("Referer", "https://localhost.evil.example/page");
+  EXPECT_EQ(client->request("POST", "/auth-test", "", referer)->status_code, "400 Bad Request");
+
+  // A wrong token is refused even from the same origin.
+  auto wrong = with_cookie(token);
+  wrong.emplace("Origin", same_origin());
+  wrong.emplace("X-CSRF-Token", std::string(64, '0'));
+  EXPECT_EQ(client->request("POST", "/auth-test", "", wrong)->status_code, "400 Bad Request");
+
+  // Same origin: accepted.
+  auto same = with_cookie(token);
+  same.emplace("Origin", same_origin());
+  EXPECT_EQ(client->request("POST", "/auth-test", "", same)->status_code, "200 OK");
+
+  // The session's token: accepted without Origin.
+  auto with_token = with_cookie(token);
+  with_token.emplace("X-CSRF-Token", csrf);
+  EXPECT_EQ(client->request("POST", "/auth-test", "", with_token)->status_code, "200 OK");
+
+  // Reads need neither.
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(token))->status_code, "200 OK");
+
+  // validate_csrf_token() applies the same rule for cookie requests.
+  EXPECT_EQ(client->request("POST", "/csrf-validate-test", "", with_cookie(token))->status_code, "400 Bad Request");
+  EXPECT_EQ(client->request("POST", "/csrf-validate-test", "", with_token)->status_code, "200 OK");
+}
+
+// Test: HTTP Basic still works for API clients (curl -u), and a stale cookie doesn't get in the way
+TEST_F(ConfigHttpSessionTest, BasicAuthStillWorksForApiClients) {
+  SimpleWeb::CaseInsensitiveMultimap headers;
+  headers.emplace("Authorization", create_auth_header("testuser", "testpass"));
+  EXPECT_EQ(client->request("GET", "/auth-test", "", headers)->status_code, "200 OK");
+  EXPECT_EQ(client->request("POST", "/auth-test", "", headers)->status_code, "200 OK");
+
+  headers.emplace("Cookie", "nova_session=" + std::string(64, 'b'));
+  EXPECT_EQ(client->request("GET", "/auth-test", "", headers)->status_code, "200 OK");
+}
+
+// Test: browsers never get a Basic challenge (no native popup); curl without credentials still does
+TEST_F(ConfigHttpSessionTest, NoBasicChallengeForBrowsers) {
+  const std::vector<std::pair<std::string, std::string>> browser_markers {
+    {"Accept", "text/html,application/xhtml+xml"},
+    {"X-Requested-With", "XMLHttpRequest"},
+    {"Sec-Fetch-Mode", "cors"},
+    {"Sec-Fetch-Site", "same-origin"},
+  };
+  for (const auto &[name, value] : browser_markers) {
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace(name, value);
+    const auto api = client->request("GET", "/auth-test", "", headers);
+    EXPECT_EQ(header_of(api, "WWW-Authenticate"), "") << name;
+    EXPECT_TRUE(api->status_code == "401 Unauthorized" || api->status_code == "303 See Other") << name << ' ' << api->status_code;
+  }
+  // A plain API client is still challenged.
+  EXPECT_NE(header_of(client->request("GET", "/auth-test"), "WWW-Authenticate"), "");
+}
+
+// Test: a browser engine's cached Basic credentials are ignored, so signing out sticks
+TEST_F(ConfigHttpSessionTest, BrowsersSignInWithTheCookieOnly) {
+  SimpleWeb::CaseInsensitiveMultimap headers;
+  headers.emplace("Authorization", create_auth_header("testuser", "testpass"));
+  headers.emplace("Sec-Fetch-Site", "same-origin");
+  const auto response = client->request("GET", "/auth-test", "", headers);
+  EXPECT_EQ(response->status_code, "401 Unauthorized");
+  EXPECT_EQ(header_of(response, "WWW-Authenticate"), "");
+  EXPECT_EQ(login_guard::web_ui().failures("127.0.0.1"), 0) << "ignored credentials are not a failed attempt";
+}
+
+// Test: signed-out page loads go to /login?next=<path>; unsafe targets drop next
+TEST_F(ConfigHttpSessionTest, PageLoadsRedirectToLogin) {
+  SimpleWeb::CaseInsensitiveMultimap nav;
+  nav.emplace("Accept", "text/html");
+  nav.emplace("Sec-Fetch-Mode", "navigate");
+
+  auto response = client->request("GET", "/page-test", "", nav);
+  ASSERT_EQ(response->status_code, "303 See Other");
+  EXPECT_EQ(header_of(response, "Location"), "/login?next=/page-test");
+  EXPECT_EQ(header_of(response, "WWW-Authenticate"), "");
+
+  response = client->request("GET", "/settings?tab=network&x=a%20b", "", nav);
+  ASSERT_EQ(response->status_code, "303 See Other");
+  EXPECT_EQ(header_of(response, "Location"), "/login?next=/settings%3Ftab%3Dnetwork%26x%3Da%2520b");
+
+  // "//evil.example" would be scheme-relative: no next at all.
+  response = client->request("GET", "//evil.example/x", "", nav);
+  EXPECT_EQ(header_of(response, "Location"), "/login");
+
+  // Signed in: the page itself.
+  auto signed_in = with_cookie(login_token());
+  signed_in.emplace("Accept", "text/html");
+  response = client->request("GET", "/page-test", "", signed_in);
+  EXPECT_EQ(response->status_code, "200 OK");
+}
+
+// Test: sessions can be listed and revoked individually or all-but-this-one
+TEST_F(ConfigHttpSessionTest, ListAndRevokeSessions) {
+  const auto a = login_token();
+  const auto b = login_token(true);
+  const auto mine = login_token();
+
+  auto list = client->request("GET", "/api/auth/sessions", "", with_cookie(mine));
+  ASSERT_EQ(list->status_code, "200 OK");
+  auto sessions = nlohmann::json::parse(list->content.string()).at("sessions");
+  ASSERT_EQ(sessions.size(), 3u);
+  std::string other_id;
+  int current = 0;
+  for (const auto &s : sessions) {
+    EXPECT_EQ(s.find("token_hash"), s.end());
+    EXPECT_EQ(s.find("csrf"), s.end());
+    if (s.at("current").get<bool>()) {
+      ++current;
+    } else {
+      other_id = s.at("id").get<std::string>();
+    }
+  }
+  EXPECT_EQ(current, 1);
+
+  auto post = with_cookie(mine);
+  post.emplace("Origin", same_origin());
+  post.emplace("Content-Type", "application/json");
+  auto response = client->request("POST", "/api/auth/sessions/revoke", nlohmann::json {{"id", other_id}}.dump(), post);
+  ASSERT_EQ(response->status_code, "200 OK");
+  EXPECT_EQ(nlohmann::json::parse(response->content.string()).at("revoked").get<int>(), 1);
+  EXPECT_EQ(web_session::web_ui().size(), 2u);
+
+  response = client->request("POST", "/api/auth/sessions/revoke", nlohmann::json {{"others", true}}.dump(), post);
+  ASSERT_EQ(response->status_code, "200 OK");
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(a))->status_code, "401 Unauthorized");
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(b))->status_code, "401 Unauthorized");
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(mine))->status_code, "200 OK");
+}
+
+// Test: sessions survive a restart (a new store reading the same file)
+TEST_F(ConfigHttpSessionTest, SessionsSurviveRestart) {
+  const auto token = login_token(true);
+  web_session::web_ui().open(test_web_dir / "web_sessions.json");  // what a restart does
+  EXPECT_EQ(client->request("GET", "/auth-test", "", with_cookie(token))->status_code, "200 OK");
+#ifndef _WIN32
+  const auto perms = std::filesystem::status(test_web_dir / "web_sessions.json").permissions();
+  EXPECT_EQ(perms & (std::filesystem::perms::group_all | std::filesystem::perms::others_all), std::filesystem::perms::none);
+#endif
+}
+
+// Test: first-run setup is still reachable, and /api/auth/login asks for it
+TEST_F(ConfigHttpSessionTest, LoginBeforeSetupPointsToWelcome) {
+  config::sunshine.username.clear();
+  const auto response = login("testuser", "testpass");
+  EXPECT_EQ(response->status_code, "409 Conflict");
+  EXPECT_EQ(nlohmann::json::parse(response->content.string()).at("error").get<std::string>(), "setup_required");
+  EXPECT_TRUE(nlohmann::json::parse(client->request("GET", "/api/auth/session")->content.string()).at("setup_required").get<bool>());
+}

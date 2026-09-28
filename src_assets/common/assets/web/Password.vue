@@ -10,6 +10,7 @@ import NvTextField from './nova/components/NvTextField.vue'
 import NvButton from './nova/components/NvButton.vue'
 import NvAlert from './nova/components/NvAlert.vue'
 import NewPasswordFields from './nova/pages/auth/NewPasswordFields.vue'
+import SessionsCard from './nova/pages/auth/SessionsCard.vue'
 import { GENERIC_ERROR, useCredentialsForm } from './nova/pages/auth/useCredentialsForm'
 
 const { t } = useI18n()
@@ -61,6 +62,7 @@ const serverMessage = computed(() => (serverError.value === GENERIC_ERROR ? t('n
         <NvButton type="submit" variant="primary" :loading="saving">{{ t('nova.auth.save') }}</NvButton>
       </div>
     </form>
+    <SessionsCard v-if="!saved" class="nv-password__sessions" />
   </NvPage>
 </template>
 
@@ -86,6 +88,10 @@ const serverMessage = computed(() => (serverError.value === GENERIC_ERROR ? t('n
   .nv-password__set + .nv-password__set {
     padding-top: var(--nv-space-5);
     border-top: 1px solid var(--nv-border);
+  }
+
+  .nv-password__sessions {
+    margin-top: var(--nv-space-6);
   }
 
   .nv-password__legend {

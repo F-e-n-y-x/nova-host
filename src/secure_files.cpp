@@ -127,6 +127,7 @@ namespace secure_files {
     add(config::stream.file_apps);
     add(fs::path {config::nvhttp.file_state}.parent_path() / "session_history.json");
     add(fs::path {config::nvhttp.file_state}.parent_path() / "app_stats.json");
+    add(fs::path {config::nvhttp.file_state}.parent_path() / "web_sessions.json");
     add(config::sunshine.log_file);
     for (int i = 1; i <= 5; ++i) {
       add(fs::path {config::sunshine.log_file}.concat(std::format(".{}", i)));

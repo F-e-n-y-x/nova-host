@@ -6,6 +6,7 @@ import { computed, ref, shallowRef } from 'vue'
 import { fetchJson, getConfig, postJson } from '../nova/api.js'
 import { detectEncoders, parseLogs } from '../nova/logs.js'
 import { applyRules } from './settings_schema.js'
+import { apiFetch } from '../fetch_utils.js'
 import { hostEncoders, useHostProbes } from './hostProbes.js'
 import {
   DEFAULTS, allOptionKeys, buildSavePayload, changedKeys, clone, optionApplies, prepareConfig, validateOption,
@@ -52,7 +53,7 @@ export function useSettingsForm() {
       return
     }
     try {
-      const response = await fetch('./api/logs')
+      const response = await apiFetch('./api/logs')
       if (response.ok) detectedEncoders.value = detectEncoders(parseLogs(await response.text())).map((e) => e.type)
     } catch {
       detectedEncoders.value = []
@@ -142,7 +143,7 @@ export function useSettingsForm() {
     restarting.value = true
     needsRestart.value = false
     // The host drops the connection while restarting, so a failed response is expected.
-    await fetch('./api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).catch(() => null)
+    await apiFetch('./api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).catch(() => null)
     const deadline = Date.now() + 45000
     await wait(3000)
     while (Date.now() < deadline) {

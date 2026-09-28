@@ -44,18 +44,3 @@ const serverMessage = computed(() => (serverError.value === GENERIC_ERROR ? t('n
     </form>
   </AuthLayout>
 </template>
-
-<style>
-@layer components {
-  .nv-auth-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--nv-space-4);
-  }
-
-  .nv-auth-form__note {
-    margin: 0;
-    font-size: var(--nv-text-sm);
-  }
-}
-</style>

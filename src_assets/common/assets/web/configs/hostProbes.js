@@ -5,6 +5,7 @@
  * page falls back to free-text fields.
  */
 import { shallowRef } from 'vue'
+import { apiFetch } from '../fetch_utils.js'
 
 const displays = shallowRef(null)
 const sinks = shallowRef(null)
@@ -13,7 +14,7 @@ let started = null
 
 async function getOptional(url) {
   try {
-    const response = await fetch(url, { credentials: 'include' })
+    const response = await apiFetch(url)
     if (!response.ok) return null
     return await response.json()
   } catch {
