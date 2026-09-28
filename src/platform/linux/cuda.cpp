@@ -24,6 +24,7 @@ extern "C" {
 #include "src/logging.h"
 #include "src/utility.h"
 #include "src/video.h"
+#include "src/virtual_display.h"
 #include "wayland.h"
 
 /**
@@ -827,7 +828,17 @@ namespace cuda {
         params.privateDataSize = sizeof(MAGIC_PRIVATE_DATA);
 
         handle_t handle;
-        auto status = func.nvFBCCreateHandle(&handle.handle, &params);
+        // NvFBC has no display parameter: it binds to $DISPLAY here. Point it at Nova's virtual
+        // display for this call only (serialised with every other override).
+        const auto target = virtual_display::capture_target();
+        NVFBCSTATUS status;
+        {
+          virtual_display::scoped_x_env_t scope {target};
+          status = func.nvFBCCreateHandle(&handle.handle, &params);
+        }
+        if (target) {
+          BOOST_LOG(debug) << "NvFBC: session handle on virtual display "sv << target->display;
+        }
         if (status) {
           BOOST_LOG(error) << "Failed to create session: "sv << handle.last_error();
 
@@ -978,7 +989,10 @@ namespace cuda {
           if (status_params->bXRandRAvailable) {
             auto monitor_nr = util::from_view(display_name);
 
-            if (monitor_nr < 0 || monitor_nr >= status_params->dwOutputNum) {
+            if (status_params->dwOutputNum == 0) {
+              // A headless screen (Nova's virtual display) has no outputs: capture the whole screen.
+              BOOST_LOG(info) << "NvFBC: no outputs, capturing the whole "sv << status_params->screenSize.w << 'x' << status_params->screenSize.h << " screen"sv;
+            } else if (monitor_nr < 0 || monitor_nr >= status_params->dwOutputNum) {
               BOOST_LOG(warning) << "Can't stream monitor ["sv << monitor_nr << "], it needs to be between [0] and ["sv << status_params->dwOutputNum - 1 << "], defaulting to virtual desktop"sv;
             } else {
               streamedMonitor = monitor_nr;
@@ -1313,6 +1327,6 @@ namespace platf {
       display_names.emplace_back(std::to_string(x));
     }
 
-    return display_names;
+    return virtual_display::nvfbc_names_with_headless_fallback(std::move(display_names), status_params->dwOutputNum, status_params->screenSize.w, status_params->screenSize.h);
   }
 }  // namespace platf

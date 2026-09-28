@@ -14,6 +14,7 @@
 
 // local includes
 #include "src/platform/virtualhid_input.h"
+#include "src/virtual_display.h"
 
 using namespace std::literals;
 
@@ -37,7 +38,12 @@ namespace platf {
 
   std::optional<util::point_t> get_mouse_loc(input_t & /*input*/) {
 #ifdef SUNSHINE_BUILD_X11
-    auto *display = XOpenDisplay(nullptr);
+    // The pointer that matters is the one on the display being streamed.
+    Display *display = nullptr;
+    {
+      virtual_display::scoped_x_env_t scope {virtual_display::capture_target()};
+      display = XOpenDisplay(nullptr);
+    }
     if (!display) {
       return std::nullopt;
     }

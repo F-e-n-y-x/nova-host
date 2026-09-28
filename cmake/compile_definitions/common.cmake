@@ -199,6 +199,8 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/nova_compat.h"
         "${CMAKE_SOURCE_DIR}/src/display_follow.cpp"
         "${CMAKE_SOURCE_DIR}/src/display_follow.h"
+        "${CMAKE_SOURCE_DIR}/src/virtual_display.cpp"
+        "${CMAKE_SOURCE_DIR}/src/virtual_display.h"
         "${CMAKE_SOURCE_DIR}/src/nova_client_api.h"
         "${CMAKE_SOURCE_DIR}/src/stream_stats.cpp"
         "${CMAKE_SOURCE_DIR}/src/stream_stats.h"
