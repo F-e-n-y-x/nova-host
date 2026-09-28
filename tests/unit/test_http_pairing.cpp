@@ -900,3 +900,75 @@ TEST_F(PairingHttpHandlerTest, StockMoonlightRequestGetsOwnerName) {
   response.get();
   config::sunshine.username = original_username;
 }
+
+// Replays the /pair request Nebula 0.3.0-dev8 sends (engine NvHTTP.executePairingCommand with a
+// PairingIdentity): OkHttp's query order and %-encoding, pairingQuery() without devicename=roth,
+// then pairingParams(), then uniqueid/clientname/uuid from getCompleteUrl().
+TEST_F(PairingHttpHandlerTest, NebulaDev8PairRequestGetsASuggestedName) {
+  const auto original_username = config::sunshine.username;
+  config::sunshine.username = "ayush";
+  std::packaged_task<std::string()> request_task {[this]() {
+    return request(std::format(
+      "/pair?updateState=1&phrase=getservercert&salt=ff5dc6eda99339a8a0793e216c4257c4&clientcert={}"
+      "&devicename=Ayush%27s%20S25%20Ultra&clientapp=Nebula&clientver=0.3.0-dev8&clientform=phone"
+      "&uniqueid=0123456789ABCDEF&clientname=Ayush%27s%20S25%20Ultra&uuid=6f1c2b1e-9a0d-4f53-9a51-2a4c1f9b0e77",
+      util::hex_vec(PUBLIC_CERT, true)
+    ));
+  }};
+  auto response = request_task.get_future();
+  std::jthread request_thread {std::move(request_task)};
+
+  ASSERT_FALSE(wait_for_pending_pairing().empty());
+  const auto pending = get_pending_pairings();
+  ASSERT_EQ(pending.size(), 1);
+  EXPECT_EQ(pending.front().name, "Ayush's S25 Ultra");
+  EXPECT_EQ(pending.front().app, "Nebula");
+  EXPECT_EQ(pending.front().form, "phone");
+  EXPECT_EQ(pending.front().suggested_name, "Nebula from Ayush's S25 Ultra");
+  EXPECT_TRUE(cancel_pairing(pending.front().id));
+  response.get();
+  config::sunshine.username = original_username;
+}
+
+// A device named only by its model gets the Web UI user as the owner.
+TEST_F(PairingHttpHandlerTest, NebulaDev8ModelOnlyNameGetsTheOwner) {
+  const auto original_username = config::sunshine.username;
+  config::sunshine.username = "ayush";
+  std::packaged_task<std::string()> request_task {[this]() {
+    return request(std::format(
+      "/pair?updateState=1&phrase=getservercert&salt=ff5dc6eda99339a8a0793e216c4257c4&clientcert={}"
+      "&devicename=Galaxy%20S25%20Ultra&clientapp=Nebula&clientver=0.3.0-dev8&clientform=tablet"
+      "&uniqueid=0123456789ABCDEF&clientname=SM-S938B&uuid=6f1c2b1e-9a0d-4f53-9a51-2a4c1f9b0e77",
+      util::hex_vec(PUBLIC_CERT, true)
+    ));
+  }};
+  auto response = request_task.get_future();
+  std::jthread request_thread {std::move(request_task)};
+
+  ASSERT_FALSE(wait_for_pending_pairing().empty());
+  const auto pending = get_pending_pairings();
+  ASSERT_EQ(pending.size(), 1);
+  EXPECT_EQ(pending.front().suggested_name, "Nebula from Ayush's Galaxy S25 Ultra");
+  EXPECT_EQ(pending.front().form, "tablet");
+  EXPECT_TRUE(cancel_pairing(pending.front().id));
+  response.get();
+  config::sunshine.username = original_username;
+}
+
+TEST(DisplayScaleReply, MatchesWhatNebulaParses) {
+  using enum display_follow::scale_result_e;
+  const auto ok = display_scale_reply(applied, 150, 0, {});
+  EXPECT_EQ(ok["status_code"], 200);
+  EXPECT_EQ(ok["success"], true);
+  EXPECT_EQ(ok["scale"], 150);
+  const auto mirror = display_scale_reply(not_virtual, 150, 0, {});
+  EXPECT_EQ(mirror["status_code"], 409);
+  EXPECT_EQ(mirror["success"], false);
+  EXPECT_NE(mirror["status_message"].get<std::string>().find("Virtual display"), std::string::npos);
+  EXPECT_EQ(display_scale_reply(invalid, 130, 0, {})["status_code"], 400);
+  EXPECT_EQ(display_scale_reply(failed, 150, 0, {})["status_code"], 500);
+  const auto refused = display_scale_reply(std::nullopt, 150, 403, "no");
+  EXPECT_EQ(refused["status_code"], 403);
+  EXPECT_EQ(refused["success"], false);
+  EXPECT_EQ(refused["status_message"], "no");
+}

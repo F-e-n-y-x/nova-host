@@ -11,8 +11,10 @@
 #include <cctype>
 #include <charconv>
 #include <filesystem>
+#include <cstdint>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <new>
 #include <optional>
 #include <string_view>
@@ -568,9 +570,39 @@ namespace confighttp {
    * @param response The HTTP response object.
    * @param output_tree The JSON tree to send.
    */
+  /**
+   * @brief Identifies the Web UI build being served: FNV-1a of index.html (which names every
+   *        hashed asset), read once per process.
+   *
+   * API responses carry it as X-Nova-Build; a page loaded from an older build (a tab left open
+   * across a package upgrade and restart) sees a different value and reloads, instead of running
+   * old code against the new API.
+   *
+   * @return 16 hex characters, or empty when index.html can't be read.
+   */
+  const std::string &web_build_id() {
+    static const std::string id = [] {
+      std::ifstream in(WEB_DIR "index.html", std::ios::binary);
+      if (!in) {
+        return std::string {};
+      }
+      const std::string content {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+      std::uint64_t hash = 0xcbf29ce484222325ULL;
+      for (const unsigned char c : content) {
+        hash ^= c;
+        hash *= 0x100000001b3ULL;
+      }
+      return std::format("{:016x}", hash);
+    }();
+    return id;
+  }
+
   void send_response(const resp_https_t &response, const nlohmann::json &output_tree) {
     SimpleWeb::CaseInsensitiveMultimap headers;
     headers.emplace("Content-Type", "application/json");
+    if (!web_build_id().empty()) {
+      headers.emplace("X-Nova-Build", web_build_id());
+    }
     headers.emplace("X-Frame-Options", "DENY");
     headers.emplace("Content-Security-Policy", "frame-ancestors 'none';");
     response->write(output_tree.dump(), headers);
