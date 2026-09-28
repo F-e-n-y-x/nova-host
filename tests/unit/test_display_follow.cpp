@@ -7,8 +7,12 @@
 #include "../tests_common.h"
 
 // standard includes
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <thread>
 #include <map>
 #include <memory>
 #include <optional>
@@ -236,10 +240,16 @@ namespace {
       return false;
     }
 
+    bool set_scale(int percent) override {
+      log.push_back("scale " + std::to_string(percent));
+      return !fail_scale;
+    }
+
     std::vector<std::string> log;  ///< Calls in order (shared with the hooks).
     bool running = false;  ///< Whether a display is up.
     bool fail_start = false;  ///< Make start() fail.
     bool fail_resize = false;  ///< Make resize() fail.
+    bool fail_scale = false;  ///< Make set_scale() fail.
   };
 
   /**
@@ -247,6 +257,33 @@ namespace {
    */
   class DisplayFollowVirtualTest: public DisplayFollowTest {
   protected:
+    /**
+     * @brief Scheduler whose timer the test fires by hand.
+     */
+    display_follow::scheduler_t fake_scheduler() {
+      return {
+        [this](std::chrono::milliseconds delay, std::function<void()> fn) {
+          scheduled_delay = delay;
+          pending = std::move(fn);
+          ++schedules;
+        },
+        [this]() {
+          pending = nullptr;
+          ++cancels;
+        },
+      };
+    }
+
+    /**
+     * @brief Run the armed linger callback (as the timer would when it expires).
+     */
+    void fire() {
+      ASSERT_TRUE(pending) << "no linger armed";
+      auto fn = std::move(pending);
+      pending = nullptr;
+      fn();
+    }
+
     display_follow::controller_t make_virtual() {
       backend = std::make_shared<fake_backend_t>();
       display_follow::virtual_hooks_t hooks;
@@ -270,11 +307,16 @@ namespace {
         },
         marker,
         backend,
-        hooks
+        hooks,
+        fake_scheduler()
       };
     }
 
     std::shared_ptr<fake_backend_t> backend;  ///< Backend of the last make_virtual().
+    std::function<void()> pending;  ///< Armed linger callback.
+    std::chrono::milliseconds scheduled_delay {0};  ///< Delay of the last schedule.
+    int schedules = 0;  ///< schedule() calls.
+    int cancels = 0;  ///< cancel() calls.
   };
 }  // namespace
 
@@ -378,4 +420,231 @@ TEST_F(DisplayFollowVirtualTest, StartupRecoveryAsksTheBackend) {
   auto controller = make_virtual();
   EXPECT_FALSE(controller.recover(script));
   EXPECT_EQ(backend->log, (std::vector<std::string> {"recover"}));
+}
+
+// ---- Linger: a quick reconnect (Nebula's live resolution change) resumes the same display ----
+
+using namespace std::chrono_literals;
+
+TEST_F(DisplayFollowVirtualTest, LingerKeepsTheDisplayAndItsAppAfterTheLastDisconnect) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  EXPECT_TRUE(controller.on_last_session_end(script, 30s));
+  EXPECT_TRUE(controller.lingering());
+  EXPECT_EQ(scheduled_delay, 30s);
+  EXPECT_EQ(backend->log, (std::vector<std::string> {"start 3120x1440", "up :20"})) << "nothing ended or stopped yet";
+  ASSERT_TRUE(controller.virtual_target());
+}
+
+TEST_F(DisplayFollowVirtualTest, ResumeWithinTheLingerResizesTheSameDisplay) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  controller.on_last_session_end(script, 30s);
+  auto landscape = phone("virtual");
+  landscape.width = 2340;
+  landscape.height = 1080;
+  landscape.fps = 60;
+  EXPECT_EQ(controller.on_stream_request("virtual", script, landscape, false, false, "headless_x"), display_follow::outcome_e::virtual_reused);
+  EXPECT_FALSE(controller.lingering());
+  EXPECT_EQ(cancels, 1);
+  EXPECT_EQ(backend->log, (std::vector<std::string> {"start 3120x1440", "up :20", "resize 2340x1080", "up :20"}));
+  EXPECT_EQ(controller.virtual_target()->width, 2340);
+  EXPECT_EQ(controller.virtual_target()->fps, 60);
+  // The timer callback of the cancelled linger must not tear the resumed display down.
+  auto stale = std::move(pending);
+  if (stale) {
+    stale();
+  }
+  EXPECT_TRUE(controller.virtual_target());
+  EXPECT_EQ(backend->log.size(), 4u);
+}
+
+TEST_F(DisplayFollowVirtualTest, StaleLingerCallbackIsIgnored) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  controller.on_last_session_end(script, 30s);
+  auto first = pending;  // the timer thread may already hold it when a resume arrives
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  first();
+  EXPECT_TRUE(controller.virtual_target());
+  EXPECT_EQ(std::count(backend->log.begin(), backend->log.end(), "stop"), 0);
+}
+
+TEST_F(DisplayFollowVirtualTest, LingerExpiryEndsTheAppAndStopsTheDisplay) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  controller.on_last_session_end(script, 30s);
+  fire();
+  EXPECT_FALSE(controller.lingering());
+  EXPECT_FALSE(controller.virtual_target());
+  EXPECT_EQ(backend->log, (std::vector<std::string> {"start 3120x1440", "up :20", "end app", "stop", "down"}));
+}
+
+TEST_F(DisplayFollowVirtualTest, QuitDuringTheLingerTearsDownAtOnce) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  controller.on_last_session_end(script, 30s);
+  EXPECT_TRUE(controller.end_now(script));
+  EXPECT_FALSE(controller.lingering());
+  EXPECT_FALSE(controller.virtual_target());
+  EXPECT_EQ(cancels, 1);
+  EXPECT_EQ(backend->log, (std::vector<std::string> {"start 3120x1440", "up :20", "end app", "stop", "down"}));
+  EXPECT_FALSE(pending);
+}
+
+TEST_F(DisplayFollowVirtualTest, ZeroLingerKeepsTheOldBehaviour) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  EXPECT_TRUE(controller.on_last_session_end(script, 0s));
+  EXPECT_EQ(schedules, 0);
+  EXPECT_FALSE(controller.virtual_target());
+  EXPECT_EQ(backend->log.back(), "down");
+}
+
+TEST_F(DisplayFollowVirtualTest, NothingToKeepMeansNoLinger) {
+  auto controller = make_virtual();
+  EXPECT_FALSE(controller.on_last_session_end(script, 30s));
+  EXPECT_EQ(schedules, 0);
+  EXPECT_FALSE(controller.lingering());
+}
+
+TEST_F(DisplayFollowVirtualTest, MirrorResumeWithinTheLingerSwitchesWithoutRestoring) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x");
+  controller.on_last_session_end(script, 30s);
+  EXPECT_EQ(calls.size(), 1u) << "no restore while waiting for a reconnect";
+  auto small = phone("mirror");
+  small.width = 1280;
+  small.height = 720;
+  EXPECT_EQ(controller.on_stream_request("virtual", script, small, false, false, "headless_x"), display_follow::outcome_e::switched);
+  ASSERT_EQ(calls.size(), 2u);
+  EXPECT_EQ(calls[1].action, "set") << "straight to the new mode, the desktop never flickers back";
+  EXPECT_EQ(calls[1].env["SUNSHINE_CLIENT_WIDTH"], "1280");
+  EXPECT_TRUE(controller.active());
+  EXPECT_FALSE(controller.lingering());
+}
+
+TEST_F(DisplayFollowVirtualTest, MirrorLingerExpiryRestoresTheDesktop) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x");
+  controller.on_last_session_end(script, 30s);
+  fire();
+  ASSERT_EQ(calls.size(), 2u);
+  EXPECT_EQ(calls[1].action, "restore");
+  EXPECT_FALSE(controller.active());
+  EXPECT_FALSE(fs::exists(marker));
+}
+
+TEST_F(DisplayFollowVirtualTest, MirrorQuitDuringTheLingerRestoresAtOnce) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x");
+  controller.on_last_session_end(script, 30s);
+  EXPECT_TRUE(controller.end_now(script));
+  ASSERT_EQ(calls.size(), 2u);
+  EXPECT_EQ(calls[1].action, "restore");
+}
+
+TEST_F(DisplayFollowVirtualTest, MirrorAfterALingeringVirtualDisplayStopsIt) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  controller.on_last_session_end(script, 30s);
+  EXPECT_EQ(controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x"), display_follow::outcome_e::switched);
+  EXPECT_FALSE(controller.virtual_target());
+  EXPECT_EQ(backend->log, (std::vector<std::string> {"start 3120x1440", "up :20", "end app", "stop", "down"}));
+  EXPECT_EQ(calls.back().action, "set");
+}
+
+TEST_F(DisplayFollowVirtualTest, RealTimerFiresAfterTheDelay) {
+  // The built-in timer (no injected scheduler) tears down after the linger.
+  auto real_backend = std::make_shared<fake_backend_t>();
+  display_follow::controller_t controller {
+    [](const std::string &, const std::string &, const display_follow::env_t &) {
+      return 0;
+    },
+    marker,
+    real_backend
+  };
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  controller.on_last_session_end(script, 50ms);
+  EXPECT_TRUE(controller.virtual_target());
+  for (int i = 0; i < 100 && controller.virtual_target(); ++i) {
+    std::this_thread::sleep_for(10ms);
+  }
+  EXPECT_FALSE(controller.virtual_target());
+  EXPECT_FALSE(controller.lingering());
+  // Re-armed and cancelled: nothing happens.
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  controller.on_last_session_end(script, 50ms);
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  std::this_thread::sleep_for(150ms);
+  EXPECT_TRUE(controller.virtual_target());
+}
+
+// ---- Display scale (/display-scale) ----
+
+TEST_F(DisplayFollowVirtualTest, ScaleNeedsAVirtualDisplay) {
+  auto controller = make_virtual();
+  EXPECT_EQ(controller.set_scale(150), display_follow::scale_result_e::not_virtual);
+  controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x");
+  EXPECT_EQ(controller.set_scale(150), display_follow::scale_result_e::not_virtual) << "Mirror never changes the desktop's scale";
+  EXPECT_EQ(calls.size(), 1u);
+}
+
+TEST_F(DisplayFollowVirtualTest, ScaleIsValidatedAndApplied) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  EXPECT_EQ(controller.virtual_target()->scale, 100);
+  EXPECT_EQ(controller.set_scale(130), display_follow::scale_result_e::invalid);
+  EXPECT_EQ(controller.set_scale(0), display_follow::scale_result_e::invalid);
+  EXPECT_EQ(controller.set_scale(150), display_follow::scale_result_e::applied);
+  EXPECT_EQ(controller.virtual_target()->scale, 150);
+  EXPECT_EQ(backend->log.back(), "scale 150");
+  EXPECT_EQ(controller.set_scale(150), display_follow::scale_result_e::applied);
+  EXPECT_EQ(backend->log.back(), "scale 150");
+  EXPECT_EQ(std::count(backend->log.begin(), backend->log.end(), "scale 150"), 1) << "same scale is not re-applied";
+  backend->fail_scale = true;
+  EXPECT_EQ(controller.set_scale(200), display_follow::scale_result_e::failed);
+  EXPECT_EQ(controller.virtual_target()->scale, 150);
+}
+
+TEST_F(DisplayFollowVirtualTest, StartAndResumeCarryTheDeviceScale) {
+  auto controller = make_virtual();
+  auto request = phone("virtual");
+  request.scale = 175;
+  controller.on_stream_request("virtual", script, request, false, false, "headless_x");
+  EXPECT_EQ(controller.virtual_target()->scale, 175);
+  controller.on_last_session_end(script, 30s);
+  request.scale = 125;
+  controller.on_stream_request("virtual", script, request, false, false, "headless_x");
+  EXPECT_EQ(controller.virtual_target()->scale, 125);
+  EXPECT_EQ(backend->log[3], "scale 125");
+}
+
+TEST(DisplayScaleStore, RoundTripsPerDevice) {
+  const auto dir = fs::temp_directory_path() / ("nova-scale-store-" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+  fs::remove_all(dir);
+  const auto file = dir / "virtual-display-scale.json";
+  EXPECT_EQ(display_follow::stored_scale(file, "aaaa"), 100);
+  EXPECT_TRUE(display_follow::store_scale(file, "aaaa", 150));
+  EXPECT_TRUE(display_follow::store_scale(file, "bbbb", 200));
+  EXPECT_FALSE(display_follow::store_scale(file, "cccc", 110));
+  EXPECT_FALSE(display_follow::store_scale(file, "", 150));
+  EXPECT_EQ(display_follow::stored_scale(file, "aaaa"), 150);
+  EXPECT_EQ(display_follow::stored_scale(file, "bbbb"), 200);
+  EXPECT_EQ(display_follow::stored_scale(file, "cccc"), 100);
+  EXPECT_EQ(fs::status(file).permissions() & fs::perms::all, fs::perms::owner_read | fs::perms::owner_write);
+  std::ofstream {file} << "not json";
+  EXPECT_EQ(display_follow::stored_scale(file, "aaaa"), 100);
+  EXPECT_TRUE(display_follow::store_scale(file, "aaaa", 125)) << "a corrupt file is replaced";
+  EXPECT_EQ(display_follow::stored_scale(file, "aaaa"), 125);
+  fs::remove_all(dir);
+}
+
+TEST(DisplayScaleStore, DeviceKeyIsStable) {
+  EXPECT_EQ(display_follow::device_key(""), "");
+  const auto key = display_follow::device_key("-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n");
+  EXPECT_EQ(key.size(), 16u);
+  EXPECT_EQ(key, display_follow::device_key("-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n"));
+  EXPECT_NE(key, display_follow::device_key("-----BEGIN CERTIFICATE-----\nabd\n-----END CERTIFICATE-----\n"));
+  EXPECT_EQ(display_follow::device_key("a"), "af63dc4c8601ec8c");  // FNV-1a 64 test vector
 }

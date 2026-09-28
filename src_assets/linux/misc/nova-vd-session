@@ -1,0 +1,650 @@
+#!/usr/bin/env python3
+"""The desktop Nova runs on a Virtual display (virtual_display_session = desktop).
+
+Nova starts this on the headless X server (DISPLAY=:N) instead of a bare window manager, so a
+"Desktop (Virtual display)" stream shows a usable desktop and a game launched there has one behind it:
+
+- the user's Cinnamon wallpaper (org.cinnamon.desktop.background), else Nova's default
+- desktop icons (nemo-desktop), a tint2 panel with a launcher, task list and clock
+- Openbox with a right-click menu: terminal, files, browser, Lutris and the Nova Library games
+
+The session is kept away from the desktop on :0:
+- It gets its own D-Bus session bus (dbus-run-session). nemo-desktop, nemo and gnome-terminal are
+  single-instance D-Bus apps: on the shared bus a second nemo-desktop exits at once and a terminal
+  opened here would appear on :0.
+- nemo-desktop runs with a private XDG_CONFIG_HOME holding a copy of the user's dconf database and
+  GTK settings, so anything it writes stays in that copy.
+- GIO_USE_VFS=local and no portals, so no second gvfs/metadata daemon writes the user's files.
+- Chrome gets its own profile directory; with the normal profile Chrome hands the window to the
+  instance already running on :0.
+
+Subcommands (Nova runs them with DISPLAY, XAUTHORITY and NOVA_VD_DIR set):
+  (none) | start   run the session (blocks; Nova stops it by signalling the process group)
+  refresh          the screen was resized: redraw the wallpaper at the new size
+  scale PERCENT    set the display scale (100, 125, 150, 175 or 200) and reload the panel and icons
+  menu             print the Openbox pipe menu of Nova Library games
+  run CMD...       run a program with the session's scale variables (used by the menu and panel)
+
+Environment:
+  NOVA_VD_DIR        per-display state directory (required, created 0700 by Nova)
+  NOVA_VD_WM         window manager (default "openbox")
+  NOVA_VD_SCALE      initial scale in percent (default 100)
+  NOVA_VD_APPS       Nova's apps.json, for the Library menu
+  NOVA_VD_WALLPAPER  default wallpaper when the user has none
+"""
+import json
+import os
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import urllib.parse
+from xml.sax.saxutils import escape, quoteattr
+
+SCALES = (100, 125, 150, 175, 200)
+SELF = os.path.abspath(__file__)
+
+
+def log(*parts):
+    print("nova-vd-session:", *parts, file=sys.stderr, flush=True)
+
+
+def state_dir():
+    d = os.environ.get("NOVA_VD_DIR", "")
+    if not d:
+        log("NOVA_VD_DIR is not set")
+        sys.exit(2)
+    return os.path.join(d, "session")
+
+
+def home():
+    return os.environ.get("HOME") or os.path.expanduser("~")
+
+
+def user_config_home():
+    return os.environ.get("NOVA_VD_USER_CONFIG") or os.environ.get("XDG_CONFIG_HOME") or os.path.join(home(), ".config")
+
+
+def clamp_scale(value):
+    try:
+        pct = int(str(value).strip().rstrip("%"))
+    except ValueError:
+        return 100
+    return min(SCALES, key=lambda s: abs(s - pct))
+
+
+def read_scale(d):
+    try:
+        with open(os.path.join(d, "scale"), encoding="utf-8") as f:
+            return clamp_scale(f.read())
+    except OSError:
+        return clamp_scale(os.environ.get("NOVA_VD_SCALE", "100"))
+
+
+def scale_env(pct):
+    """Variables for programs started at a scale: GTK takes an integer GDK_SCALE plus a font factor."""
+    factor = pct / 100
+    gdk_scale = 2 if pct >= 200 else 1
+    return {
+        "GDK_SCALE": str(gdk_scale),
+        "GDK_DPI_SCALE": f"{factor / gdk_scale:g}",
+        "QT_SCALE_FACTOR": f"{factor:g}",
+        "QT_AUTO_SCREEN_SCALE_FACTOR": "0",
+        "ELM_SCALE": f"{factor:g}",
+    }
+
+
+def run_quiet(argv, env=None, timeout=10):
+    try:
+        return subprocess.run(argv, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout).returncode
+    except (OSError, subprocess.SubprocessError):
+        return -1
+
+
+def screen_size():
+    try:
+        out = subprocess.run(["xrandr", "--current"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        if line.startswith("Screen ") and " current " in line:
+            cur = line.split(" current ", 1)[1].split(",", 1)[0]
+            w, h = cur.replace(" ", "").split("x")
+            return int(w), int(h)
+    return None
+
+
+def gsetting(schema, key):
+    """Read the user's setting straight from their dconf database (no bus needed)."""
+    env = dict(os.environ)
+    env.pop("DCONF_PROFILE", None)
+    env["XDG_CONFIG_HOME"] = user_config_home()
+    try:
+        out = subprocess.run(["gsettings", "get", schema, key], capture_output=True, text=True, env=env, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    value = out.stdout.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    return value if out.returncode == 0 else ""
+
+
+def wallpaper_source():
+    uri = gsetting("org.cinnamon.desktop.background", "picture-uri")
+    if uri.startswith("file://"):
+        path = urllib.parse.unquote(urllib.parse.urlparse(uri).path)
+        if os.path.isfile(path):
+            return os.path.realpath(path), gsetting("org.cinnamon.desktop.background", "picture-options") or "zoom"
+    default = os.environ.get("NOVA_VD_WALLPAPER", "")
+    if default and os.path.isfile(default):
+        return default, "zoom"
+    return "", ""
+
+
+def geometry_args(options, w, h):
+    size = f"{w}x{h}"
+    if options == "stretched":
+        return ["-resize", size + "!"]
+    if options in ("scaled", "centered"):
+        fit = ["-resize", size] if options == "scaled" else []
+        return fit + ["-background", "black", "-gravity", "center", "-extent", size]
+    return ["-resize", size + "^", "-gravity", "center", "-extent", size]  # zoom, spanned, wallpaper
+
+
+def draw_wallpaper(d):
+    """Paint the root window (what shows without desktop icons) and keep a copy for the icon view."""
+    src, options = wallpaper_source()
+    size = screen_size()
+    if not src or not size or not shutil.which("convert"):
+        run_quiet(["xsetroot", "-solid", "#141824"])
+        return ""
+    out = os.path.join(d, "wallpaper.png")
+    tmp = out + ".tmp.png"
+    if run_quiet(["convert", src + "[0]", *geometry_args(options, *size), "-depth", "8", tmp], timeout=30) != 0:
+        run_quiet(["xsetroot", "-solid", "#141824"])
+        return ""
+    os.replace(tmp, out)
+    if shutil.which("display"):
+        run_quiet(["display", "-window", "root", out], timeout=15)
+    return out
+
+
+DCONF_DB = "nova-virtual-display"
+
+
+def isolate_dconf(d):
+    """Give the session its own copy of the user's dconf database (~/.config/dconf/nova-virtual-display).
+
+    Readers see the user's settings; writes (a second dconf-service runs on the private bus) land in
+    the copy, so they can never race the desktop's dconf-service over ~/.config/dconf/user.
+    """
+    dconf_dir = os.path.join(user_config_home(), "dconf")
+    src_db = os.path.join(dconf_dir, "user")
+    if os.path.isfile(src_db):
+        os.makedirs(dconf_dir, exist_ok=True)
+        shutil.copyfile(src_db, os.path.join(dconf_dir, DCONF_DB))
+    profile = os.path.join(d, "dconf-profile")
+    with open(profile, "w", encoding="utf-8") as f:
+        f.write(f"user-db:{DCONF_DB}\n")
+    return profile
+
+
+def write_nemo_config(d, wallpaper, pct):
+    """A private config home for nemo-desktop: the user's dconf and GTK settings, plus the wallpaper.
+
+    Without a compositor nemo-desktop paints its transparent desktop window black; this CSS gives
+    that window the wallpaper instead.
+    """
+    cfg = os.path.join(d, "nemo-config")
+    os.makedirs(os.path.join(cfg, "gtk-3.0"), exist_ok=True)
+    # dconf-service resolves the database under its own config home, so share the real directory
+    # (the session reads and writes only its nova-virtual-display copy there).
+    link = os.path.join(cfg, "dconf")
+    if not os.path.islink(link):
+        shutil.rmtree(link, ignore_errors=True)
+        os.symlink(os.path.join(user_config_home(), "dconf"), link)
+    profile = os.path.join(d, "dconf-profile")
+    # Larger labels need a wider icon grid, or they overlap. Written to the session's copy only.
+    env = dict(os.environ, XDG_CONFIG_HOME=cfg, DCONF_PROFILE=profile)
+    grid = f"{min(2.0, max(1.0, pct / 100)):.2f}"
+    for key in ("horizontal-grid-adjust", "vertical-grid-adjust"):
+        run_quiet(["gsettings", "set", "org.nemo.desktop", key, grid], env=env)
+    for name in ("settings.ini", "bookmarks"):
+        src = os.path.join(user_config_home(), "gtk-3.0", name)
+        if os.path.isfile(src):
+            shutil.copyfile(src, os.path.join(cfg, "gtk-3.0", name))
+    user_css = os.path.join(user_config_home(), "gtk-3.0", "gtk.css")
+    css = []
+    if os.path.isfile(user_css):
+        css.append(f'@import url("file://{urllib.parse.quote(user_css)}");')
+    if wallpaper:
+        css.append(
+            ".nemo-desktop-window, .nemo-desktop.view, .nemo-desktop-icon-view {\n"
+            f'  background-image: url("file://{urllib.parse.quote(wallpaper)}?{int(time.time())}");\n'
+            "  background-size: cover;\n  background-position: center;\n}"
+        )
+    with open(os.path.join(cfg, "gtk-3.0", "gtk.css"), "w", encoding="utf-8") as f:
+        f.write("\n".join(css) + "\n")
+    return cfg
+
+
+def browser_command():
+    for name in ("google-chrome-stable", "google-chrome", "chromium", "chromium-browser"):
+        if shutil.which(name):
+            profile = os.path.join(user_config_home(), "nova-host", "virtual-display-browser")
+            return [name, f"--user-data-dir={profile}", "--no-first-run"]
+    for name in ("firefox-esr", "firefox"):
+        if shutil.which(name):
+            return [name, "--new-instance", "-P", "nova-virtual-display"]
+    return []
+
+
+def launchers():
+    """(label, icon, argv) for the panel and menu; only programs that are installed."""
+    items = []
+    if shutil.which("gnome-terminal"):
+        items.append(("Terminal", "org.gnome.Terminal", ["gnome-terminal"]))
+    elif shutil.which("x-terminal-emulator"):
+        items.append(("Terminal", "utilities-terminal", ["x-terminal-emulator"]))
+    if shutil.which("nemo"):
+        items.append(("Files", "system-file-manager", ["nemo", home()]))
+    browser = browser_command()
+    if browser:
+        icon = "google-chrome" if "chrome" in browser[0] else "web-browser"
+        items.append(("Web browser", icon, browser))
+    if shutil.which("lutris"):
+        items.append(("Lutris", "net.lutris.Lutris", ["lutris"]))
+    return items
+
+
+def write_desktop_files(d):
+    apps = os.path.join(d, "applications")
+    os.makedirs(apps, exist_ok=True)
+    paths = []
+    for i, (label, icon, argv) in enumerate(launchers()):
+        path = os.path.join(apps, f"nova-vd-{i}.desktop")
+        exec_line = " ".join(shlex.quote(a) for a in [SELF, "run", *argv]).replace("%", "%%")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"[Desktop Entry]\nType=Application\nName={label}\nIcon={icon}\nExec={exec_line}\nTerminal=false\n")
+        paths.append(path)
+    return paths
+
+
+def write_tint2rc(d, pct):
+    s = pct / 100
+    px = lambda v: max(1, round(v * s))
+    lines = [
+        "# Generated by nova-vd-session",
+        "rounded = 0", "border_width = 0", "background_color = #10131c 92", "border_color = #000000 0",
+        "background_color_hover = #10131c 92", "background_color_pressed = #10131c 92",
+        "",
+        "rounded = 4", "border_width = 0", "background_color = #ffffff 0", "border_color = #000000 0",
+        "background_color_hover = #ffffff 12", "background_color_pressed = #ffffff 20",
+        "",
+        "rounded = 4", "border_width = 0", "background_color = #6c8cff 35", "border_color = #000000 0",
+        "background_color_hover = #6c8cff 45", "background_color_pressed = #6c8cff 55",
+        "",
+        "panel_items = LTSC",
+        "panel_size = 100% " + str(px(40)),
+        "panel_margin = 0 0",
+        f"panel_padding = {px(6)} {px(4)} {px(6)}",
+        "panel_background_id = 1",
+        "wm_menu = 1",
+        "panel_dock = 0",
+        "panel_position = bottom center horizontal",
+        "panel_layer = top",
+        "panel_monitor = all",
+        "autohide = 0",
+        "strut_policy = follow_size",
+        "disable_transparency = 1",
+        "",
+        f"launcher_padding = {px(2)} {px(2)} {px(4)}",
+        "launcher_background_id = 0",
+        "launcher_icon_background_id = 2",
+        f"launcher_icon_size = {px(28)}",
+        "launcher_icon_theme_override = 0",
+        "launcher_tooltip = 1",
+        "startup_notifications = 0",
+    ]
+    lines += [f"launcher_item_app = {p}" for p in write_desktop_files(d)]
+    lines += [
+        "",
+        "taskbar_mode = single_desktop",
+        f"taskbar_padding = {px(4)} 0 {px(4)}",
+        "taskbar_background_id = 0",
+        "taskbar_active_background_id = 0",
+        "taskbar_name = 0",
+        "taskbar_hide_inactive_tasks = 0",
+        "taskbar_distribute_size = 1",
+        "task_icon = 1",
+        "task_text = 1",
+        "task_centered = 0",
+        f"task_maximum_size = {px(220)} {px(32)}",
+        f"task_padding = {px(6)} {px(3)} {px(6)}",
+        "task_tooltip = 1",
+        f"task_font = Sans {px(10)}",
+        "task_font_color = #e6e9f2 100",
+        "task_background_id = 2",
+        "task_active_background_id = 3",
+        "task_urgent_background_id = 3",
+        "task_iconified_background_id = 2",
+        "task_iconified_font_color = #e6e9f2 60",
+        "mouse_left = toggle_iconify",
+        "mouse_middle = close",
+        "mouse_right = close",
+        "mouse_scroll_up = toggle",
+        "mouse_scroll_down = iconify",
+        "",
+        "systray_padding = 0 4 2",
+        "systray_background_id = 0",
+        f"systray_icon_size = {px(22)}",
+        "",
+        "time1_format = %H:%M",
+        "time2_format = %a %d %b",
+        f"time1_font = Sans Bold {px(10)}",
+        f"time2_font = Sans {px(8)}",
+        "clock_font_color = #e6e9f2 100",
+        f"clock_padding = {px(8)} 0",
+        "clock_background_id = 0",
+        "clock_tooltip = %A %d %B %Y",
+        "",
+        "tooltip_show_timeout = 0.5",
+        "tooltip_hide_timeout = 0.1",
+        f"tooltip_padding = {px(6)} {px(4)}",
+        "tooltip_background_id = 1",
+        "tooltip_font_color = #e6e9f2 100",
+        f"tooltip_font = Sans {px(10)}",
+    ]
+    path = os.path.join(d, "tint2rc")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
+def openbox_theme():
+    wanted = gsetting("org.cinnamon.desktop.wm.preferences", "theme")
+    for name in (wanted, "Onyx", "Clearlooks"):
+        if name and os.path.isdir(os.path.join("/usr/share/themes", name, "openbox-3")):
+            return name
+    return "Clearlooks"
+
+
+def write_openbox_config(d, pct):
+    """rc.xml (the system one with one desktop, a theme and scaled fonts) and menu.xml."""
+    import xml.etree.ElementTree as ET
+
+    ns = "http://openbox.org/3.4/rc"
+    ET.register_namespace("", ns)
+    q = lambda tag: f"{{{ns}}}{tag}"
+    src = next((p for p in ("/etc/xdg/openbox/rc.xml", "/usr/share/openbox/rc.xml") if os.path.isfile(p)), "")
+    rc_path = os.path.join(d, "openbox-rc.xml")
+    menu_path = os.path.join(d, "openbox-menu.xml")
+    if src:
+        tree = ET.parse(src)
+        root = tree.getroot()
+        theme = root.find(q("theme"))
+        if theme is not None:
+            name = theme.find(q("name"))
+            if name is not None:
+                name.text = openbox_theme()
+            for font in theme.findall(q("font")):
+                size = font.find(q("size"))
+                if size is not None and (size.text or "").strip().isdigit():
+                    size.text = str(max(6, round(int(size.text) * pct / 100)))
+        desktops = root.find(q("desktops"))
+        if desktops is not None:
+            number = desktops.find(q("number"))
+            if number is not None:
+                number.text = "1"
+        menu = root.find(q("menu"))
+        if menu is not None:
+            for f in menu.findall(q("file")):
+                menu.remove(f)
+            f = ET.SubElement(menu, q("file"))
+            f.text = menu_path
+        tree.write(rc_path, encoding="UTF-8", xml_declaration=True)
+    else:
+        rc_path = ""
+
+    items = []
+    for label, _icon, argv in launchers():
+        cmd = " ".join(shlex.quote(a) for a in [SELF, "run", *argv])
+        items.append(f'  <item label={quoteattr(label)}><action name="Execute"><execute>{escape(cmd)}</execute></action></item>')
+    library = " ".join(shlex.quote(a) for a in [SELF, "menu"])
+    menu_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<openbox_menu xmlns="http://openbox.org/3.4/menu">\n'
+        '<menu id="root-menu" label="Nova">\n' + "\n".join(items) + "\n  <separator />\n"
+        f'  <menu id="nova-library" label="Nova Library" execute={quoteattr(library)} />\n'
+        "  <separator />\n"
+        '  <item label="Reconfigure"><action name="Reconfigure" /></item>\n'
+        "</menu>\n</openbox_menu>\n"
+    )
+    with open(menu_path, "w", encoding="utf-8") as f:
+        f.write(menu_xml)
+    return rc_path
+
+
+def library_entries(apps_json):
+    """(name, command) for every Nova app with something to run; the Desktop entries have none."""
+    try:
+        with open(apps_json, encoding="utf-8") as f:
+            apps = json.load(f).get("apps", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    out = []
+    for app in apps:
+        if not isinstance(app, dict):
+            continue
+        cmd = app.get("cmd") or ""
+        if not cmd:
+            detached = app.get("detached") or []
+            cmd = detached[0] if isinstance(detached, list) and detached and isinstance(detached[0], str) else ""
+        name = str(app.get("name") or "").strip()
+        if isinstance(cmd, str) and cmd.strip() and name:
+            workdir = app.get("working-dir") or ""
+            out.append((name, cmd.strip(), workdir if isinstance(workdir, str) else ""))
+    return out
+
+
+def print_library_menu():
+    entries = library_entries(os.environ.get("NOVA_VD_APPS", ""))
+    print('<?xml version="1.0" encoding="UTF-8"?>\n<openbox_pipe_menu>')
+    if not entries:
+        print('  <item label="No games in the Nova Library" />')
+    for name, cmd, workdir in entries:
+        inner = f"cd {shlex.quote(workdir)} 2>/dev/null; exec {cmd}" if workdir else f"exec {cmd}"
+        full = " ".join(shlex.quote(a) for a in [SELF, "run", "/bin/sh", "-c", inner])
+        print(f'  <item label={quoteattr(name)}><action name="Execute"><execute>{escape(full)}</execute></action></item>')
+    print("</openbox_pipe_menu>")
+
+
+def apply_dpi(pct):
+    dpi = round(96 * pct / 100)
+    # A bare `xrandr --dpi` refits the framebuffer to the active outputs, and a headless screen has
+    # none, so it would shrink to 8x8: always pass the current size along.
+    size = screen_size()
+    if size:
+        run_quiet(["xrandr", "--fb", f"{size[0]}x{size[1]}", "--dpi", str(dpi)])
+    if shutil.which("xrdb"):
+        try:
+            subprocess.run(["xrdb", "-merge"], input=f"Xft.dpi: {dpi}\n", text=True, timeout=5,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
+class Session:
+    def __init__(self, d):
+        self.d = d
+        self.children = {}
+        self.wm = None
+        self.pending = set()
+
+    def spawn(self, name, argv, extra=None):
+        env = dict(os.environ)
+        env.update(scale_env(read_scale(self.d)))
+        env.update(extra or {})
+        try:
+            logf = open(os.path.join(self.d, f"{name}.log"), "ab")
+            proc = subprocess.Popen(argv, env=env, stdout=logf, stderr=logf, stdin=subprocess.DEVNULL)
+            logf.close()
+        except OSError as e:
+            log(f"couldn't start {name}: {e}")
+            return None
+        self.children[name] = proc
+        return proc
+
+    def stop_child(self, name):
+        proc = self.children.pop(name, None)
+        if proc and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+    def start_helpers(self):
+        pct = read_scale(self.d)
+        apply_dpi(pct)
+        wallpaper = draw_wallpaper(self.d)
+        if shutil.which("tint2"):
+            self.spawn("tint2", ["tint2", "-c", write_tint2rc(self.d, pct)])
+        if shutil.which("nemo-desktop"):
+            cfg = write_nemo_config(self.d, wallpaper, pct)
+            self.spawn("nemo-desktop", ["nemo-desktop"], {"XDG_CONFIG_HOME": cfg})
+
+    def reload(self):
+        pct = read_scale(self.d)
+        log(f"reloading at {pct}%")
+        self.stop_child("tint2")
+        self.stop_child("nemo-desktop")
+        write_openbox_config(self.d, pct)
+        if self.wm and self.wm.poll() is None:
+            run_quiet(["openbox", "--reconfigure"])
+        self.start_helpers()
+
+    def run(self):
+        os.makedirs(self.d, mode=0o700, exist_ok=True)
+        os.environ["DCONF_PROFILE"] = isolate_dconf(self.d)
+        with open(os.path.join(self.d, "pid"), "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        if not os.path.exists(os.path.join(self.d, "scale")):
+            with open(os.path.join(self.d, "scale"), "w", encoding="utf-8") as f:
+                f.write(str(read_scale(self.d)))
+        # The bare root window has the "X" cursor; give it the normal arrow.
+        run_quiet(["xsetroot", "-cursor_name", "left_ptr"])
+        signal.signal(signal.SIGHUP, lambda *_: self.pending.add("reload"))
+        signal.signal(signal.SIGUSR1, lambda *_: self.pending.add("refresh"))
+        signal.signal(signal.SIGTERM, lambda *_: self.pending.add("quit"))
+
+        wm = os.environ.get("NOVA_VD_WM", "openbox") or "openbox"
+        rc = write_openbox_config(self.d, read_scale(self.d)) if os.path.basename(wm.split()[0]) == "openbox" else ""
+        argv = shlex.split(wm) + (["--config-file", rc] if rc else [])
+        self.wm = self.spawn("wm", argv)
+        time.sleep(0.3)
+        self.start_helpers()
+
+        restarts = {}
+        while True:
+            if "quit" in self.pending:
+                break
+            if "reload" in self.pending:
+                self.pending.discard("reload")
+                self.pending.discard("refresh")
+                self.reload()
+            if "refresh" in self.pending:
+                self.pending.discard("refresh")
+                wallpaper = draw_wallpaper(self.d)
+                if "nemo-desktop" in self.children:
+                    self.stop_child("nemo-desktop")
+                    cfg = write_nemo_config(self.d, wallpaper, read_scale(self.d))
+                    self.spawn("nemo-desktop", ["nemo-desktop"], {"XDG_CONFIG_HOME": cfg})
+            if self.wm is None or self.wm.poll() is not None:
+                log("the window manager exited; ending the session")
+                break
+            # Restart a panel or icon view that crashed, a few times at most.
+            for name in ("tint2", "nemo-desktop"):
+                proc = self.children.get(name)
+                if proc and proc.poll() is not None and restarts.get(name, 0) < 3:
+                    restarts[name] = restarts.get(name, 0) + 1
+                    args = proc.args
+                    extra = {"XDG_CONFIG_HOME": os.path.join(self.d, "nemo-config")} if name == "nemo-desktop" else None
+                    self.spawn(name, args, extra)
+            try:
+                time.sleep(0.5)
+            except InterruptedError:
+                pass
+        for name in list(self.children):
+            self.stop_child(name)
+
+
+def private_env():
+    env = dict(os.environ)
+    env.update({
+        "NOVA_VD_PRIVATE_BUS": "1",
+        "XDG_SESSION_TYPE": "x11",
+        "XDG_CURRENT_DESKTOP": "Nova",
+        "DESKTOP_SESSION": "nova-virtual-display",
+        "XDG_SESSION_DESKTOP": "nova-virtual-display",
+        "GIO_USE_VFS": "local",
+        "GIO_USE_VOLUME_MONITOR": "unix",
+        "GTK_USE_PORTAL": "0",
+        "NO_AT_BRIDGE": "1",
+        "WAYLAND_DISPLAY": "",
+    })
+    env.pop("DBUS_SESSION_BUS_ADDRESS", None)
+    env.pop("SESSION_MANAGER", None)
+    env.pop("DESKTOP_STARTUP_ID", None)
+    return env
+
+
+def signal_session(sig):
+    try:
+        with open(os.path.join(state_dir(), "pid"), encoding="utf-8") as f:
+            os.kill(int(f.read().strip()), sig)
+        return 0
+    except (OSError, ValueError):
+        return 1
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "start"
+    if cmd == "start":
+        if os.environ.get("NOVA_VD_PRIVATE_BUS") != "1" and shutil.which("dbus-run-session"):
+            os.execvpe("dbus-run-session", ["dbus-run-session", "--", sys.executable, SELF, "start"], private_env())
+        if os.environ.get("NOVA_VD_PRIVATE_BUS") != "1":
+            log("dbus-run-session not found; the desktop starts without icons, terminal or file manager isolation")
+            os.environ.update(private_env())
+        Session(state_dir()).run()
+        return 0
+    if cmd == "refresh":
+        return signal_session(signal.SIGUSR1)
+    if cmd == "scale":
+        if len(argv) < 3:
+            print("usage: nova-vd-session scale PERCENT", file=sys.stderr)
+            return 2
+        d = state_dir()
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        pct = clamp_scale(argv[2])
+        with open(os.path.join(d, "scale"), "w", encoding="utf-8") as f:
+            f.write(str(pct))
+        apply_dpi(pct)
+        signal_session(signal.SIGHUP)
+        return 0
+    if cmd == "menu":
+        print_library_menu()
+        return 0
+    if cmd == "run":
+        if len(argv) < 3:
+            return 2
+        env = dict(os.environ)
+        env.update(scale_env(read_scale(state_dir())))
+        os.execvpe(argv[2], argv[2:], env)
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

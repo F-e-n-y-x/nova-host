@@ -67,6 +67,8 @@
       "display_follow_cmd": "/usr/local/bin/sunshine-resolution.sh",
       "virtual_display": "headless_x",
       "virtual_display_wm": "openbox",
+      "virtual_display_session": "desktop",
+      "virtual_display_linger": 30,
       "virtual_display_fps_cap": 0,
       "install_steam_audio_drivers": "enabled",
       "adapter_name": "",

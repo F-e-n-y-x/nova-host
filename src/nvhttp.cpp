@@ -687,6 +687,7 @@ namespace nvhttp {
     request.height = session.height;
     request.fps = session.fps;
     request.client_name = session.client_name;
+    request.device_key = display_follow::device_key(session.client_cert);
     request.mode = session.display_mode.empty() ? default_display_mode(appid) : session.display_mode;
 
     bool legacy_prep = false;
@@ -2287,7 +2288,7 @@ namespace nvhttp {
     if (!nova_require_device(response, request)) {
       return;
     }
-    nova_json(response, SimpleWeb::StatusCode::success_ok, {{"nova", true}, {"version", PROJECT_VERSION}, {"features", {"apps", "art", "details", "display_mode", "bitrate", "sessions"}}});
+    nova_json(response, SimpleWeb::StatusCode::success_ok, {{"nova", true}, {"version", PROJECT_VERSION}, {"features", {"apps", "art", "details", "display_mode", "bitrate", "sessions", "display_scale"}}});
   }
 
   /**
@@ -2421,6 +2422,73 @@ namespace nvhttp {
     tree.put("root.bitrate", sessions > 0 ? 1 : 0);
     tree.put("root.applied_kbps", *kbps);
     tree.put("root.<xmlattr>.status_code", 200);
+  }
+
+  /**
+   * @brief The /display-scale answer (JSON, always HTTP 200, like /rotate-display).
+   *
+   * @param result What set_display_scale() did, or std::nullopt for a refused request.
+   * @param percent Requested scale.
+   * @param refused_code Status for a refused request (401, 403 or 400).
+   * @param refused_message Message for a refused request.
+   * @return The JSON body.
+   */
+  nlohmann::json display_scale_reply(std::optional<display_follow::scale_result_e> result, int percent, int refused_code, const std::string &refused_message) {
+    using enum display_follow::scale_result_e;
+    int code = refused_code;
+    std::string message = refused_message;
+    if (result) {
+      switch (*result) {
+        case applied:
+          return {{"status_code", 200}, {"success", true}, {"status_message", "OK"}, {"scale", percent}};
+        case invalid:
+          code = 400;
+          message = "Scale must be 100, 125, 150, 175 or 200";
+          break;
+        case not_virtual:
+          code = 409;
+          message = "Display scaling is only available on a Virtual display; Mirror never changes the desktop's scale";
+          break;
+        case failed:
+          code = 500;
+          message = "Couldn't change the virtual display's scale";
+          break;
+      }
+    }
+    return {{"status_code", code}, {"success", false}, {"status_message", message}};
+  }
+
+  /**
+   * @brief GET /display-scale?scale=<percent>: scale the Virtual display (fonts, DPI, panel, icons).
+   *
+   * Needs the launch permission. Mirror streams are refused so the desktop's own DPI never changes.
+   * The scale is remembered for the device and used for its next Virtual display.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void display_scale(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    const auto peer = verified_peer_for(request);
+    const auto args = request->parse_query_string();
+    int percent = 0;
+    try {
+      percent = std::stoi(get_arg(args, "scale", "0"));
+    } catch (...) {
+      percent = 0;
+    }
+    nlohmann::json body;
+    if (peer.cert.empty()) {
+      body = display_scale_reply(std::nullopt, percent, 401, "This device isn't paired");
+    } else if (!client_permissions::has(permissions_for_request(request), client_permissions::launch_apps)) {
+      body = display_scale_reply(std::nullopt, percent, 403, "This device isn't allowed to change the display");
+    } else {
+      const auto result = display_follow::set_display_scale(percent, display_follow::device_key(peer.cert));
+      BOOST_LOG(info) << "Nova: "sv << peer.name << " asked for display scale "sv << percent << "% ("sv
+                      << (result == display_follow::scale_result_e::applied ? "applied"sv : "refused"sv) << ')';
+      body = display_scale_reply(result, percent, 0, {});
+    }
+    nova_json(response, SimpleWeb::StatusCode::success_ok, body);
   }
 
   /**
@@ -2569,6 +2637,7 @@ namespace nvhttp {
     };
     https_server.resource["^/cancel$"]["GET"] = cancel;
     https_server.resource["^/bitrate$"]["GET"] = bitrate;
+    https_server.resource["^/display-scale$"]["GET"] = display_scale;
     https_server.resource["^/nova/v1/capabilities$"]["GET"] = nova_capabilities;
     https_server.resource["^/nova/v1/apps$"]["GET"] = nova_apps;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/art/(poster|hero|logo|icon|background)$"]["GET"] = nova_app_art;

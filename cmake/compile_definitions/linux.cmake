@@ -335,3 +335,5 @@ list(APPEND SUNSHINE_EXTERNAL_LIBRARIES glad)
 
 # Nova: installed location of the GE-Proton/umu game launcher.
 list(APPEND SUNSHINE_DEFINITIONS NOVA_PROTON_RUN="${CMAKE_INSTALL_FULL_LIBDIR}/nova-host/nova-proton-run")
+# Desktop session for Virtual display streams (src_assets/linux/misc/nova-vd-session).
+list(APPEND SUNSHINE_DEFINITIONS NOVA_VD_SESSION="${CMAKE_INSTALL_FULL_LIBDIR}/nova-host/nova-vd-session")

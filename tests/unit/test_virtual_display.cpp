@@ -441,3 +441,53 @@ TEST(VirtualDisplaySeat, RuleDetection) {
   fs::remove_all(dir);
   EXPECT_EQ(vd::input_name_suffix, " (Nova VD)");
 }
+
+TEST_F(VirtualDisplayTest, DesktopSessionGetsItsStateDirAndEnvironment) {
+  vd::x_server_t server {dir, "'/usr/lib/nova-host/nova-vd-session'", sys.ops(), {{"NOVA_VD_SCALE", "150"}, {"NOVA_VD_WM", "openbox"}}};
+  const auto target = server.start({2340, 1080, 60});
+  ASSERT_TRUE(target);
+  EXPECT_EQ(join(sys.wm_argv), "/bin/sh -c exec '/usr/lib/nova-host/nova-vd-session'");
+  EXPECT_EQ(env_value(sys.wm_env, "DISPLAY"), ":20");
+  EXPECT_EQ(env_value(sys.wm_env, "NOVA_VD_DIR"), (dir / "X20").string());
+  EXPECT_EQ(env_value(sys.wm_env, "NOVA_VD_SCALE"), "150");
+  EXPECT_EQ(env_value(sys.wm_env, "WAYLAND_DISPLAY"), "");
+  // A helper run against the display (refresh after a resize, a scale change) sees the same.
+  EXPECT_EQ(server.run_on_display({"/usr/lib/nova-host/nova-vd-session", "refresh"}), 0);
+  EXPECT_EQ(sys.runs.back(), "/usr/lib/nova-host/nova-vd-session refresh");
+  EXPECT_EQ(env_value(sys.run_envs.back(), "NOVA_VD_DIR"), (dir / "X20").string());
+  EXPECT_EQ(env_value(sys.run_envs.back(), "XAUTHORITY"), target->xauthority);
+  server.stop();
+  EXPECT_EQ(server.run_on_display({"/bin/true"}), -1) << "nothing to run against once stopped";
+}
+
+TEST(VirtualDisplayScale, ValidScalesAndTheirEnvironment) {
+  for (const int ok : {100, 125, 150, 175, 200}) {
+    EXPECT_TRUE(vd::valid_scale(ok)) << ok;
+  }
+  for (const int bad : {0, 99, 110, 250, -100}) {
+    EXPECT_FALSE(vd::valid_scale(bad)) << bad;
+  }
+  EXPECT_TRUE(vd::scale_env(100).empty());
+  EXPECT_TRUE(vd::scale_env(130).empty());
+  const auto s150 = vd::scale_env(150);
+  EXPECT_EQ(env_value(s150, "GDK_SCALE"), "1");
+  EXPECT_EQ(env_value(s150, "GDK_DPI_SCALE"), "1.5");
+  EXPECT_EQ(env_value(s150, "QT_SCALE_FACTOR"), "1.5");
+  const auto s200 = vd::scale_env(200);
+  EXPECT_EQ(env_value(s200, "GDK_SCALE"), "2");
+  EXPECT_EQ(env_value(s200, "GDK_DPI_SCALE"), "1");
+  EXPECT_EQ(env_value(s200, "QT_SCALE_FACTOR"), "2");
+}
+
+TEST(VirtualDisplayScale, AppsLaunchedOnAScaledDisplayGetIt) {
+  vd::target_t target {":20", "/x", 2340, 1080, 60};
+  target.scale = 125;
+  const auto env = vd::app_env(target, -1, "", "", "");
+  EXPECT_EQ(env_value(env, "GDK_DPI_SCALE"), "1.25");
+  EXPECT_EQ(env_value(env, "QT_SCALE_FACTOR"), "1.25");
+  for (const auto &[key, value] : env) {
+    EXPECT_TRUE(std::ranges::find(vd::app_env_keys(), key) != vd::app_env_keys().end()) << key << " must be restorable";
+  }
+  target.scale = 100;
+  EXPECT_EQ(env_value(vd::app_env(target, -1, "", "", ""), "GDK_SCALE"), "<unset>");
+}

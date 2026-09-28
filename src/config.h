@@ -139,6 +139,8 @@ namespace config {
     std::string display_follow_cmd;  ///< Nova: command run with "set"/"restore" to switch the display to the client mode.
     std::string virtual_display;  ///< Nova: "headless_x" (default) gives Virtual display streams their own X server; "off" sends them through display_follow_cmd.
     std::string virtual_display_wm;  ///< Nova: window manager started on the virtual display ("openbox"), empty for none.
+    std::string virtual_display_session;  ///< Nova: "desktop" (default) runs Nova's desktop session (wallpaper, icons, panel, menu) on the virtual display; "bare" only the window manager.
+    int virtual_display_linger;  ///< Nova: seconds the virtual display, its app and a Mirror switch outlive the last disconnect (a quick reconnect resumes them); 0 = tear down at once.
     int virtual_display_fps_cap;  ///< Nova: frame cap for apps on the virtual display: 0 = the client's frame rate, -1 = none, >0 = that rate.
     std::string encoder;  ///< Encoder backend name selected by configuration.
     std::string adapter_name;  ///< Display adapter name selected in configuration.

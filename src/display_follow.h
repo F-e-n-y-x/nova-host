@@ -5,6 +5,8 @@
 #pragma once
 
 // standard includes
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -43,6 +45,28 @@ namespace display_follow {
     std::string mode;  ///< "virtual", "mirror", or empty for the default (virtual); both follow the client size, passed on as NOVA_DISPLAY_MODE.
     std::string app_name;  ///< App being launched or resumed, for logging.
     std::string client_name;  ///< Device name, for logging.
+    std::string device_key;  ///< Stable id of the device (see device_key()), for its saved display scale.
+    int scale = 100;  ///< Display scale for a Virtual display, in percent.
+  };
+
+  /**
+   * @brief Runs a callback once after a delay; a new schedule or cancel replaces the pending one.
+   *
+   * Injected so tests can fire the linger timeout by hand.
+   */
+  struct scheduler_t {
+    std::function<void(std::chrono::milliseconds, std::function<void()>)> schedule;  ///< Arm the timer.
+    std::function<void()> cancel;  ///< Disarm it (the callback won't run).
+  };
+
+  /**
+   * @brief Result of a display scale request.
+   */
+  enum class scale_result_e {
+    applied,  ///< The virtual display now uses the scale.
+    invalid,  ///< Not one of 100, 125, 150, 175, 200.
+    not_virtual,  ///< No Virtual display runs (Mirror streams never change the desktop's scale).
+    failed,  ///< The display couldn't be changed.
   };
 
   /**
@@ -93,6 +117,16 @@ namespace display_follow {
      * @return True if something was cleaned up.
      */
     virtual bool recover() = 0;
+
+    /**
+     * @brief Change the running display's scale (DPI, fonts, panel and icons).
+     *
+     * @param percent 100, 125, 150, 175 or 200.
+     * @return True on success.
+     */
+    virtual bool set_scale([[maybe_unused]] int percent) {
+      return false;
+    }
   };
 
   /**
@@ -117,7 +151,11 @@ namespace display_follow {
      * @param backend Separate-display backend for Virtual display streams, or null when unavailable.
      * @param hooks Callbacks around the virtual display's lifetime.
      */
-    controller_t(runner_t runner, std::filesystem::path marker, std::shared_ptr<virtual_backend_t> backend = nullptr, virtual_hooks_t hooks = {});
+    controller_t(runner_t runner, std::filesystem::path marker, std::shared_ptr<virtual_backend_t> backend = nullptr, virtual_hooks_t hooks = {}, scheduler_t scheduler = {});
+    ~controller_t();
+
+    controller_t(const controller_t &) = delete;
+    controller_t &operator=(const controller_t &) = delete;
 
     /**
      * @brief Apply the client's mode at the start of a stream.
@@ -134,14 +172,42 @@ namespace display_follow {
     outcome_e on_stream_request(const std::string &setting, const std::string &cmd, const request_t &request, bool legacy_prep, bool other_sessions, const std::string &virtual_setting = "off");
 
     /**
-     * @brief Restore the display after the last stream ended.
+     * @brief The last stream ended: restore the display, now or after a grace period.
      *
-     * Stops the virtual display too (after before_stop, which ends the app running on it).
+     * With a linger the virtual display, the app on it and a Mirror switch of the desktop are kept
+     * for that long, so a client that reconnects at once (Nebula's live resolution change
+     * disconnects and sends /resume with the new size) finds them; on_stream_request() within the
+     * window cancels the teardown. Without one (or when it expires) the virtual display is stopped
+     * (after before_stop, which ends the app on it) and the desktop restored.
      *
      * @param cmd Value of display_follow_cmd.
-     * @return True if a restore ran successfully or a virtual display was stopped.
+     * @param linger Grace period; zero tears down at once.
+     * @return True if something was (or will be) restored or stopped.
      */
-    bool on_last_session_end(const std::string &cmd);
+    bool on_last_session_end(const std::string &cmd, std::chrono::milliseconds linger = std::chrono::milliseconds {0});
+
+    /**
+     * @brief Tear down at once, cancelling a pending linger (the app was quit, Nova exits).
+     *
+     * @param cmd Value of display_follow_cmd, or empty to leave a Mirror switch alone.
+     * @return True if something was restored or stopped.
+     */
+    bool end_now(const std::string &cmd);
+
+    /**
+     * @brief Whether a teardown is pending after the last disconnect.
+     *
+     * @return True during the grace period.
+     */
+    bool lingering() const;
+
+    /**
+     * @brief Change the running virtual display's scale.
+     *
+     * @param percent Requested scale.
+     * @return What happened.
+     */
+    scale_result_e set_scale(int percent);
 
     /**
      * @brief Restore a display left switched by a previous run (crash or kill).
@@ -168,8 +234,13 @@ namespace display_follow {
     std::optional<virtual_display::target_t> virtual_target() const;
 
   private:
+    class linger_timer_t;
+
     bool restore_locked(const std::string &cmd);
     void stop_virtual_locked();
+    bool teardown_locked(const std::string &cmd);
+    void cancel_linger_locked();
+    void linger_expired(std::uint64_t generation, const std::string &cmd);
 
     runner_t runner_;
     std::filesystem::path marker_;
@@ -178,7 +249,38 @@ namespace display_follow {
     mutable std::mutex mutex_;
     bool active_ = false;
     std::optional<virtual_display::target_t> virtual_;
+    bool lingering_ = false;
+    std::uint64_t linger_generation_ = 0;
+    scheduler_t scheduler_;
+    std::unique_ptr<linger_timer_t> timer_;  ///< Backs scheduler_ when none was injected; last, so it stops first.
   };
+
+  /**
+   * @brief Stable key for a device's saved settings: FNV-1a 64 of its certificate, in hex.
+   *
+   * @param client_cert PEM of the paired client's certificate.
+   * @return 16 hex characters, or empty for an empty certificate.
+   */
+  std::string device_key(const std::string &client_cert);
+
+  /**
+   * @brief The display scale a device last chose for Virtual display sessions.
+   *
+   * @param file JSON file mapping device keys to percentages.
+   * @param key Device key.
+   * @return The saved scale, or 100.
+   */
+  int stored_scale(const std::filesystem::path &file, const std::string &key);
+
+  /**
+   * @brief Remember a device's display scale.
+   *
+   * @param file JSON file mapping device keys to percentages (written 0600).
+   * @param key Device key.
+   * @param percent Scale to save.
+   * @return True when saved.
+   */
+  bool store_scale(const std::filesystem::path &file, const std::string &key, int percent);
 
   /**
    * @brief Whether a prep command is the display script this step replaces.
@@ -215,9 +317,18 @@ namespace display_follow {
   outcome_e stream_requested(const request_t &request, bool legacy_prep, bool other_sessions);
 
   /**
-   * @brief Config-driven wrapper called when the last stream session ends.
+   * @brief Config-driven wrapper called when the last stream session ends (honours virtual_display_linger).
    */
   void last_session_ended();
+
+  /**
+   * @brief /display-scale: change the Virtual display's scale and remember it for the device.
+   *
+   * @param percent Requested scale.
+   * @param key Device key (see device_key()).
+   * @return What happened.
+   */
+  scale_result_e set_display_scale(int percent, const std::string &key);
 
   /**
    * @brief Config-driven wrapper called once at startup.

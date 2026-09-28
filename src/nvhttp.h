@@ -24,6 +24,7 @@
 // local includes
 #include "client_permissions.h"
 #include "crypto.h"
+#include "display_follow.h"
 
 /**
  * @brief Contains all the functions and variables related to the nvhttp (GameStream) server.
@@ -239,6 +240,17 @@ namespace nvhttp {
    * @return Suggested name, never empty.
    */
   std::string suggest_pairing_name(std::string_view app, std::string_view device_name, std::string_view owner);
+
+  /**
+   * @brief JSON answer of GET /display-scale (sent with HTTP 200; `status_code` carries the result).
+   *
+   * @param result What display_follow::set_display_scale() did, or std::nullopt when refused earlier.
+   * @param percent Requested scale.
+   * @param refused_code Status for a refused request.
+   * @param refused_message Message for a refused request.
+   * @return {status_code, success, status_message[, scale]}.
+   */
+  nlohmann::json display_scale_reply(std::optional<display_follow::scale_result_e> result, int percent, int refused_code, const std::string &refused_message);
 
   /**
    * @brief Result of inserting a new pairing session into bounded pending storage.

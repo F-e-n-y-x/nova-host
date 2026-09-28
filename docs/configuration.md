@@ -2943,6 +2943,81 @@ a message naming the file instead of streaming a desktop while the game silently
     </tr>
 </table>
 
+### virtual_display_session
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            What Nova runs on the virtual display (Nova). `desktop` starts Nova's desktop session,
+            `nova-vd-session`: the user's Cinnamon wallpaper (`org.cinnamon.desktop.background`,
+            else Nova's own), desktop icons (`nemo-desktop`), a `tint2` panel with a launcher, task
+            list and clock, and an Openbox right-click menu with a terminal, the file manager, a
+            browser, Lutris and the Nova Library games. Apps with a command still launch directly,
+            with the desktop behind them. `bare` starts only `virtual_display_wm`.
+            <br><br>
+            The session is kept apart from the desktop on `:0`: it has its own D-Bus session bus
+            (`dbus-run-session`), because nemo, nemo-desktop and gnome-terminal are single-instance
+            apps that would otherwise open their windows on `:0`; it reads and writes a copy of the
+            user's dconf database (`~/.config/dconf/nova-virtual-display`); and the browser uses its
+            own profile (`~/.config/nova-host/virtual-display-browser`), since Chrome hands a window
+            to the instance already running on `:0`. Missing tools are skipped (no panel without
+            tint2, no icons without nemo-desktop, a plain background without ImageMagick).
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            virtual_display_session = desktop
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            virtual_display_session = bare
+            @endcode</td>
+    </tr>
+    <tr>
+        <td rowspan="2">Choices</td>
+        <td>desktop</td>
+        <td>Wallpaper, icons, panel and menu.</td>
+    </tr>
+    <tr>
+        <td>bare</td>
+        <td>Only the window manager (a stream with no app shows a black screen).</td>
+    </tr>
+</table>
+
+### virtual_display_linger
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Seconds the virtual display, the app on it and a Mirror display mode outlive the last
+            disconnect (Nova). A device that reconnects within that time, for example after changing
+            the resolution during a stream (the client disconnects and resumes at the new size),
+            gets the same display back, resized to its new mode, and the desktop on `:0` is not
+            restored in between. Quitting the app ends everything at once. `0` tears down on
+            disconnect.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            virtual_display_linger = 30
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            virtual_display_linger = 0
+            @endcode</td>
+    </tr>
+</table>
+
 ### virtual_display_fps_cap
 
 <table>

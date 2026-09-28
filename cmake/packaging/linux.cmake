@@ -25,6 +25,10 @@ install(DIRECTORY "${CMAKE_SOURCE_DIR}/tools/display/nova_display"
 install(PROGRAMS "${CMAKE_SOURCE_DIR}/tools/display/helpers/nova-drm-vdd"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host/helpers")
 
+# Desktop session on a Virtual display (wallpaper, icons, panel, menu; see src/display_follow.cpp).
+install(PROGRAMS "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/nova-vd-session"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host")
+
 # GE-Proton/umu launcher for Windows games (see src/nova_compat.h).
 install(PROGRAMS "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/nova-proton-run"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host")
@@ -169,7 +173,11 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS "\
 # userspace library. Recommends (not Depends): installed by default, but their
 # absence never blocks the package — Fedora's equivalents live in RPM Fusion,
 # so on RPM `nova-display setup` remains the bootstrap path.
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "evdi-dkms, libevdi1")
+# The Virtual display desktop (nova-vd-session) uses Openbox, the tint2 panel, nemo-desktop icons,
+# ImageMagick for the wallpaper and dbus-run-session for its private session bus; without them
+# it degrades (no panel, no icons, a plain background) instead of failing.
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "evdi-dkms, libevdi1, python3, openbox, tint2, x11-xserver-utils, imagemagick, dbus-daemon | dbus-bin | dbus")
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS "nemo")
 set(CPACK_RPM_PACKAGE_REQUIRES "\
             ${CPACK_RPM_PLATFORM_PACKAGE_REQUIRES} \
             libcap >= 2.22, \

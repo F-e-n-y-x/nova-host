@@ -10,6 +10,7 @@
 #pragma once
 
 // standard includes
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -29,7 +30,31 @@ namespace virtual_display {
     int width = 0;  ///< Current screen width in pixels.
     int height = 0;  ///< Current screen height in pixels.
     int fps = 0;  ///< Frame rate the display was created for (the client's).
+    int scale = 100;  ///< Display scale in percent (100, 125, 150, 175 or 200).
   };
+
+  /**
+   * @brief Display scales a client may pick, in percent.
+   */
+  inline constexpr std::array<int, 5> scales {100, 125, 150, 175, 200};
+
+  /**
+   * @brief Whether a percentage is one of the supported scales.
+   *
+   * @param percent Requested scale.
+   * @return True for 100, 125, 150, 175 or 200.
+   */
+  bool valid_scale(int percent);
+
+  /**
+   * @brief Environment that makes GTK, Qt and EFL programs follow a display scale.
+   *
+   * GTK only takes an integer GDK_SCALE, so fractional scales use GDK_DPI_SCALE for text.
+   *
+   * @param percent Scale in percent.
+   * @return Variables to set; empty at 100 %.
+   */
+  std::vector<std::pair<std::string, std::string>> scale_env(int percent);
 
   /**
    * @brief Make capture (NvFBC) use this display, or the desktop again when empty.
@@ -179,10 +204,13 @@ namespace virtual_display {
      * @brief Create the owner; nothing starts until start().
      *
      * @param state_dir Directory for the config, cookie, log and crash marker (created 0700).
-     * @param wm Window manager command run on the display ("openbox"), or empty for none.
+     * @param wm Window manager or desktop session command run on the display ("openbox", or
+     *        Nova's nova-vd-session), or empty for none.
      * @param ops Process operations.
+     * @param wm_env Extra environment for that command (NOVA_VD_DIR, the display's state
+     *        directory, is always added).
      */
-    x_server_t(std::filesystem::path state_dir, std::string wm, ops_t ops);
+    x_server_t(std::filesystem::path state_dir, std::string wm, ops_t ops, env_list_t wm_env = {});
 
     /**
      * @brief Start a new display at the given size.
@@ -199,6 +227,15 @@ namespace virtual_display {
      * @return True on success.
      */
     bool resize(const mode_t &mode);
+
+    /**
+     * @brief Run a helper against the running display (DISPLAY, XAUTHORITY, NOVA_VD_DIR and the
+     *        window manager environment set), e.g. `nova-vd-session refresh`.
+     *
+     * @param argv Command and arguments.
+     * @return Its exit code, or -1 when no display runs or it couldn't run.
+     */
+    int run_on_display(const std::vector<std::string> &argv);
 
     /**
      * @brief Stop the window manager and the server (SIGTERM, SIGKILL after 2 s) and remove the state.
@@ -242,8 +279,11 @@ namespace virtual_display {
     void terminate(long pid, const std::string &expect);
 
     std::filesystem::path state_dir_;
+    env_list_t display_env() const;
+
     std::string wm_;
     ops_t ops_;
+    env_list_t wm_env_;
     std::optional<target_t> target_;
     int number_ = -1;
     long server_pid_ = -1;

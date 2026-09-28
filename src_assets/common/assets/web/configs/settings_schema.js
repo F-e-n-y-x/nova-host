@@ -166,6 +166,15 @@ export const OPTIONS = {
     type: 'text', mono: true, platforms: ['linux'], placeholder: { default: 'openbox' },
     when: (c) => c.display_follow !== 'off' && c.virtual_display !== 'off',
   },
+  virtual_display_session: {
+    type: 'choice', platforms: ['linux'],
+    choices: ['desktop', 'bare'].map((value) => ({ value, label: `nova.settings.choices.virtual_display_session_${value}` })),
+    when: (c) => c.display_follow !== 'off' && c.virtual_display !== 'off',
+  },
+  virtual_display_linger: {
+    type: 'number', unit: 's', min: 0, max: 3600, integer: true, platforms: ['linux'],
+    when: (c) => c.display_follow !== 'off',
+  },
   virtual_display_fps_cap: {
     type: 'number', unit: 'fps', min: -1, max: 1000, integer: true, platforms: ['linux'],
     when: (c) => c.display_follow !== 'off' && c.virtual_display !== 'off',
@@ -435,7 +444,7 @@ export const SECTIONS = [
   {
     id: 'display',
     options: ['capture', 'capture_pacing', 'display_follow', 'display_follow_cmd', 'virtual_display', 'virtual_display_wm',
-      'virtual_display_fps_cap', 'adapter_name', 'output_name', 'max_bitrate', 'minimum_fps_target', 'max_fps_target',
+      'virtual_display_session', 'virtual_display_linger', 'virtual_display_fps_cap', 'adapter_name', 'output_name', 'max_bitrate', 'minimum_fps_target', 'max_fps_target',
       'dd_configuration_option', 'dd_resolution_option', 'dd_manual_resolution', 'dd_refresh_rate_option', 'dd_manual_refresh_rate',
       'dd_hdr_option', 'dd_wa_hdr_toggle_delay', 'dd_config_revert_delay', 'dd_config_revert_on_disconnect', 'dd_mode_remapping'],
   },

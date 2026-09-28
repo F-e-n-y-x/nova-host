@@ -453,6 +453,10 @@
     "virtual_display_desc": "When a device picks Virtual display, start a separate headless screen at its exact resolution and frame rate on the NVIDIA GPU, launch the app there and stream only that screen. Your desktop keeps its resolution, windows and pointer. The screen is removed when the last device disconnects, which also ends the app on it. Off: Virtual display resizes the desktop like Mirror.",
     "virtual_display_wm": "Virtual display window manager",
     "virtual_display_wm_desc": "Window manager started on the virtual display, for window focus, fullscreen and decorations. \"none\" starts none.",
+    "virtual_display_session": "Virtual display session",
+    "virtual_display_session_desc": "What runs on the virtual display. Desktop gives it your wallpaper, desktop icons, a panel with a launcher and clock, and a right-click menu with a terminal, files, a browser, Lutris and your Nova Library; games launch on top of it. Bare starts only the window manager, so a stream with no game shows a black screen.",
+    "virtual_display_linger": "Keep the session after a disconnect",
+    "virtual_display_linger_desc": "Seconds the virtual display and its app (or a Mirror display mode) are kept after the last device disconnects, so a quick reconnect, such as changing the resolution during a stream, resumes where it was. Quit ends it at once. 0 ends it on disconnect.",
     "virtual_display_fps_cap": "Virtual display frame cap",
     "virtual_display_fps_cap_desc": "The virtual display has no refresh of its own, so apps on it are capped (DXVK, VKD3D and MangoHud). 0 matches the device's frame rate, -1 turns the cap off, any other value caps at that rate.",
     "sunshine_name": "Host name",
@@ -1142,7 +1146,9 @@
         "display_follow_virtual": "Follow the device (virtual display)",
         "display_follow_off": "Off",
         "virtual_display_headless_x": "Separate screen (headless X server)",
-        "virtual_display_off": "Off (resize the desktop)"
+        "virtual_display_off": "Off (resize the desktop)",
+        "virtual_display_session_desktop": "Desktop (wallpaper, icons, panel)",
+        "virtual_display_session_bare": "Bare (window manager only)"
       },
       "picker_primary": "primary",
       "picker_virtual": "virtual, created by Nova",

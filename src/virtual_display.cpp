@@ -546,10 +546,49 @@ namespace virtual_display {
     return -1;
   }
 
-  x_server_t::x_server_t(fs::path state_dir, std::string wm, ops_t ops):
+  x_server_t::x_server_t(fs::path state_dir, std::string wm, ops_t ops, env_list_t wm_env):
       state_dir_ {std::move(state_dir)},
       wm_ {std::move(wm)},
-      ops_ {std::move(ops)} {
+      ops_ {std::move(ops)},
+      wm_env_ {std::move(wm_env)} {
+  }
+
+  env_list_t x_server_t::display_env() const {
+    env_list_t env {{"DISPLAY", target_->display}, {"XAUTHORITY", target_->xauthority}, {"WAYLAND_DISPLAY", ""}};
+    env.emplace_back("NOVA_VD_DIR", (state_dir_ / ("X" + std::to_string(number_))).string());
+    env.insert(env.end(), wm_env_.begin(), wm_env_.end());
+    return env;
+  }
+
+  int x_server_t::run_on_display(const std::vector<std::string> &argv) {
+    if (!running() || argv.empty()) {
+      return -1;
+    }
+    return ops_.run(argv, display_env());
+  }
+
+  bool valid_scale(const int percent) {
+    return std::ranges::find(scales, percent) != scales.end();
+  }
+
+  env_list_t scale_env(const int percent) {
+    if (!valid_scale(percent) || percent == 100) {
+      return {};
+    }
+    const int gdk_scale = percent >= 200 ? 2 : 1;
+    const auto fmt = [](double v) {
+      std::ostringstream out;
+      out << v;
+      return out.str();
+    };
+    const double factor = percent / 100.0;
+    return {
+      {"GDK_SCALE", std::to_string(gdk_scale)},
+      {"GDK_DPI_SCALE", fmt(factor / gdk_scale)},
+      {"QT_SCALE_FACTOR", fmt(factor)},
+      {"QT_AUTO_SCREEN_SCALE_FACTOR", "0"},
+      {"ELM_SCALE", fmt(factor)},
+    };
   }
 
   fs::path x_server_t::marker() const {
@@ -682,8 +721,7 @@ namespace virtual_display {
     set_screen_size(mode);
 
     if (!wm_.empty()) {
-      const env_list_t env {{"DISPLAY", display}, {"XAUTHORITY", xauth.string()}, {"WAYLAND_DISPLAY", ""}};
-      wm_pid_ = ops_.spawn({"/bin/sh", "-c", "exec " + wm_}, env, dir / "wm.log");
+      wm_pid_ = ops_.spawn({"/bin/sh", "-c", "exec " + wm_}, display_env(), dir / "wm.log");
       if (wm_pid_ < 0) {
         BOOST_LOG(warning) << "Virtual display: couldn't start the window manager ["sv << wm_ << ']';
       }
@@ -804,6 +842,9 @@ namespace virtual_display {
     if (!pulse_sink.empty()) {
       env.emplace_back("PULSE_SINK", pulse_sink);
     }
+    for (auto &kv : scale_env(target.scale)) {
+      env.push_back(std::move(kv));
+    }
     const int cap = fps_cap == 0 ? target.fps : fps_cap;
     if (cap > 0) {
       // A NoScanout screen has no vblank, so an uncapped game renders thousands of frames a second.
@@ -837,6 +878,11 @@ namespace virtual_display {
       "MANGOHUD",
       "MANGOHUD_CONFIG",
       "LD_PRELOAD",
+      "GDK_SCALE",
+      "GDK_DPI_SCALE",
+      "QT_SCALE_FACTOR",
+      "QT_AUTO_SCREEN_SCALE_FACTOR",
+      "ELM_SCALE",
     };
     return keys;
   }

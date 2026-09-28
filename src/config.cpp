@@ -783,6 +783,8 @@ namespace config {
     "/usr/local/bin/sunshine-resolution.sh",  // display_follow_cmd (Nova); skipped when the file does not exist
     "headless_x",  // virtual_display (Nova)
     "openbox",  // virtual_display_wm (Nova)
+    "desktop",  // virtual_display_session (Nova)
+    30,  // virtual_display_linger (Nova): seconds
     0,  // virtual_display_fps_cap (Nova): the client's frame rate
     {},  // encoder
     {},  // adapter_name
@@ -1739,6 +1741,8 @@ namespace config {
     string_f(vars, "display_follow_cmd", video.display_follow_cmd);
     string_restricted_f(vars, "virtual_display", video.virtual_display, {"headless_x"sv, "off"sv});
     string_f(vars, "virtual_display_wm", video.virtual_display_wm);
+    string_restricted_f(vars, "virtual_display_session", video.virtual_display_session, {"desktop"sv, "bare"sv});
+    int_between_f(vars, "virtual_display_linger", video.virtual_display_linger, {0, 3600});
     int_between_f(vars, "virtual_display_fps_cap", video.virtual_display_fps_cap, {-1, 1000});
     string_f(vars, "encoder", video.encoder);
     string_f(vars, "adapter_name", video.adapter_name);
