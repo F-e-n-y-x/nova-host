@@ -80,10 +80,6 @@ namespace nova_update {
              });
     }
 
-    bool ends_with_ci(std::string_view s, std::string_view suffix) {
-      return s.size() >= suffix.size() && lower(std::string {s.substr(s.size() - suffix.size())}) == suffix;
-    }
-
     std::optional<asset_t> parse_asset(const nlohmann::json &a, std::string_view repo) {
       if (!a.is_object() || !a.contains("name") || !a.contains("url") || !a["name"].is_string() || !a["url"].is_string()) {
         return std::nullopt;
