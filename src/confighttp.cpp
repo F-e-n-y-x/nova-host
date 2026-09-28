@@ -61,6 +61,7 @@
 #include "logging.h"
 #include "network.h"
 #include "nova_client_api.h"
+#include "nova_update_http.h"
 #include "nvhttp.h"
 #include "platform/common.h"
 #include "process.h"
@@ -3546,6 +3547,7 @@ namespace confighttp {
     server.resource["^/api/audio/sinks$"]["GET"] = getAudioSinks;
     server.resource["^/api/preview$"]["GET"] = getPreview;
     server.resource["^/api/health$"]["GET"] = getHealth;
+    nova_update::register_routes(server);
 
     // static/dynamic resources
     server.resource["^/images/sunshine.ico$"]["GET"] = getFaviconImage;

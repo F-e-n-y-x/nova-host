@@ -914,6 +914,18 @@ namespace config {
     {},  // rawg_api_key
   };
 
+  /**
+   * @brief Default Nova power mode and update settings.
+   */
+  nova_t nova {
+    .power_mode = false,
+    .power_mode_gpu = true,
+    .power_mode_cpu = true,
+    .power_mode_inhibit = true,
+    .update_check = true,
+    .update_github_token = {},
+  };
+
   sunshine_t sunshine {
     "en",  // locale
     2,  // min_log_level
@@ -1925,6 +1937,12 @@ namespace config {
     string_f(vars, "rawg_api_key", library.rawg_api_key);
 
     bool_f(vars, "notify_pre_releases", sunshine.notify_pre_releases);
+    bool_f(vars, "update_check", nova.update_check);
+    string_f(vars, "update_github_token", nova.update_github_token);
+    bool_f(vars, "power_mode", nova.power_mode);
+    bool_f(vars, "power_mode_gpu", nova.power_mode_gpu);
+    bool_f(vars, "power_mode_cpu", nova.power_mode_cpu);
+    bool_f(vars, "power_mode_inhibit", nova.power_mode_inhibit);
     bool_f(vars, "system_tray", sunshine.system_tray);
 
     int port = sunshine.port;
