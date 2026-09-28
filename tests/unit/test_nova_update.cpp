@@ -176,8 +176,13 @@ namespace {
       fs::remove_all(dir, ec);
     }
 
-    void set_releases(const nlohmann::json &releases) {
-      pages["https://api.github.com/repos/F-e-n-y-x/nova-host/releases?per_page=30"] = {200, releases.dump(), {}};
+    void set_releases(const std::vector<nlohmann::json> &releases) {
+      // Build the array explicitly: a one-element brace list would make nlohmann copy the object instead.
+      auto array = nlohmann::json::array();
+      for (const auto &r : releases) {
+        array.push_back(r);
+      }
+      pages["https://api.github.com/repos/F-e-n-y-x/nova-host/releases?per_page=30"] = {200, array.dump(), {}};
     }
 
     nova_update::service_t make() {
