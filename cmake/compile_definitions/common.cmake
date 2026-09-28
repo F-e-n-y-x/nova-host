@@ -68,7 +68,35 @@ elseif(UNIX)
 endif()
 
 # libvirtualhid
-add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/libvirtualhid")
+# Nova carries local libvirtualhid fixes in third-party/patches/libvirtualhid until they land
+# upstream. Each patch is applied once to the submodule; a patch that neither applies nor is
+# already applied stops the configure so a submodule bump can't silently drop a fix.
+set(NOVA_LIBVIRTUALHID_DIR "${CMAKE_SOURCE_DIR}/third-party/libvirtualhid")
+file(GLOB NOVA_LIBVIRTUALHID_PATCHES "${CMAKE_SOURCE_DIR}/third-party/patches/libvirtualhid/*.patch")
+list(SORT NOVA_LIBVIRTUALHID_PATCHES)
+if(NOVA_LIBVIRTUALHID_PATCHES)
+    find_package(Git REQUIRED)
+endif()
+foreach(nova_patch IN LISTS NOVA_LIBVIRTUALHID_PATCHES)
+    execute_process(
+            COMMAND "${GIT_EXECUTABLE}" apply --reverse --check "${nova_patch}"
+            WORKING_DIRECTORY "${NOVA_LIBVIRTUALHID_DIR}"
+            RESULT_VARIABLE nova_patch_applied
+            OUTPUT_QUIET ERROR_QUIET)
+    if(nova_patch_applied EQUAL 0)
+        continue()
+    endif()
+    execute_process(
+            COMMAND "${GIT_EXECUTABLE}" apply "${nova_patch}"
+            WORKING_DIRECTORY "${NOVA_LIBVIRTUALHID_DIR}"
+            RESULT_VARIABLE nova_patch_result
+            ERROR_VARIABLE nova_patch_error)
+    if(NOT nova_patch_result EQUAL 0)
+        message(FATAL_ERROR "Failed to apply ${nova_patch} to libvirtualhid:\n${nova_patch_error}")
+    endif()
+    message(STATUS "Applied libvirtualhid patch: ${nova_patch}")
+endforeach()
+add_subdirectory("${NOVA_LIBVIRTUALHID_DIR}")
 list(APPEND SUNSHINE_EXTERNAL_LIBRARIES libvirtualhid::libvirtualhid)
 list(APPEND PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/virtualhid_input.h"

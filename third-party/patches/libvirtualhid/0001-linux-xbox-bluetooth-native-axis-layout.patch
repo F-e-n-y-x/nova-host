@@ -1,0 +1,637 @@
+From: Fenyx <ayushsoni2911@gmail.com>
+Subject: [PATCH] fix(linux): use the native Xbox Bluetooth axis layout
+
+The Xbox One/Series profiles identify as the Bluetooth controllers
+(045e:0b20 / 045e:0b13) but advertised xpad-style usages: right stick on
+Rx/Ry and triggers on Z/Rz. Consumers that pick the layout from the
+vendor/product ID (Chromium's MapperXboxBluetooth, SDL mappings) expect
+what the kernel produces for the real controller: right stick on
+ABS_Z/ABS_RZ, left trigger on ABS_BRAKE, right trigger on ABS_GAS. With
+the old usages Chromium showed RT as LT, LT as the right stick X, the
+right stick Y as RT and the right stick X as the right stick Y.
+
+Use the native usages (Z/Rz, Simulation Brake/Accelerator) in the UHID
+descriptor and the same evdev codes on the uinput fallback. Byte layout
+is unchanged, so HIDAPI consumers are unaffected.
+
+Applied by Nova at configure time (cmake/compile_definitions/common.cmake).
+---
+diff --git a/src/platform/linux/uhid_backend.cpp b/src/platform/linux/uhid_backend.cpp
+index b2e0a2c..d8685cc 100644
+--- a/src/platform/linux/uhid_backend.cpp
++++ b/src/platform/linux/uhid_backend.cpp
+@@ -110,6 +110,36 @@ namespace lvh::detail {
+     constexpr auto xbox_sparse_uinput_bus = BUS_BLUETOOTH;
+     constexpr std::uint16_t xbox_wireless_uinput_product_id = 0x0B20;
+     constexpr std::uint16_t xbox_series_uinput_product_id = 0x0B13;
++
++    /**
++     * @brief Evdev codes for the right stick and the analog triggers of a gamepad.
++     */
++    struct EvdevGamepadAxisCodes {
++      std::uint16_t right_x;  ///< Right stick horizontal axis.
++      std::uint16_t right_y;  ///< Right stick vertical axis.
++      std::uint16_t left_trigger;  ///< Left analog trigger.
++      std::uint16_t right_trigger;  ///< Right analog trigger.
++    };
++
++    /**
++     * @brief Choose the evdev axis codes a gamepad profile exposes.
++     *
++     * The Xbox One and Series profiles identify as the Bluetooth controllers (045e:0b20 and
++     * 045e:0b13), so their axes must match what the Linux kernel reports for that hardware: right
++     * stick on ABS_Z/ABS_RZ, left trigger on ABS_BRAKE and right trigger on ABS_GAS. Chromium's
++     * standard gamepad mapping and SDL's controller database select their layout from the vendor
++     * and product IDs, so the xpad-style ABS_RX/ABS_RY + ABS_Z/ABS_RZ layout shifts the axes there
++     * (the right trigger reads as the left one and the right stick drives the triggers).
++     *
++     * @param kind Gamepad profile kind.
++     * @return Evdev axis codes for the profile.
++     */
++    constexpr EvdevGamepadAxisCodes evdev_gamepad_axis_codes(GamepadProfileKind kind) {
++      if (kind == GamepadProfileKind::xbox_one || kind == GamepadProfileKind::xbox_series) {
++        return {.right_x = ABS_Z, .right_y = ABS_RZ, .left_trigger = ABS_BRAKE, .right_trigger = ABS_GAS};
++      }
++      return {.right_x = ABS_RX, .right_y = ABS_RY, .left_trigger = ABS_Z, .right_trigger = ABS_RZ};
++    }
+ #if defined(__linux__)
+     namespace ps = playstation_feature_reports;
+     constexpr auto playstation_periodic_report_ms = 10;
+@@ -124,12 +154,15 @@ namespace lvh::detail {
+     constexpr std::size_t xbox_bluetooth_battery_report_size = 2;
+ 
+     std::vector<std::uint8_t> make_xbox_bluetooth_report_descriptor(bool include_battery) {
+-      // Preserve the native Xbox BLE report layout while advertising the
+-      // conventional Linux evdev usages for the right stick and triggers.
+-      // HIDAPI consumes the same byte offsets directly, while the kernel maps
+-      // these usages to ABS_RX/ABS_RY and ABS_Z/ABS_RZ for Steam. Battery-capable
+-      // clients add the native two-byte Xbox Bluetooth battery notification as
+-      // report 4 through the standard Battery Strength usage.
++      // Preserve the native Xbox BLE report layout and its native usages: the
++      // right stick is Z/Rz and the triggers are Simulation Brake (left) and
++      // Accelerator (right), so the kernel maps them to ABS_Z/ABS_RZ and
++      // ABS_BRAKE/ABS_GAS exactly as it does for a real 045e:0b13 controller.
++      // Chromium and SDL mappings pick the axis layout from the vendor and
++      // product IDs, so any other usages shift the axes for them. HIDAPI
++      // consumes the same byte offsets directly. Battery-capable clients add
++      // the native two-byte Xbox Bluetooth battery notification as report 4
++      // through the standard Battery Strength usage.
+       std::vector<std::uint8_t> descriptor {
+         0x05,
+         0x01,  // Usage Page (Generic Desktop)
+@@ -166,9 +199,9 @@ namespace lvh::detail {
+         0xA1,
+         0x00,  // Collection (Physical)
+         0x09,
+-        0x33,  // Usage (Rx)
++        0x32,  // Usage (Z)
+         0x09,
+-        0x34,  // Usage (Ry)
++        0x35,  // Usage (Rz)
+         0x15,
+         0x00,  // Logical Minimum (0)
+         0x27,
+@@ -184,9 +217,9 @@ namespace lvh::detail {
+         0x02,  // Input (Data, Variable, Absolute)
+         0xC0,  // End Collection
+         0x05,
+-        0x01,  // Usage Page (Generic Desktop)
++        0x02,  // Usage Page (Simulation Controls)
+         0x09,
+-        0x32,  // Usage (Z)
++        0xC5,  // Usage (Brake)
+         0x15,
+         0x00,  // Logical Minimum (0)
+         0x26,
+@@ -209,9 +242,9 @@ namespace lvh::detail {
+         0x81,
+         0x03,  // Input (Constant, Variable, Absolute)
+         0x05,
+-        0x01,  // Usage Page (Generic Desktop)
++        0x02,  // Usage Page (Simulation Controls)
+         0x09,
+-        0x35,  // Usage (Rz)
++        0xC4,  // Usage (Accelerator)
+         0x15,
+         0x00,  // Logical Minimum (0)
+         0x26,
+@@ -1739,8 +1772,9 @@ namespace lvh::detail {
+         }
+       }
+ 
++      const auto axis_codes = evdev_gamepad_axis_codes(profile_kind);
+       auto stick = make_absinfo(-32768, 32767, 16, 128);
+-      for (const auto code : {ABS_X, ABS_Y, ABS_RX, ABS_RY}) {
++      for (const auto code : {std::uint16_t {ABS_X}, std::uint16_t {ABS_Y}, axis_codes.right_x, axis_codes.right_y}) {
+         if (const auto status = enable_evdev_code(device, EV_ABS, code, "gamepad stick axis", &stick); !status.ok()) {
+           return status;
+         }
+@@ -1751,7 +1785,7 @@ namespace lvh::detail {
+       }
+ 
+       auto trigger = make_absinfo(0, xbox_trigger_max);
+-      for (const auto code : {ABS_Z, ABS_RZ}) {
++      for (const auto code : {axis_codes.left_trigger, axis_codes.right_trigger}) {
+         if (const auto status = enable_evdev_code(device, EV_ABS, code, "gamepad trigger axis", &trigger); !status.ok()) {
+           return status;
+         }
+@@ -3063,11 +3097,12 @@ namespace lvh::detail {
+           return status;
+         }
+ 
++        const auto axis_codes = evdev_gamepad_axis_codes(profile_kind_);
+         const std::array stick_axes {
+-          std::pair {ABS_X, static_cast<int>(reports::normalize_axis(state.left_stick.x))},
+-          std::pair {ABS_Y, static_cast<int>(reports::normalize_axis(-state.left_stick.y))},
+-          std::pair {ABS_RX, static_cast<int>(reports::normalize_axis(state.right_stick.x))},
+-          std::pair {ABS_RY, static_cast<int>(reports::normalize_axis(-state.right_stick.y))},
++          std::pair {std::uint16_t {ABS_X}, static_cast<int>(reports::normalize_axis(state.left_stick.x))},
++          std::pair {std::uint16_t {ABS_Y}, static_cast<int>(reports::normalize_axis(-state.left_stick.y))},
++          std::pair {axis_codes.right_x, static_cast<int>(reports::normalize_axis(state.right_stick.x))},
++          std::pair {axis_codes.right_y, static_cast<int>(reports::normalize_axis(-state.right_stick.y))},
+         };
+         for (const auto &[code, value] : stick_axes) {
+           if (const auto status = emit_event(EV_ABS, code, value); !status.ok()) {
+@@ -3083,8 +3118,8 @@ namespace lvh::detail {
+         }
+ 
+         const std::array trigger_axes {
+-          std::pair {ABS_Z, static_cast<int>(reports::normalize_trigger(state.left_trigger))},
+-          std::pair {ABS_RZ, static_cast<int>(reports::normalize_trigger(state.right_trigger))},
++          std::pair {axis_codes.left_trigger, static_cast<int>(reports::normalize_trigger(state.left_trigger))},
++          std::pair {axis_codes.right_trigger, static_cast<int>(reports::normalize_trigger(state.right_trigger))},
+         };
+         for (const auto &[code, value] : trigger_axes) {
+           if (const auto status = emit_event(EV_ABS, code, value); !status.ok()) {
+diff --git a/tests/fixtures/include/fixtures/linux_backend_test_hooks.hpp b/tests/fixtures/include/fixtures/linux_backend_test_hooks.hpp
+index 84c2cee..13f6c8c 100644
+--- a/tests/fixtures/include/fixtures/linux_backend_test_hooks.hpp
++++ b/tests/fixtures/include/fixtures/linux_backend_test_hooks.hpp
+@@ -1024,6 +1024,24 @@ namespace lvh::detail::test {
+     bool submits_battery
+   );
+ 
++  /**
++   * @brief Raw UHID wire data for one Xbox Bluetooth gamepad state.
++   */
++  struct LinuxXboxBluetoothWire {
++    OperationStatus status = OperationStatus::success();  ///< Creation and submission status.
++    std::vector<std::uint8_t> descriptor;  ///< HID report descriptor sent with UHID_CREATE2.
++    std::vector<std::uint8_t> input_report;  ///< First UHID_INPUT2 payload, including its report ID.
++  };
++
++  /**
++   * @brief Capture the report descriptor and input report an Xbox profile sends over a socketpair.
++   *
++   * @param kind Xbox One or Xbox Series profile kind.
++   * @param state Gamepad state to submit.
++   * @return Captured descriptor and input report.
++   */
++  LinuxXboxBluetoothWire linux_xbox_bluetooth_uhid_wire(GamepadProfileKind kind, const GamepadState &state);
++
+   /**
+    * @brief Check whether the Linux backend prefers UHID for a gamepad profile.
+    *
+diff --git a/tests/fixtures/linux_backend_test_hooks.cpp b/tests/fixtures/linux_backend_test_hooks.cpp
+index 0111bb2..0e3fa69 100644
+--- a/tests/fixtures/linux_backend_test_hooks.cpp
++++ b/tests/fixtures/linux_backend_test_hooks.cpp
+@@ -1691,25 +1691,26 @@ namespace lvh::detail::test {
+       result.xbox.saw_transport_descriptor = descriptor.size() == (advertises_battery ? 299U : 283U);
+       result.xbox.saw_battery_descriptor =
+         std::ranges::search(descriptor, battery_report_descriptor).begin() != descriptor.end();
++      // Native Xbox Bluetooth usages: right stick Z/Rz, Simulation Brake and Accelerator triggers.
+       constexpr std::array<std::uint8_t, 4> right_stick_usages {
+         0x09U,
+-        0x33U,
++        0x32U,
+         0x09U,
+-        0x34U,
++        0x35U,
+       };
+       constexpr std::array<std::uint8_t, 6> left_trigger_usage {
+         0x05U,
+-        0x01U,
++        0x02U,
+         0x09U,
+-        0x32U,
++        0xC5U,
+         0x15U,
+         0x00U,
+       };
+       constexpr std::array<std::uint8_t, 6> right_trigger_usage {
+         0x05U,
+-        0x01U,
++        0x02U,
+         0x09U,
+-        0x35U,
++        0xC4U,
+         0x15U,
+         0x00U,
+       };
+@@ -1820,6 +1821,47 @@ namespace lvh::detail::test {
+     return result;
+   }
+ 
++  LinuxXboxBluetoothWire linux_xbox_bluetooth_uhid_wire(GamepadProfileKind kind, const GamepadState &state) {
++    LinuxXboxBluetoothWire wire;
++    std::array<int, 2> descriptors {-1, -1};
++    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, descriptors.data()) != 0) {
++      wire.status = system_error_status(ErrorCode::backend_failure, "failed to create socketpair", errno);
++      return wire;
++    }
++
++    const auto profile = profiles::gamepad_profile(kind).value();
++    CreateGamepadOptions options;
++    options.profile = profile;
++    options.metadata.stable_id = "xbox-bluetooth-uhid-wire";
++
++    LinuxUhidRoundTripResult lifecycle;
++    UhidGamepad gamepad {descriptors[0]};
++    auto event = create_started_profile_uhid_gamepad(gamepad, 17, options, descriptors[1], BUS_BLUETOOTH, lifecycle);
++    if (!lifecycle.creation.saw_create) {
++      wire.status = lifecycle.create_status.ok() ?
++                      OperationStatus::failure(ErrorCode::backend_failure, "UHID create event was not observed") :
++                      lifecycle.create_status;
++      static_cast<void>(gamepad.close());
++      static_cast<void>(::close(descriptors[1]));
++      return wire;
++    }
++    wire.descriptor.assign(event.u.create2.rd_data, event.u.create2.rd_data + event.u.create2.rd_size);
++
++    event = {};
++    event.type = UHID_OPEN;
++    static_cast<void>(write_uhid_event(descriptors[1], event));
++
++    const auto report = reports::pack_input_report(profile, state);
++    wire.status = gamepad.submit(state, report);
++    if (wire.status.ok() && read_uhid_event_type(descriptors[1], UHID_INPUT2, event)) {
++      wire.input_report.assign(event.u.input2.data, event.u.input2.data + event.u.input2.size);
++    }
++
++    static_cast<void>(gamepad.close());
++    static_cast<void>(::close(descriptors[1]));
++    return wire;
++  }
++
+   bool linux_gamepad_prefers_uhid(GamepadProfileKind kind) {
+     return prefers_uhid_gamepad_profile(kind);
+   }
+diff --git a/tests/unit/test_linux_backend.cpp b/tests/unit/test_linux_backend.cpp
+index 5f39285..cb40829 100644
+--- a/tests/unit/test_linux_backend.cpp
++++ b/tests/unit/test_linux_backend.cpp
+@@ -6,12 +6,16 @@
+ // standard includes
+ #include <algorithm>
+ #include <array>
++#include <cstddef>
+ #include <cstdint>
+ #include <filesystem>
++#include <format>
+ #include <fstream>
+ #include <memory>
+ #include <optional>
+ #include <string>
++#include <string_view>
++#include <utility>
+ #include <vector>
+ 
+ // platform includes
+@@ -438,10 +442,21 @@ TEST_F(LinuxBackendTest, PipeBackedUinputGamepadsUseCanonicalLinuxEvents) {
+     }
+     EXPECT_EQ(event_value(EV_ABS, ABS_X), lvh::reports::normalize_axis(-0.5F));
+     EXPECT_EQ(event_value(EV_ABS, ABS_Y), lvh::reports::normalize_axis(-0.25F));
+-    EXPECT_EQ(event_value(EV_ABS, ABS_RX), lvh::reports::normalize_axis(0.75F));
+-    EXPECT_EQ(event_value(EV_ABS, ABS_RY), lvh::reports::normalize_axis(1.0F));
+-    EXPECT_EQ(event_value(EV_ABS, ABS_Z), lvh::reports::normalize_trigger(0.25F));
+-    EXPECT_EQ(event_value(EV_ABS, ABS_RZ), lvh::reports::normalize_trigger(0.75F));
++    // Xbox One/Series identify as the Bluetooth controllers, so they use the kernel's native
++    // layout for that hardware; other profiles keep the xpad-style layout.
++    const auto bluetooth_xbox = kind == xbox_one || kind == xbox_series;
++    const auto right_x = bluetooth_xbox ? ABS_Z : ABS_RX;
++    const auto right_y = bluetooth_xbox ? ABS_RZ : ABS_RY;
++    const auto left_trigger = bluetooth_xbox ? ABS_BRAKE : ABS_Z;
++    const auto right_trigger = bluetooth_xbox ? ABS_GAS : ABS_RZ;
++    EXPECT_EQ(event_value(EV_ABS, right_x), lvh::reports::normalize_axis(0.75F));
++    EXPECT_EQ(event_value(EV_ABS, right_y), lvh::reports::normalize_axis(1.0F));
++    EXPECT_EQ(event_value(EV_ABS, left_trigger), lvh::reports::normalize_trigger(0.25F));
++    EXPECT_EQ(event_value(EV_ABS, right_trigger), lvh::reports::normalize_trigger(0.75F));
++    if (bluetooth_xbox) {
++      EXPECT_EQ(event_value(EV_ABS, ABS_RX), std::nullopt);
++      EXPECT_EQ(event_value(EV_ABS, ABS_RY), std::nullopt);
++    }
+   }
+ }
+ 
+@@ -1196,10 +1211,19 @@ TEST_F(LinuxBackendTest, FakeUinputConstructionCoversCapabilitiesAndFailureBranc
+     EXPECT_NE(find_code(gamepad, EV_ABS, ABS_HAT0X), nullptr);
+     EXPECT_NE(find_code(gamepad, EV_ABS, ABS_HAT0Y), nullptr);
+     EXPECT_EQ(find_code(gamepad, EV_KEY, KEY_RECORD) != nullptr, key_record);
+-    const auto *left_trigger = find_code(gamepad, EV_ABS, ABS_Z);
++    const auto bluetooth_xbox = kind == xbox_one || kind == xbox_series;
++    const auto *left_trigger = find_code(gamepad, EV_ABS, bluetooth_xbox ? ABS_BRAKE : ABS_Z);
+     ASSERT_NE(left_trigger, nullptr);
+     EXPECT_EQ(left_trigger->minimum, 0);
+     EXPECT_EQ(left_trigger->maximum, 255);
++    const auto *right_trigger = find_code(gamepad, EV_ABS, bluetooth_xbox ? ABS_GAS : ABS_RZ);
++    ASSERT_NE(right_trigger, nullptr);
++    EXPECT_EQ(right_trigger->maximum, 255);
++    const auto *right_stick_x = find_code(gamepad, EV_ABS, bluetooth_xbox ? ABS_Z : ABS_RX);
++    ASSERT_NE(right_stick_x, nullptr);
++    EXPECT_EQ(right_stick_x->minimum, -32768);
++    EXPECT_EQ(find_code(gamepad, EV_ABS, ABS_RX) != nullptr, !bluetooth_xbox);
++    EXPECT_EQ(find_code(gamepad, EV_ABS, ABS_RY) != nullptr, !bluetooth_xbox);
+     for (const auto code : feedback_codes) {
+       EXPECT_EQ(find_code(gamepad, EV_FF, code) != nullptr, expected_profile->capabilities.supports_rumble);
+     }
+@@ -1471,3 +1495,289 @@ TEST_F(LinuxBackendTest, PlatformRuntimeReportsUnavailableDeviceCreationWhenNode
+     EXPECT_EQ(mouse.status.code(), lvh::ErrorCode::backend_unavailable);
+   }
+ }
++
++namespace {
++  /**
++   * @brief One absolute axis the Linux kernel would create from a HID input field.
++   */
++  struct KernelAbsField {
++    std::uint16_t code;  ///< Evdev ABS code the kernel's hid-input maps the usage to.
++    std::size_t bit_offset;  ///< Bit offset in the report payload, after the report ID.
++    std::size_t bit_size;  ///< Field width in bits.
++    std::int64_t logical_minimum;  ///< HID logical minimum.
++    std::int64_t logical_maximum;  ///< HID logical maximum.
++  };
++
++  /**
++   * @brief Map a HID usage to an evdev ABS code the way Linux hid-input does for gamepads.
++   *
++   * Only the usages an Xbox Bluetooth descriptor can carry are handled; the hat switch is left
++   * out because the kernel turns it into ABS_HAT0X/ABS_HAT0Y, which joydev appends after these.
++   */
++  std::optional<std::uint16_t> kernel_abs_code(std::uint32_t usage_page, std::uint32_t usage) {
++    if (usage_page == 0x01U && usage >= 0x30U && usage <= 0x35U) {
++      return static_cast<std::uint16_t>(ABS_X + (usage - 0x30U));  // X, Y, Z, Rx, Ry, Rz
++    }
++    if (usage_page == 0x02U && usage == 0xC4U) {
++      return static_cast<std::uint16_t>(ABS_GAS);  // Accelerator
++    }
++    if (usage_page == 0x02U && usage == 0xC5U) {
++      return static_cast<std::uint16_t>(ABS_BRAKE);  // Brake
++    }
++    return std::nullopt;
++  }
++
++  /**
++   * @brief Parse the input fields of one report ID into kernel ABS axes, sorted by ABS code.
++   *
++   * The sort mirrors joydev and Chromium on Linux, which number axes in ABS-code order.
++   */
++  std::vector<KernelAbsField> kernel_abs_fields(const std::vector<std::uint8_t> &descriptor, std::uint8_t report_id) {
++    std::vector<KernelAbsField> fields;
++    std::uint32_t usage_page = 0;
++    std::int64_t logical_minimum = 0;
++    std::int64_t logical_maximum = 0;
++    std::size_t report_size = 0;
++    std::size_t report_count = 0;
++    std::uint8_t current_report_id = 0;
++    std::vector<std::uint32_t> usages;
++    std::size_t bit_offset = 0;
++
++    for (std::size_t index = 0; index < descriptor.size();) {
++      const auto prefix = descriptor[index];
++      const std::size_t size = (prefix & 0x03U) == 0x03U ? 4U : (prefix & 0x03U);
++      std::uint32_t value = 0;
++      for (std::size_t byte = 0; byte < size && index + 1U + byte < descriptor.size(); ++byte) {
++        value |= static_cast<std::uint32_t>(descriptor[index + 1U + byte]) << (8U * byte);
++      }
++      std::int64_t signed_value = value;
++      if (size == 1U) {
++        signed_value = static_cast<std::int8_t>(value);
++      } else if (size == 2U) {
++        signed_value = static_cast<std::int16_t>(value);
++      } else if (size == 4U) {
++        signed_value = static_cast<std::int32_t>(value);
++      }
++      index += 1U + size;
++
++      switch (prefix & 0xFCU) {
++        case 0x04U:  // Usage Page
++          usage_page = value;
++          break;
++        case 0x14U:  // Logical Minimum
++          logical_minimum = signed_value;
++          break;
++        case 0x24U:  // Logical Maximum (unsigned when the minimum is not negative)
++          logical_maximum = logical_minimum >= 0 ? static_cast<std::int64_t>(value) : signed_value;
++          break;
++        case 0x74U:  // Report Size
++          report_size = value;
++          break;
++        case 0x94U:  // Report Count
++          report_count = value;
++          break;
++        case 0x84U:  // Report ID
++          current_report_id = static_cast<std::uint8_t>(value);
++          bit_offset = 0;
++          break;
++        case 0x08U:  // Usage
++          usages.push_back(value);
++          break;
++        case 0x80U:  // Input
++          if (current_report_id == report_id) {
++            const auto constant = (value & 0x01U) != 0U;
++            for (std::size_t item = 0; item < report_count; ++item) {
++              if (!constant && !usages.empty()) {
++                const auto usage = usages[std::min(item, usages.size() - 1U)];
++                if (const auto code = kernel_abs_code(usage_page, usage); code.has_value()) {
++                  fields.push_back({*code, bit_offset, report_size, logical_minimum, logical_maximum});
++                }
++              }
++              bit_offset += report_size;
++            }
++          }
++          usages.clear();
++          break;
++        case 0x90U:  // Output
++        case 0xB0U:  // Feature
++        case 0xA0U:  // Collection
++        case 0xC0U:  // End Collection
++          usages.clear();
++          break;
++        default:
++          break;
++      }
++    }
++
++    std::ranges::sort(fields, {}, &KernelAbsField::code);
++    return fields;
++  }
++
++  /**
++   * @brief Read a field from an input report payload and normalize it to [-1, 1] as Chromium does.
++   */
++  double normalized_field(const std::vector<std::uint8_t> &report, const KernelAbsField &field) {
++    std::uint64_t raw = 0;
++    for (std::size_t bit = 0; bit < field.bit_size; ++bit) {
++      const auto absolute_bit = field.bit_offset + bit;
++      const auto byte = 1U + (absolute_bit / 8U);  // Skip the report ID.
++      if (byte < report.size() && (report[byte] >> (absolute_bit % 8U)) & 0x01U) {
++        raw |= std::uint64_t {1} << bit;
++      }
++    }
++    const auto range = static_cast<double>(field.logical_maximum - field.logical_minimum);
++    return (2.0 * (static_cast<double>(raw) - static_cast<double>(field.logical_minimum)) / range) - 1.0;
++  }
++
++  /**
++   * @brief Standard Gamepad values a browser shows for one Xbox Bluetooth report.
++   */
++  struct StandardGamepadAxes {
++    double left_x;  ///< Standard axis 0.
++    double left_y;  ///< Standard axis 1 (up is negative).
++    double right_x;  ///< Standard axis 2.
++    double right_y;  ///< Standard axis 3 (up is negative).
++    double left_trigger;  ///< Standard button 6 value.
++    double right_trigger;  ///< Standard button 7 value.
++  };
++
++  /**
++   * @brief Apply Chromium's Linux MapperXboxBluetooth, used for 045e:0b13, 045e:0b20 and 045e:0b22.
++   *
++   * See device/gamepad/gamepad_standard_mappings_linux.cc: axes 0-3 pass through as the two
++   * sticks, the left trigger is axis 5 and the right trigger is axis 4.
++   */
++  StandardGamepadAxes chromium_xbox_bluetooth_mapping(const std::vector<double> &axes) {
++    const auto axis = [&axes](std::size_t index) {
++      return index < axes.size() ? axes[index] : 0.0;
++    };
++    return {
++      .left_x = axis(0),
++      .left_y = axis(1),
++      .right_x = axis(2),
++      .right_y = axis(3),
++      .left_trigger = (axis(5) + 1.0) / 2.0,
++      .right_trigger = (axis(4) + 1.0) / 2.0,
++    };
++  }
++}  // namespace
++
++TEST_F(LinuxBackendTest, XboxBluetoothUhidDescriptorUsesNativeKernelAxisLayout) {
++  using enum lvh::GamepadProfileKind;
++
++  for (const auto kind : {xbox_one, xbox_series}) {
++    const auto wire = lvh::detail::test::linux_xbox_bluetooth_uhid_wire(kind, {});
++    ASSERT_TRUE(wire.status.ok()) << wire.status.message();
++    const auto fields = kernel_abs_fields(wire.descriptor, 0x01U);
++
++    std::vector<std::uint16_t> codes;
++    for (const auto &field : fields) {
++      codes.push_back(field.code);
++    }
++    // The kernel's axes for a real Xbox Bluetooth controller.
++    const std::vector<std::uint16_t> expected {ABS_X, ABS_Y, ABS_Z, ABS_RZ, ABS_GAS, ABS_BRAKE};
++    EXPECT_EQ(codes, expected) << "profile " << static_cast<int>(std::to_underlying(kind));
++  }
++}
++
++TEST_F(LinuxBackendTest, XboxBluetoothUhidMovesOnlyTheMatchingStandardGamepadAxis) {
++  using enum lvh::GamepadProfileKind;
++
++  /**
++   * @brief One logical input set on its own, and the standard axis it must move.
++   */
++  struct AxisCase {
++    std::string_view name;  ///< Logical input.
++    lvh::GamepadState state;  ///< State with only that input moved.
++    StandardGamepadAxes expected;  ///< Browser view of that state.
++  };
++
++  constexpr StandardGamepadAxes neutral {};
++  const auto with = [](auto mutate) {
++    lvh::GamepadState state;
++    mutate(state);
++    return state;
++  };
++  const auto expect = [neutral](auto mutate) {
++    auto axes = neutral;
++    mutate(axes);
++    return axes;
++  };
++  const std::array cases {
++    AxisCase {"left stick right", with([](auto &s) { s.left_stick.x = 1.0F; }), expect([](auto &a) { a.left_x = 1.0; })},
++    AxisCase {"left stick left", with([](auto &s) { s.left_stick.x = -1.0F; }), expect([](auto &a) { a.left_x = -1.0; })},
++    AxisCase {"left stick up", with([](auto &s) { s.left_stick.y = 1.0F; }), expect([](auto &a) { a.left_y = -1.0; })},
++    AxisCase {"right stick right", with([](auto &s) { s.right_stick.x = 1.0F; }), expect([](auto &a) { a.right_x = 1.0; })},
++    AxisCase {"right stick left", with([](auto &s) { s.right_stick.x = -1.0F; }), expect([](auto &a) { a.right_x = -1.0; })},
++    AxisCase {"right stick up", with([](auto &s) { s.right_stick.y = 1.0F; }), expect([](auto &a) { a.right_y = -1.0; })},
++    AxisCase {"right stick down", with([](auto &s) { s.right_stick.y = -1.0F; }), expect([](auto &a) { a.right_y = 1.0; })},
++    AxisCase {"left trigger", with([](auto &s) { s.left_trigger = 1.0F; }), expect([](auto &a) { a.left_trigger = 1.0; })},
++    AxisCase {"right trigger", with([](auto &s) { s.right_trigger = 1.0F; }), expect([](auto &a) { a.right_trigger = 1.0; })},
++    AxisCase {"neutral", lvh::GamepadState {}, neutral},
++  };
++
++  constexpr double tolerance = 0.01;
++  for (const auto kind : {xbox_one, xbox_series}) {
++    for (const auto &[name, state, expected] : cases) {
++      const auto wire = lvh::detail::test::linux_xbox_bluetooth_uhid_wire(kind, state);
++      ASSERT_TRUE(wire.status.ok()) << wire.status.message();
++      ASSERT_FALSE(wire.input_report.empty()) << name;
++      std::vector<double> axes;
++      for (const auto &field : kernel_abs_fields(wire.descriptor, wire.input_report.front())) {
++        axes.push_back(normalized_field(wire.input_report, field));
++      }
++      const auto actual = chromium_xbox_bluetooth_mapping(axes);
++      const auto context = std::format("profile {} input '{}'", static_cast<int>(std::to_underlying(kind)), name);
++      EXPECT_NEAR(actual.left_x, expected.left_x, tolerance) << context << ": standard left stick X";
++      EXPECT_NEAR(actual.left_y, expected.left_y, tolerance) << context << ": standard left stick Y";
++      EXPECT_NEAR(actual.right_x, expected.right_x, tolerance) << context << ": standard right stick X";
++      EXPECT_NEAR(actual.right_y, expected.right_y, tolerance) << context << ": standard right stick Y";
++      EXPECT_NEAR(actual.left_trigger, expected.left_trigger, tolerance) << context << ": standard LT";
++      EXPECT_NEAR(actual.right_trigger, expected.right_trigger, tolerance) << context << ": standard RT";
++    }
++  }
++}
++
++TEST_F(LinuxBackendTest, XboxBluetoothUinputMovesOnlyTheMatchingAxis) {
++  using enum lvh::GamepadProfileKind;
++
++  struct AxisCase {
++    std::string_view name;  ///< Logical input.
++    lvh::GamepadState state;  ///< State with only that input moved.
++    std::uint16_t moved_code;  ///< The only ABS code that may leave its neutral value.
++  };
++  const auto with = [](auto mutate) {
++    lvh::GamepadState state;
++    mutate(state);
++    return state;
++  };
++  const std::array cases {
++    AxisCase {"left stick X", with([](auto &s) { s.left_stick.x = 1.0F; }), ABS_X},
++    AxisCase {"left stick Y", with([](auto &s) { s.left_stick.y = 1.0F; }), ABS_Y},
++    AxisCase {"right stick X", with([](auto &s) { s.right_stick.x = 1.0F; }), ABS_Z},
++    AxisCase {"right stick Y", with([](auto &s) { s.right_stick.y = 1.0F; }), ABS_RZ},
++    AxisCase {"left trigger", with([](auto &s) { s.left_trigger = 1.0F; }), ABS_BRAKE},
++    AxisCase {"right trigger", with([](auto &s) { s.right_trigger = 1.0F; }), ABS_GAS},
++  };
++
++  for (const auto kind : {xbox_one, xbox_series}) {
++    for (const auto &[name, state, moved_code] : cases) {
++      const auto result = lvh::detail::test::linux_uinput_gamepad_submit_pipe(kind, state);
++      ASSERT_TRUE(result.status.ok()) << result.status.message();
++      bool saw_moved = false;
++      for (const auto &event : result.events) {
++        if (event.type != EV_ABS || event.code == ABS_HAT0X || event.code == ABS_HAT0Y) {
++          continue;
++        }
++        EXPECT_NE(event.code, ABS_RX) << name;
++        EXPECT_NE(event.code, ABS_RY) << name;
++        if (event.code == moved_code) {
++          saw_moved = event.value != 0;
++        } else {
++          EXPECT_EQ(event.value, 0) << name << " moved ABS code " << event.code;
++        }
++      }
++      EXPECT_TRUE(saw_moved) << name << " did not move ABS code " << moved_code;
++    }
++  }
++}
