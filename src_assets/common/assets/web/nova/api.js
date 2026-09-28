@@ -4,7 +4,6 @@
  */
 import { ref } from 'vue'
 import { apiFetch } from '../fetch_utils'
-import { project } from './project'
 
 /**
  * Fetch JSON from the host API.
@@ -103,28 +102,4 @@ export function logout() {
   request.ontimeout = finish
   request.timeout = 5000
   request.send()
-}
-
-/**
- * Latest release (and newest pre-release when asked) from GitHub.
- * Resolves to null when the check can't be done — no releases yet, a private or renamed
- * repository, rate limiting or no internet — so callers show nothing rather than an error.
- *
- * @param {boolean} [includePrerelease] Also look for a newer pre-release.
- * @returns {Promise<{latest: object|null, prerelease: object|null}|null>} Release data or null.
- */
-export async function checkForUpdates(includePrerelease = false) {
-  try {
-    const response = await fetch(project.releasesApi, { headers: { Accept: 'application/vnd.github+json' } })
-    if (!response.ok) return null
-    const releases = await response.json()
-    if (!Array.isArray(releases) || releases.length === 0) return null
-    const published = releases.filter((r) => !r.draft)
-    const latest = published.find((r) => !r.prerelease) || null
-    const prerelease = includePrerelease ? published.find((r) => r.prerelease) || null : null
-    if (!latest && !prerelease) return null
-    return { latest, prerelease }
-  } catch {
-    return null
-  }
 }

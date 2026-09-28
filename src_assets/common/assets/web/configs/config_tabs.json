@@ -27,7 +27,9 @@
       "igdb_client_secret": "",
       "steam_web_api_key": "",
       "rawg_api_key": "",
-      "windows_exe_launcher": ""
+      "windows_exe_launcher": "",
+      "update_check": "enabled",
+      "update_github_token": ""
     }
   },
   {
@@ -90,7 +92,11 @@
       },
       "max_bitrate": 0,
       "minimum_fps_target": 0,
-      "max_fps_target": 0
+      "max_fps_target": 0,
+      "power_mode": "disabled",
+      "power_mode_gpu": "enabled",
+      "power_mode_cpu": "enabled",
+      "power_mode_inhibit": "enabled"
     }
   },
   {

@@ -8,7 +8,6 @@ const REPO_URL = `https://github.com/${REPO}`
 export const project = {
   name: 'Nova',
   repoUrl: REPO_URL,
-  releasesApi: `https://api.github.com/repos/${REPO}/releases`,
   releasesUrl: `${REPO_URL}/releases`,
   docsUrl: `${REPO_URL}/tree/HEAD/docs`,
   issuesUrl: `${REPO_URL}/issues`,

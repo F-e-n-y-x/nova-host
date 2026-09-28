@@ -106,6 +106,16 @@ export const OPTIONS = {
   min_log_level: { type: 'choice', choices: numbered('min_log_level', 7) },
   notify_pre_releases: { type: 'bool' },
   system_tray: { type: 'bool' },
+
+  // Updates (host-side check of the private release repository)
+  update_check: { type: 'bool' },
+  update_github_token: { type: 'secret', mono: true, placeholder: 'github_pat_…', when: (c) => on(c.update_check) },
+
+  // Streaming power mode
+  power_mode: { type: 'bool', platforms: ['linux'] },
+  power_mode_gpu: { type: 'bool', platforms: ['linux'], when: (c) => on(c.power_mode) },
+  power_mode_cpu: { type: 'bool', platforms: ['linux'], when: (c) => on(c.power_mode) },
+  power_mode_inhibit: { type: 'bool', platforms: ['linux'], when: (c) => on(c.power_mode) },
   global_prep_cmd: { type: 'PrepCommandsEditor' },
 
   // Windows games (Linux)
@@ -436,7 +446,8 @@ export const OPTIONS = {
  * encoder groups shown inside the Encoder section.
  */
 export const SECTIONS = [
-  { id: 'general', options: ['sunshine_name', 'locale', 'min_log_level', 'notify_pre_releases', 'system_tray', 'global_prep_cmd'] },
+  { id: 'general', options: ['sunshine_name', 'locale', 'min_log_level', 'system_tray', 'global_prep_cmd'] },
+  { id: 'updates', options: ['update_check', 'notify_pre_releases', 'update_github_token'] },
   {
     id: 'library',
     options: ['metadata_steam', 'metadata_language', 'metadata_auto_fetch', 'metadata_ttl_days', 'art_source_priority',
@@ -453,6 +464,7 @@ export const SECTIONS = [
       'dd_hdr_option', 'dd_wa_hdr_toggle_delay', 'dd_config_revert_delay', 'dd_config_revert_on_disconnect', 'dd_mode_remapping'],
   },
   { id: 'encoder', options: ['encoder', 'hevc_mode', 'av1_mode'], encoders: true },
+  { id: 'power', options: ['power_mode', 'power_mode_gpu', 'power_mode_cpu', 'power_mode_inhibit'] },
   { id: 'audio', options: ['stream_audio', 'audio_sink', 'virtual_sink', 'install_steam_audio_drivers', 'mic_enabled'] },
   {
     id: 'input',

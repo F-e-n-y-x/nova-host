@@ -197,7 +197,7 @@ namespace nova_update {
   }
 
   int compare_versions(const version_t &a, const version_t &b) {
-    for (const auto [x, y] : {std::pair {a.major, b.major}, std::pair {a.minor, b.minor}, std::pair {a.patch, b.patch}}) {
+    for (const auto &[x, y] : {std::pair {a.major, b.major}, std::pair {a.minor, b.minor}, std::pair {a.patch, b.patch}}) {
       if (x != y) {
         return x < y ? -1 : 1;
       }
@@ -575,10 +575,10 @@ namespace nova_update {
       fail("SHA-256 mismatch for " + release.deb.name + ": expected " + *expected + ", got " + (actual.empty() ? "nothing"s : actual));
       return;
     }
-    const auto info = deps_.run({"dpkg-deb", "-f", part.string(), "Package", "Version"});
+    const auto fields = deps_.run({"dpkg-deb", "-f", part.string(), "Package", "Version"});
     std::string package;
     std::string version;
-    std::istringstream lines {info.output};
+    std::istringstream lines {fields.output};
     for (std::string line; std::getline(lines, line);) {
       if (line.starts_with("Package: ")) {
         package = line.substr(9);
@@ -590,7 +590,7 @@ namespace nova_update {
     const auto upstream = parse_version(version);
     const bool version_ok = upstream && upstream->major == release.version.major && upstream->minor == release.version.minor &&
                             upstream->patch == release.version.patch;
-    if (info.exit_code != 0 || package != "nova-host" || !version_ok) {
+    if (fields.exit_code != 0 || package != "nova-host" || !version_ok) {
       std::filesystem::remove(part, ec);
       fail("the downloaded file is not the nova-host " + release.version.str() + " package (" + (package.empty() ? "unreadable"s : package + " " + version) + ")");
       return;
