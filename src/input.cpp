@@ -159,7 +159,12 @@ namespace input {
    * @return Decoded floating-point value clamped between min and max.
    */
   float from_clamped_netfloat(netfloat f, float min, float max) {
-    return std::clamp(from_netfloat(f), min, max);
+    const auto value = from_netfloat(f);
+    // std::clamp passes NaN through unchanged; map it to the lower bound.
+    if (std::isnan(value)) {
+      return min;
+    }
+    return std::clamp(value, min, max);
   }
 
   static task_pool_util::TaskPool::task_id_t key_press_repeat_id {};
@@ -1534,6 +1539,13 @@ namespace input {
       from_netfloat(packet->y),
       from_netfloat(packet->z),
     };
+
+    // A NaN/inf sample would reach the virtual pad's fixed-point HID report
+    // conversion, which is undefined for non-finite values. Drop the sample.
+    if (!std::isfinite(motion.x) || !std::isfinite(motion.y) || !std::isfinite(motion.z)) {
+      BOOST_LOG(debug) << "Dropping non-finite motion sample for controller ["sv << (int) packet->controllerNumber << ']';
+      return;
+    }
 
     platf::gamepad_motion(platf_input, motion);
   }
