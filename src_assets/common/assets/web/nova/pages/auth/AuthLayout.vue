@@ -108,6 +108,18 @@ watchEffect(() => {
     color: var(--nv-text-secondary);
   }
 
+  /* Forms inside the card (sign in, first-run setup). */
+  .nv-auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nv-space-4);
+  }
+
+  .nv-auth-form__note {
+    margin: 0;
+    font-size: var(--nv-text-sm);
+  }
+
   @media (max-width: 480px) {
     .nv-auth__main {
       padding-top: var(--nv-space-6);

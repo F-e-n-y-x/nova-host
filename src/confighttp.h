@@ -131,6 +131,48 @@ namespace confighttp {
   void getCSRFToken(const resp_https_t &response, const req_https_t &request);
 
   /**
+   * @brief POST /api/auth/login: check username and password, set the nova_session cookie.
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
+  void postAuthLogin(const resp_https_t &response, const req_https_t &request);
+
+  /**
+   * @brief POST /api/auth/logout: forget this browser's session and delete its cookie.
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
+  void postAuthLogout(const resp_https_t &response, const req_https_t &request);
+
+  /**
+   * @brief GET /api/auth/session: whether this browser is signed in (and its CSRF token).
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
+  void getAuthSession(const resp_https_t &response, const req_https_t &request);
+
+  /**
+   * @brief GET /api/auth/sessions: signed-in browsers.
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
+  void getAuthSessions(const resp_https_t &response, const req_https_t &request);
+
+  /**
+   * @brief POST /api/auth/sessions/revoke: sign out one browser, or all others.
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
+  void postAuthSessionsRevoke(const resp_https_t &response, const req_https_t &request);
+
+  /**
+   * @brief POST /api/password: create the first account or change the credentials.
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
+  void savePassword(const resp_https_t &response, const req_https_t &request);
+
+  /**
    * @brief List authenticated pairing requests awaiting operator approval.
    *
    * @param response HTTP response object to populate.

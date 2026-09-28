@@ -19,6 +19,7 @@ const routes = [
   { path: '/help/clients', redirect: { path: '/help', hash: '#clients' } },
   { path: '/password', component: () => import('./Password.vue') },
   { path: '/welcome', component: () => import('./Welcome.vue'), meta: { bare: true } },
+  { path: '/login', component: () => import('./Login.vue'), meta: { bare: true } },
   { path: '/logout', component: () => import('./Logout.vue'), meta: { bare: true } },
   { path: '/apps', redirect: keep('/library') },
   { path: '/config', redirect: keep('/settings') },

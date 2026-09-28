@@ -52,7 +52,7 @@ export function useVirtualInput({ gamepadDriver, translate }) {
 
   async function refreshStatus() {
     try {
-      const r = await (await fetch('./api/virtual-input/status')).json()
+      const r = await (await apiFetch('./api/virtual-input/status')).json()
       virtualhid.value = { ...emptyDriver(), ...(r.virtualhid || {}) }
       vigembus.value = { ...emptyDriver(), ...(r.vigembus || {}) }
     } catch (error) {
@@ -85,7 +85,7 @@ export function useVirtualInput({ gamepadDriver, translate }) {
   }
 
   async function licenseRequest(options) {
-    const response = await (options ? apiFetch('./api/virtual-input/license', options) : fetch('./api/virtual-input/license'))
+    const response = await (options ? apiFetch('./api/virtual-input/license', options) : apiFetch('./api/virtual-input/license'))
     const status = await response.json()
     if (!response.ok) throw new Error(status.error || translate('virtualhid_license_request_failed'))
     return status

@@ -5,6 +5,7 @@
  */
 import { computed, nextTick, reactive, shallowRef } from 'vue'
 import { apiFetch } from '../../../fetch_utils'
+import { setCsrfToken } from '../../auth'
 
 /** Minimum length for a new web UI password. */
 export const MIN_PASSWORD_LENGTH = 4
@@ -12,7 +13,7 @@ export const MIN_PASSWORD_LENGTH = 4
 /** serverError value when the host failed without saying why. */
 export const GENERIC_ERROR = 'generic'
 
-/** Milliseconds before reloading after a successful save, so the browser asks for the new credentials. */
+/** Milliseconds before reloading after a successful save, so the page picks up its new session. */
 export const RELOAD_DELAY_MS = 4000
 
 /**
@@ -102,6 +103,8 @@ export function useCredentialsForm({ usernameRequired, toBody, onSaved, root = (
         serverError.value = body?.error || GENERIC_ERROR
         return false
       }
+      // The host signed every browser out and gave this one a new session.
+      if (body.csrf_token) setCsrfToken(body.csrf_token)
       saved.value = true
       ;(onSaved || scheduleReload)()
       return true

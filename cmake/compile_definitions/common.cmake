@@ -257,6 +257,8 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/nova_client_api.h"
         "${CMAKE_SOURCE_DIR}/src/login_guard.cpp"
         "${CMAKE_SOURCE_DIR}/src/login_guard.h"
+        "${CMAKE_SOURCE_DIR}/src/web_session.cpp"
+        "${CMAKE_SOURCE_DIR}/src/web_session.h"
         "${CMAKE_SOURCE_DIR}/src/secure_files.cpp"
         "${CMAKE_SOURCE_DIR}/src/secure_files.h"
         "${CMAKE_SOURCE_DIR}/src/host_commands.cpp"

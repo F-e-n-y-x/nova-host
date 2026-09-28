@@ -3,6 +3,7 @@
  * polls it. Polling pauses while the tab is hidden and catches up when it returns.
  */
 import { onBeforeUnmount, onMounted, readonly, shallowRef, watch } from 'vue'
+import { apiFetch } from '../../../fetch_utils'
 
 /** Milliseconds between polls while live. */
 export const POLL_INTERVAL_MS = 3000
@@ -83,7 +84,7 @@ export function useLogFeed({ interval = POLL_INTERVAL_MS, load = defaultLoad } =
 }
 
 async function defaultLoad() {
-  const response = await fetch('./api/logs', { cache: 'no-store' })
+  const response = await apiFetch('./api/logs', { cache: 'no-store' })
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim())
   return response.text()
 }

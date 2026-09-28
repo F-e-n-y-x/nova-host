@@ -13,6 +13,7 @@ import NvCard from '../../components/NvCard.vue'
 import NvIconButton from '../../components/NvIconButton.vue'
 import NvSkeleton from '../../components/NvSkeleton.vue'
 import { toast } from '../../toast'
+import { apiFetch } from '../../../fetch_utils'
 
 const props = defineProps({
   load: { type: Function, default: undefined },
@@ -24,7 +25,7 @@ const loading = shallowRef(true)
 const available = shallowRef(true)
 
 async function defaultLoad() {
-  const response = await fetch('./api/health', { credentials: 'include' })
+  const response = await apiFetch('./api/health')
   if (!response.ok) return null
   return response.json()
 }

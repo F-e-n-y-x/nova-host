@@ -103,7 +103,8 @@ describe('Password', () => {
     expect(byLabel(w, 'Current password').attributes('autocomplete')).toBe('current-password')
     await w.get('form').trigger('submit')
     await flushPromises()
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+    const passwordCall = fetch.mock.calls.find(([url]) => url === './api/password')
+    expect(JSON.parse(passwordCall[1].body)).toEqual({
       currentUsername: 'ayush', currentPassword: 'old secret', newUsername: '', newPassword: 'new secret 1', confirmNewPassword: 'new secret 1',
     })
   })
@@ -123,7 +124,7 @@ describe('Logout', () => {
   it('offers to sign in again', () => {
     const w = track(mountNova(Logout))
     expect(w.get('h1').text()).toBe('You’re signed out')
-    expect(w.findAll('a').find((a) => a.text() === 'Sign in again').attributes('href')).toBe('./')
+    expect(w.findAll('a').find((a) => a.text() === 'Sign in again').attributes('href')).toBe('/login')
   })
 })
 

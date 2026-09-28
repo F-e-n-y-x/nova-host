@@ -4,6 +4,7 @@
  */
 import { ref } from 'vue'
 import { apiFetch } from '../fetch_utils'
+import { signOut } from './auth'
 
 /**
  * Fetch JSON from the host API.
@@ -89,17 +90,10 @@ export function useAsync(loader, { immediate = true } = {}) {
 }
 
 /**
- * Sign out of HTTP basic auth by replacing the cached credentials, then show /logout.
+ * Sign out: the host forgets this browser's session, then the sign-in page is shown.
+ *
+ * @returns {Promise<void>}
  */
 export function logout() {
-  const logoutPageUrl = new URL('/logout', globalThis.location.href)
-  const request = new XMLHttpRequest()
-  const finish = () => globalThis.location.replace(logoutPageUrl.toString())
-  request.open('GET', '/', true, 'sunshine-logout', Date.now().toString())
-  request.setRequestHeader('Cache-Control', 'no-store')
-  request.onload = finish
-  request.onerror = finish
-  request.ontimeout = finish
-  request.timeout = 5000
-  request.send()
+  return signOut()
 }

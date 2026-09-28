@@ -72,6 +72,7 @@
 #include "system_tray.h"
 #include "utility.h"
 #include "uuid.h"
+#include "web_session.h"
 
 using namespace std::literals;
 
@@ -611,30 +612,283 @@ namespace confighttp {
     response->write(output_tree.dump(), headers);
   }
 
+  namespace {
+    /**
+     * @brief Where a request says it came from, compared with the host it was sent to.
+     */
+    enum class origin_e {
+      absent,  ///< Neither Origin nor Referer (curl, scripts; or a browser told not to send them).
+      same,  ///< Origin/Referer is this host, or one of csrf_allowed_origins.
+      cross,  ///< Another site.
+    };
+
+    /**
+     * @brief Authority ("host:port") of an absolute URL, or empty.
+     * @param url Absolute URL.
+     * @return The authority.
+     */
+    std::string_view authority_of(const std::string_view url) {
+      const auto scheme = url.find("://");
+      if (scheme == std::string_view::npos) {
+        return {};
+      }
+      const auto rest = url.substr(scheme + 3);
+      return rest.substr(0, rest.find_first_of("/?#"));
+    }
+
+    /**
+     * @brief Whether a URL starts with one of csrf_allowed_origins (followed by ':' or '/' or the end).
+     * @param url Origin or Referer value.
+     * @return True when allowed.
+     */
+    bool is_allowed_origin(const std::string_view url) {
+      return std::ranges::any_of(config::sunshine.csrf_allowed_origins, [&url](const std::string &allowed_origin) {
+        if (!url.starts_with(allowed_origin)) {
+          return false;
+        }
+        const size_t len = allowed_origin.length();
+        return url.length() == len || url[len] == ':' || url[len] == '/';
+      });
+    }
+
+    /**
+     * @brief Compare Origin (or, without it, Referer) with the Host header and csrf_allowed_origins.
+     *
+     * Same-origin by construction: when the Origin/Referer authority equals the Host header the
+     * browser used to reach us, the request can't be cross-site, whichever name, IP or tailnet
+     * address the host is reached by. csrf_allowed_origins covers reverse proxies.
+     *
+     * @param request The HTTP request.
+     * @return Where the request came from.
+     */
+    origin_e request_origin(const req_https_t &request) {
+      const auto host_it = request->header.find("Host");
+      const auto judge = [&](const std::string_view url) {
+        if (host_it != request->header.end() && !authority_of(url).empty() && authority_of(url) == host_it->second) {
+          return origin_e::same;
+        }
+        return is_allowed_origin(url) ? origin_e::same : origin_e::cross;
+      };
+      // "Origin: null" (sandboxed or privacy-restricted contexts) says nothing about the site.
+      if (const auto origin_it = request->header.find("Origin"); origin_it != request->header.end() && origin_it->second != "null") {
+        return judge(origin_it->second);
+      }
+      if (const auto referer_it = request->header.find("Referer"); referer_it != request->header.end()) {
+        return judge(referer_it->second);
+      }
+      return origin_e::absent;
+    }
+
+    /**
+     * @brief Whether a method can change state (anything but GET, HEAD and OPTIONS).
+     * @param method HTTP method.
+     * @return True for POST, PUT, PATCH, DELETE and unknown methods.
+     */
+    bool is_state_changing(const std::string_view method) {
+      return method != "GET" && method != "HEAD" && method != "OPTIONS";
+    }
+
+    /**
+     * @brief Case-insensitive "header contains" check.
+     */
+    bool header_has(const req_https_t &request, const std::string_view name, const std::string_view needle) {
+      const auto it = request->header.find(std::string {name});
+      return it != request->header.end() && boost::icontains(it->second, needle);
+    }
+
+    /**
+     * @brief The request came from a web browser rather than curl or a script.
+     *
+     * Browsers get a 401 without WWW-Authenticate (so no native sign-in popup) or a redirect to
+     * /login. Fetch metadata (Sec-Fetch-*) is sent by every current browser; Accept: text/html,
+     * X-Requested-With and a session cookie cover the rest.
+     *
+     * @param request The HTTP request.
+     * @return True for browser requests.
+     */
+    bool from_browser(const req_https_t &request) {
+      const auto &h = request->header;
+      return h.find("Sec-Fetch-Site") != h.end() || h.find("Sec-Fetch-Mode") != h.end() || h.find("Sec-Fetch-Dest") != h.end() ||
+             h.find("X-Requested-With") != h.end() || header_has(request, "Accept", "text/html") ||
+             header_has(request, "Cookie", web_session::cookie_name);
+    }
+
+    /**
+     * @brief A browser engine sent this request (fetch metadata present).
+     *
+     * Such requests sign in with the session cookie only. HTTP Basic credentials a browser
+     * cached from the old sign-in popup are ignored, so signing out really signs out, and a
+     * cross-site page can't ride on them. curl, scripts and other API clients send no fetch
+     * metadata and keep using Basic.
+     *
+     * @param request The HTTP request.
+     * @return True when Sec-Fetch-Site is present.
+     */
+    bool from_browser_engine(const req_https_t &request) {
+      return request->header.find("Sec-Fetch-Site") != request->header.end();
+    }
+
+    /**
+     * @brief The request is a page load (navigation) rather than an API call.
+     * @param request The HTTP request.
+     * @return True for GET navigations outside /api/.
+     */
+    bool is_page_load(const req_https_t &request) {
+      if (request->method != "GET" || request->path.starts_with("/api/"sv) || request->path == "/api") {
+        return false;
+      }
+      return header_has(request, "Sec-Fetch-Mode", "navigate") || header_has(request, "Sec-Fetch-Dest", "document") ||
+             header_has(request, "Accept", "text/html");
+    }
+
+    /**
+     * @brief The session cookie's value, or empty.
+     * @param request The HTTP request.
+     * @return Token.
+     */
+    std::string session_cookie(const req_https_t &request) {
+      const auto [first, last] = request->header.equal_range("Cookie");
+      for (auto it = first; it != last; ++it) {
+        if (auto value = web_session::cookie_value(it->second, web_session::cookie_name); !value.empty()) {
+          return value;
+        }
+      }
+      return {};
+    }
+
+    /**
+     * @brief Tag of the credentials in effect; sessions made under other credentials are void.
+     * @return The tag.
+     */
+    std::string current_cred_tag() {
+      return web_session::credential_tag(config::sunshine.password, config::sunshine.salt);
+    }
+
+    /**
+     * @brief The signed-in session this request carries, if any.
+     * @param request The HTTP request.
+     * @param had_cookie Set when a session cookie was present (valid or not).
+     * @return The session.
+     */
+    std::optional<web_session::session_t> request_session(const req_https_t &request, bool *had_cookie = nullptr) {
+      const auto token = session_cookie(request);
+      if (had_cookie) {
+        *had_cookie = !token.empty();
+      }
+      if (token.empty() || config::sunshine.username.empty()) {
+        return std::nullopt;
+      }
+      return web_session::web_ui().validate(token, current_cred_tag(), web_session::clock::now());
+    }
+
+    /**
+     * @brief Headers every auth response carries.
+     */
+    SimpleWeb::CaseInsensitiveMultimap auth_headers(const std::string_view content_type = "application/json") {
+      return {
+        {"Content-Type", std::string {content_type}},
+        {"Cache-Control", "no-store"},
+        {"X-Frame-Options", "DENY"},
+        {"Content-Security-Policy", "frame-ancestors 'none';"}
+      };
+    }
+
+    /**
+     * @brief The request's path and query, as sent.
+     */
+    std::string request_target(const req_https_t &request) {
+      return request->query_string.empty() ? request->path : request->path + "?" + request->query_string;
+    }
+
+    /**
+     * @brief 401 (or, for a page load, a redirect to /login) without asking for Basic credentials
+     *        when a browser is asking.
+     * @param clear_cookie Also delete a stale session cookie.
+     */
+    void send_unauthorized_impl(const resp_https_t &response, const req_https_t &request, const bool clear_cookie) {
+      auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+      BOOST_LOG(info) << "Web UI: ["sv << address << "] -- not authorized"sv;
+
+      if (is_page_load(request)) {
+        auto headers = auth_headers("text/html; charset=utf-8");
+        headers.emplace("Location", web_session::login_redirect(request_target(request)));
+        if (clear_cookie) {
+          headers.emplace("Set-Cookie", web_session::clear_cookie());
+        }
+        response->write(SimpleWeb::StatusCode::redirection_see_other, headers);
+        return;
+      }
+
+      constexpr auto code = SimpleWeb::StatusCode::client_error_unauthorized;
+      nlohmann::json tree;
+      tree["status_code"] = code;
+      tree["status"] = false;
+      tree["error"] = "Unauthorized";
+
+      auto headers = auth_headers();
+      if (!from_browser(request)) {
+        // API clients (curl, scripts) may still be challenged for Basic credentials.
+        headers.emplace("WWW-Authenticate", R"(Basic realm="Nova", charset="UTF-8")");
+      }
+      if (clear_cookie) {
+        headers.emplace("Set-Cookie", web_session::clear_cookie());
+      }
+      response->write(code, tree.dump(), headers);
+    }
+
+    /**
+     * @brief CSRF check for a state-changing request signed in with the session cookie.
+     *
+     * Passes when Origin (or Referer) is this host or an allowed origin, or when X-CSRF-Token
+     * carries this session's token. A token that is sent must be right. Unlike Basic-auth
+     * requests, a cookie request with neither header nor token is refused: the cookie is sent
+     * automatically, so its presence proves nothing about who made the request.
+     *
+     * @param response The HTTP response object.
+     * @param request The HTTP request object.
+     * @param session The session the request carries.
+     * @return True when the request may proceed.
+     */
+    bool session_csrf_ok(const resp_https_t &response, const req_https_t &request, const web_session::session_t &session) {
+      const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+      bool token_ok = false;
+      if (const auto token_it = request->header.find("X-CSRF-Token"); token_it != request->header.end()) {
+        token_ok = web_session::equal_ct(token_it->second, session.csrf_token);
+        if (!token_ok) {
+          BOOST_LOG(error) << "Web UI: ["sv << address << "] -- CSRF token mismatch on "sv << request->method << ' ' << request->path;
+          bad_request(response, request, "Invalid CSRF token");
+          return false;
+        }
+      }
+      switch (request_origin(request)) {
+        case origin_e::same:
+          return true;
+        case origin_e::cross:
+          if (token_ok) {
+            return true;
+          }
+          BOOST_LOG(error) << "Web UI: ["sv << address << "] -- CSRF protection blocked a cross-site "sv << request->method << ' ' << request->path;
+          bad_request(response, request, "Missing CSRF token");
+          return false;
+        case origin_e::absent:
+          if (token_ok) {
+            return true;
+          }
+          BOOST_LOG(error) << "Web UI: ["sv << address << "] -- CSRF protection blocked "sv << request->method << ' ' << request->path << " without Origin or token"sv;
+          bad_request(response, request, "Missing CSRF token");
+          return false;
+      }
+      return false;
+    }
+  }  // namespace
+
   /**
    * @brief Send a 401 Unauthorized response.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
    */
   void send_unauthorized(const resp_https_t &response, const req_https_t &request) {
-    auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
-    BOOST_LOG(info) << "Web UI: ["sv << address << "] -- not authorized"sv;
-
-    constexpr auto code = SimpleWeb::StatusCode::client_error_unauthorized;
-
-    nlohmann::json tree;
-    tree["status_code"] = code;
-    tree["status"] = false;
-    tree["error"] = "Unauthorized";
-
-    const SimpleWeb::CaseInsensitiveMultimap headers {
-      {"Content-Type", "application/json"},
-      {"WWW-Authenticate", R"(Basic realm="Sunshine Gamestream Host", charset="UTF-8")"},
-      {"X-Frame-Options", "DENY"},
-      {"Content-Security-Policy", "frame-ancestors 'none';"}
-    };
-
-    response->write(code, tree.dump(), headers);
+    send_unauthorized_impl(response, request, false);
   }
 
   /**
@@ -655,10 +909,10 @@ namespace confighttp {
   }
 
   /**
-   * @brief Authenticate the user.
+   * @brief Refuse (403) a request whose source address is outside origin_web_ui_allowed.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
-   * @return True if the user is authenticated, false otherwise.
+   * @return True when the source may use the web UI.
    */
   bool origin_allowed(const resp_https_t &response, const req_https_t &request) {
     const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
@@ -670,6 +924,12 @@ namespace confighttp {
     return true;
   }
 
+  /**
+   * @brief Authenticate the user: a valid session cookie, or HTTP Basic for API clients.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * @return True if the user is authenticated, false otherwise (the response has been sent).
+   */
   bool authenticate(const resp_https_t &response, const req_https_t &request) {
     auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
 
@@ -683,10 +943,17 @@ namespace confighttp {
       return false;
     }
 
+    // 1. The session cookie set by /api/auth/login.
+    bool had_cookie = false;
+    if (const auto session = request_session(request, &had_cookie)) {
+      return !is_state_changing(request->method) || session_csrf_ok(response, request, *session);
+    }
+
+    // 2. HTTP Basic, for curl and other API clients. Browsers use the sign-in page instead.
     const auto auth = request->header.find("authorization");
-    if (auth == request->header.end()) {
-      // No credentials yet: the browser shows its sign-in prompt. Not a failed attempt.
-      send_unauthorized(response, request);
+    if (auth == request->header.end() || from_browser_engine(request)) {
+      // No credentials yet: not a failed attempt.
+      send_unauthorized_impl(response, request, had_cookie);
       return false;
     }
 
@@ -701,13 +968,13 @@ namespace confighttp {
 
     const auto &rawAuth = auth->second;
     const auto fail = [&]() {
-      // Fingerprint the attempt so a stale browser tab repeating one wrong password counts once.
+      // Fingerprint the attempt so a stale client repeating one wrong password counts once.
       const auto fingerprint = util::hex(crypto::hash(rawAuth + config::sunshine.salt)).to_string();
       if (const auto lockout = login_guard::web_ui().record_failure(source, fingerprint, now); lockout.count() > 0) {
         BOOST_LOG(warning) << "Web UI: ["sv << address << "] -- "sv << login_guard::web_ui().failures(source) << " failed sign-ins, locked out for "sv << lockout.count() << " s"sv;
         send_locked_out(response, request, lockout);
       } else {
-        send_unauthorized(response, request);
+        send_unauthorized_impl(response, request, had_cookie);
       }
       return false;
     };
@@ -725,7 +992,7 @@ namespace confighttp {
     const auto username = authData.substr(0, index);
     const auto password = authData.substr(index + 1);
 
-    if (const auto hash = util::hex(crypto::hash(password + config::sunshine.salt)).to_string(); !boost::iequals(username, config::sunshine.username) || hash != config::sunshine.password) {
+    if (const auto hash = util::hex(crypto::hash(password + config::sunshine.salt)).to_string(); !boost::iequals(username, config::sunshine.username) || !web_session::equal_ct(hash, config::sunshine.password)) {
       return fail();
     }
 
@@ -834,6 +1101,11 @@ namespace confighttp {
    * @return A unique identifier based on username or IP address.
    */
   std::string get_client_id(const req_https_t &request) {
+    // A signed-in browser: its session, so CSRF tokens are per session.
+    if (const auto session = request_session(request)) {
+      return "session:" + session->id;
+    }
+
     // Try to use the authenticated username as client ID
     if (const auto auth = request->header.find("authorization"); !config::sunshine.username.empty() && auth != request->header.end()) {
       if (const auto &rawAuth = auth->second; rawAuth.rfind("Basic "sv, 0) == 0) {
@@ -915,76 +1187,30 @@ namespace confighttp {
    * @brief Validate CSRF token.
    */
   bool validate_csrf_token(const resp_https_t &response, const req_https_t &request, const std::string &client_id) {
-    // Helper function to check if a URL starts with any allowed origin
-    auto is_allowed_origin = [](const std::string_view url) {
-      return std::ranges::any_of(config::sunshine.csrf_allowed_origins, [&url](const std::string &allowed_origin) {
-        // Ensure exact prefix match (with ":" or "/" after to prevent malicious.com matching allowed.com)
-        if (url.rfind(allowed_origin, 0) != 0) {  // rfind with pos=0 checks if the url starts with allowed_origin
-          return false;
-        }
-        // Check that it's followed by ":" (port) or "/" (path) or is an exact match
-        const size_t len = allowed_origin.length();
-        return url.length() == len || url[len] == ':' || url[len] == '/';
-      });
-    };
-
-    // Same-origin by construction: when the Origin/Referer authority equals
-    // the Host header the browser used to reach us, the request cannot be
-    // cross-site — regardless of which name, IP, or tailnet address this
-    // host is reached by. This is what makes first-run setup work from
-    // another machine with zero configuration; csrf_allowed_origins remains
-    // for reverse proxies, where Host and Origin legitimately differ.
-    auto authority_of = [](const std::string &url) -> std::string_view {
-      std::string_view v {url};
-      auto scheme = v.find("://");
-      if (scheme == std::string_view::npos) {
-        return {};
-      }
-      auto rest = v.substr(scheme + 3);
-      auto cut = rest.find('/');
-      return cut == std::string_view::npos ? rest : rest.substr(0, cut);
-    };
-    const auto host_it = request->header.find("Host");
-
-    // Check if the request is from the same origin (Origin or Referer header matches configured allowed origins)
-    const auto origin_it = request->header.find("Origin");
-    if (origin_it != request->header.end() && host_it != request->header.end() &&
-        !authority_of(origin_it->second).empty() && authority_of(origin_it->second) == host_it->second) {
-      return true;
-    }
-    if (origin_it != request->header.end() && is_allowed_origin(origin_it->second)) {
-      // Same origin request - allow without CSRF token
-      return true;
+    // Signed in with the session cookie: the stricter per-session check (a same-origin header
+    // or this session's token is required, because the browser attaches the cookie by itself).
+    if (const auto session = request_session(request)) {
+      return session_csrf_ok(response, request, *session);
     }
 
-    // If we have a Referer header, check if it's same-origin
-    const auto referer_it = request->header.find("Referer");
-    if (referer_it != request->header.end() && host_it != request->header.end() &&
-        !authority_of(referer_it->second).empty() && authority_of(referer_it->second) == host_it->second) {
-      return true;
-    }
-    if (referer_it != request->header.end() && is_allowed_origin(referer_it->second)) {
-      // Same origin request - allow without CSRF token
-      return true;
-    }
-
-    // If neither Origin nor Referer is present, this cannot be a browser-initiated CSRF attack.
-    // Non-browser clients (e.g. curl, scripts) never send these headers, and a malicious web page
-    // cannot cause a non-browser client to make requests on a user's behalf.
-    if (origin_it == request->header.end() && referer_it == request->header.end()) {
+    const auto origin = request_origin(request);
+    // Same origin, or no Origin/Referer at all: a request without them can't be browser-initiated
+    // CSRF against Basic credentials (curl and scripts never send them, and browsers don't send
+    // Basic credentials here any more, see from_browser_engine()).
+    if (origin != origin_e::cross) {
       return true;
     }
 
     // A browser-like request arrived with an Origin/Referer that doesn't match an allowed origin.
-    // Require a CSRF token.
-    const std::string_view blocked_origin = (origin_it != request->header.end()) ? origin_it->second : referer_it->second;
-    // Extract token from X-CSRF-Token header
+    // Require a CSRF token (header, or the query string as a fallback).
     const auto header_it = request->header.find("X-CSRF-Token");
     if (header_it == request->header.end()) {
-      // Also check query parameters as fallback
       auto query_params = request->parse_query_string();
       const auto query_it = query_params.find("csrf_token");
       if (query_it == query_params.end()) {
+        const auto origin_it = request->header.find("Origin");
+        const auto referer_it = request->header.find("Referer");
+        const std::string_view blocked_origin = origin_it != request->header.end() ? std::string_view {origin_it->second} : referer_it != request->header.end() ? std::string_view {referer_it->second} : ""sv;
         auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
         BOOST_LOG(error) << "Web UI: ["sv << address << "] -- CSRF protection blocked request from origin: "sv << blocked_origin;
         BOOST_LOG(error) << "Web UI: To allow this origin, add it to the 'csrf_allowed_origins' option in your Sunshine configuration"sv;
@@ -1160,12 +1386,250 @@ namespace confighttp {
 
     print_req(request);
 
-    std::string client_id = get_client_id(request);
-    std::string token = generate_csrf_token(client_id);
-
     nlohmann::json output_tree;
-    output_tree["csrf_token"] = token;
+    if (const auto session = request_session(request)) {
+      // Session-cookie requests are checked against their session's token.
+      output_tree["csrf_token"] = session->csrf_token;
+    } else {
+      output_tree["csrf_token"] = generate_csrf_token(get_client_id(request));
+    }
     send_response(response, output_tree);
+  }
+
+  namespace {
+    /**
+     * @brief Write JSON with the auth headers plus optional extras (Set-Cookie).
+     */
+    void send_auth_json(const resp_https_t &response, const SimpleWeb::StatusCode code, const nlohmann::json &tree, const std::vector<std::pair<std::string, std::string>> &extra = {}) {
+      auto headers = auth_headers();
+      if (!web_build_id().empty()) {
+        headers.emplace("X-Nova-Build", web_build_id());
+      }
+      for (const auto &[name, value] : extra) {
+        headers.emplace(name, value);
+      }
+      response->write(code, tree.dump(), headers);
+    }
+
+    /**
+     * @brief Public description of a session (never the token or its hash).
+     */
+    nlohmann::json session_json(const web_session::session_t &s, const std::string_view current_id) {
+      return {
+        {"id", s.id},
+        {"created", s.created},
+        {"last_seen", s.last_seen},
+        {"expires", s.expires},
+        {"remember", s.remember},
+        {"user_agent", s.user_agent},
+        {"address", s.address},
+        {"current", s.id == current_id},
+      };
+    }
+
+    /**
+     * @brief Sign this browser in: store a new session and build its Set-Cookie header.
+     * @param request The HTTP request (User-Agent and address are recorded).
+     * @param remember 30-day cookie instead of a browser-session cookie.
+     * @param body Receives username, csrf_token, expires and remember.
+     * @return The Set-Cookie header value.
+     */
+    std::string start_session(const req_https_t &request, const bool remember, nlohmann::json &body) {
+      const auto ua_it = request->header.find("User-Agent");
+      const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+      const auto created = web_session::web_ui().create(remember, current_cred_tag(), ua_it == request->header.end() ? ""sv : std::string_view {ua_it->second}, address, web_session::clock::now());
+      body["username"] = config::sunshine.username;
+      body["csrf_token"] = created.session.csrf_token;
+      body["expires"] = created.session.expires;
+      body["remember"] = remember;
+      return web_session::set_cookie(created.token, remember ? std::optional {web_session::remembered_lifetime} : std::nullopt);
+    }
+
+    /**
+     * @brief Refuse auth requests that a browser sent from another site (login CSRF).
+     * @return True when the request may proceed.
+     */
+    bool auth_origin_ok(const resp_https_t &response, const req_https_t &request) {
+      if (request_origin(request) == origin_e::cross) {
+        auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+        BOOST_LOG(error) << "Web UI: ["sv << address << "] -- cross-site "sv << request->path << " refused"sv;
+        send_auth_json(response, SimpleWeb::StatusCode::client_error_forbidden, {{"status_code", 403}, {"status", false}, {"error", "Cross-site request refused"}});
+        return false;
+      }
+      return true;
+    }
+  }  // namespace
+
+  /**
+   * @brief Sign in with the web UI username and password; sets the nova_session cookie.
+   *
+   * Wrong passwords count toward the same per-source lockout as HTTP Basic (429 + Retry-After).
+   *
+   * @api_examples{/api/auth/login|:| POST|:| {"username":"admin","password":"secret","remember":true}}
+   */
+  void postAuthLogin(const resp_https_t &response, const req_https_t &request) {
+    if (!origin_allowed(response, request) || !auth_origin_ok(response, request) || !check_content_type(response, request, "application/json")) {
+      return;
+    }
+    if (config::sunshine.username.empty()) {
+      send_auth_json(response, SimpleWeb::StatusCode::client_error_conflict, {{"status_code", 409}, {"status", false}, {"error", "setup_required"}});
+      return;
+    }
+
+    const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+    const auto source = login_guard::source_key(address);
+    const auto now = login_guard::limiter_t::clock::now();
+    if (const auto wait = login_guard::web_ui().locked_for(source, now); wait.count() > 0) {
+      send_locked_out(response, request, wait);
+      return;
+    }
+
+    std::string username;
+    std::string password;
+    const scoped_sensitive_string_clear_t clear_password {password};
+    bool remember = false;
+    try {
+      const auto input = nlohmann::json::parse(request->content.string());
+      username = input.at("username").get<std::string>();
+      password = input.at("password").get<std::string>();
+      if (const auto it = input.find("remember"); it != input.end() && it->is_boolean()) {
+        remember = it->get<bool>();
+      }
+    } catch (const std::exception &) {
+      bad_request(response, request, "Expected {\"username\": string, \"password\": string, \"remember\": boolean}");
+      return;
+    }
+
+    const auto hash = util::hex(crypto::hash(password + config::sunshine.salt)).to_string();
+    const bool ok = !username.empty() && !password.empty() && boost::iequals(username, config::sunshine.username) && web_session::equal_ct(hash, config::sunshine.password);
+    if (!ok) {
+      const auto fingerprint = util::hex(crypto::hash("login\n" + username + "\n" + password + config::sunshine.salt)).to_string();
+      if (const auto lockout = login_guard::web_ui().record_failure(source, fingerprint, now); lockout.count() > 0) {
+        BOOST_LOG(warning) << "Web UI: ["sv << address << "] -- "sv << login_guard::web_ui().failures(source) << " failed sign-ins, locked out for "sv << lockout.count() << " s"sv;
+        send_locked_out(response, request, lockout);
+      } else {
+        BOOST_LOG(info) << "Web UI: ["sv << address << "] -- wrong username or password"sv;
+        send_auth_json(response, SimpleWeb::StatusCode::client_error_unauthorized, {{"status_code", 401}, {"status", false}, {"error", "Wrong username or password"}});
+      }
+      return;
+    }
+    login_guard::web_ui().record_success(source);
+
+    // Never reuse a session id the browser already had (session fixation).
+    if (const auto old = session_cookie(request); !old.empty()) {
+      web_session::web_ui().revoke_token(old);
+    }
+
+    nlohmann::json body {{"status", true}};
+    const auto cookie = start_session(request, remember, body);
+    BOOST_LOG(info) << "Web UI: ["sv << address << "] -- signed in"sv << (remember ? " (kept for 30 days)"sv : ""sv);
+    send_auth_json(response, SimpleWeb::StatusCode::success_ok, body, {{"Set-Cookie", cookie}});
+  }
+
+  /**
+   * @brief Sign this browser out: forget its session and delete the cookie.
+   *
+   * @api_examples{/api/auth/logout|:| POST|:| null}
+   */
+  void postAuthLogout(const resp_https_t &response, const req_https_t &request) {
+    if (!origin_allowed(response, request) || !auth_origin_ok(response, request)) {
+      return;
+    }
+    if (const auto token = session_cookie(request); !token.empty() && web_session::web_ui().revoke_token(token)) {
+      const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+      BOOST_LOG(info) << "Web UI: ["sv << address << "] -- signed out"sv;
+    }
+    send_auth_json(response, SimpleWeb::StatusCode::success_ok, {{"status", true}}, {{"Set-Cookie", web_session::clear_cookie()}});
+  }
+
+  /**
+   * @brief Whether this browser is signed in (never 401, so the sign-in page can ask).
+   *
+   * @api_examples{/api/auth/session|:| GET|:| null}
+   */
+  void getAuthSession(const resp_https_t &response, const req_https_t &request) {
+    if (!origin_allowed(response, request)) {
+      return;
+    }
+    bool had_cookie = false;
+    const auto session = request_session(request, &had_cookie);
+    nlohmann::json body {
+      {"authenticated", session.has_value()},
+      {"setup_required", config::sunshine.username.empty()},
+    };
+    if (session) {
+      body["username"] = config::sunshine.username;
+      body["csrf_token"] = session->csrf_token;
+      body["expires"] = session->expires;
+      body["remember"] = session->remember;
+      body["id"] = session->id;
+    }
+    std::vector<std::pair<std::string, std::string>> extra;
+    if (had_cookie && !session) {
+      extra.emplace_back("Set-Cookie", web_session::clear_cookie());
+    }
+    send_auth_json(response, SimpleWeb::StatusCode::success_ok, body, extra);
+  }
+
+  /**
+   * @brief List signed-in browsers.
+   *
+   * @api_examples{/api/auth/sessions|:| GET|:| null}
+   */
+  void getAuthSessions(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    const auto current = request_session(request);
+    const auto current_id = current ? current->id : ""s;
+    auto items = nlohmann::json::array();
+    for (const auto &s : web_session::web_ui().list(web_session::clock::now())) {
+      items.push_back(session_json(s, current_id));
+    }
+    send_auth_json(response, SimpleWeb::StatusCode::success_ok, {{"status", true}, {"sessions", std::move(items)}});
+  }
+
+  /**
+   * @brief Sign out one browser ({"id": "..."}) or every other one ({"others": true}).
+   *
+   * @api_examples{/api/auth/sessions/revoke|:| POST|:| {"id":"0123456789abcdef01"}}
+   */
+  void postAuthSessionsRevoke(const resp_https_t &response, const req_https_t &request) {
+    if (!check_content_type(response, request, "application/json") || !authenticate(response, request) || !validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    const auto current = request_session(request);
+    std::string id;
+    bool others = false;
+    try {
+      const auto input = nlohmann::json::parse(request->content.string());
+      id = input.value("id", ""s);
+      others = input.value("others", false);
+    } catch (const std::exception &) {
+      bad_request(response, request, "Expected {\"id\": string} or {\"others\": true}");
+      return;
+    }
+
+    auto &store = web_session::web_ui();
+    int revoked = 0;
+    if (others) {
+      for (const auto &s : store.list(web_session::clock::now())) {
+        if ((!current || s.id != current->id) && store.revoke_id(s.id)) {
+          ++revoked;
+        }
+      }
+    } else if (!id.empty()) {
+      revoked = store.revoke_id(id) ? 1 : 0;
+    } else {
+      bad_request(response, request, "Expected {\"id\": string} or {\"others\": true}");
+      return;
+    }
+
+    std::vector<std::pair<std::string, std::string>> extra;
+    if (current && !others && id == current->id) {
+      extra.emplace_back("Set-Cookie", web_session::clear_cookie());
+    }
+    send_auth_json(response, SimpleWeb::StatusCode::success_ok, {{"status", true}, {"revoked", revoked}}, extra);
   }
 
   /**
@@ -2098,6 +2562,7 @@ namespace confighttp {
     std::vector<std::string> errors = {};
     std::stringstream ss;
     std::stringstream config_stream;
+    std::string session_cookie_header;
     ss << request->content.rdbuf();
     try {
       // TODO: Input Validation
@@ -2115,13 +2580,20 @@ namespace confighttp {
         errors.emplace_back("Invalid Username");
       } else {
         auto hash = util::hex(crypto::hash(password + config::sunshine.salt)).to_string();
-        if (config::sunshine.username.empty() || (boost::iequals(username, config::sunshine.username) && hash == config::sunshine.password)) {
+        if (config::sunshine.username.empty() || (boost::iequals(username, config::sunshine.username) && web_session::equal_ct(hash, config::sunshine.password))) {
           if (newPassword.empty() || newPassword != confirmPassword) {
             errors.emplace_back("Password Mismatch");
           } else {
+            const auto previous = request_session(request);
             http::save_user_creds(config::sunshine.credentials_file, newUsername, newPassword);
             http::reload_user_creds(config::sunshine.credentials_file);
+            // New credentials sign every browser out; this one gets a fresh session so the
+            // owner isn't sent to the sign-in page right after choosing the password.
+            web_session::web_ui().revoke_all();
             output_tree["status"] = true;
+            if (from_browser(request)) {
+              session_cookie_header = start_session(request, previous && previous->remember, output_tree);
+            }
           }
         } else {
           errors.emplace_back("Invalid Current Credentials");
@@ -2137,7 +2609,11 @@ namespace confighttp {
         return;
       }
 
-      send_response(response, output_tree);
+      if (session_cookie_header.empty()) {
+        send_response(response, output_tree);
+      } else {
+        send_auth_json(response, SimpleWeb::StatusCode::success_ok, output_tree, {{"Set-Cookie", session_cookie_header}});
+      }
     } catch (std::exception &e) {
       BOOST_LOG(warning) << "SavePassword: "sv << e.what();
       bad_request(response, request, e.what());
@@ -3676,6 +4152,15 @@ namespace confighttp {
 
     // Public SPA routes with authentication behavior that differs from the default fallback
     server.resource["^/logout/?$"]["GET"] = page_handler(false);
+    server.resource["^/login/?$"]["GET"] = [](const resp_https_t &response, const req_https_t &request) {
+      if (config::sunshine.username.empty()) {
+        send_redirect(response, request, "/welcome");
+        return;
+      }
+      if (origin_allowed(response, request)) {
+        getPage(response, request, false);
+      }
+    };
     server.resource["^/welcome/?$"]["GET"] = page_handler(false, true);
 
     // rest api
@@ -3716,6 +4201,12 @@ namespace confighttp {
     server.resource["^/api/library/metadata/([0-9]{1,5})$"]["GET"] = getLibraryMetadata;
     server.resource["^/api/library/metadata/([0-9]{1,5})$"]["POST"] = postLibraryMetadata;
     server.resource["^/api/csrf-token$"]["GET"] = getCSRFToken;
+    // Nova sign-in sessions (the page at /login)
+    server.resource["^/api/auth/login$"]["POST"] = postAuthLogin;
+    server.resource["^/api/auth/logout$"]["POST"] = postAuthLogout;
+    server.resource["^/api/auth/session$"]["GET"] = getAuthSession;
+    server.resource["^/api/auth/sessions$"]["GET"] = getAuthSessions;
+    server.resource["^/api/auth/sessions/revoke$"]["POST"] = postAuthSessionsRevoke;
     server.resource["^/api/password$"]["POST"] = savePassword;
     server.resource["^/api/pin$"]["DELETE"] = cancelPairing;
     server.resource["^/api/pin$"]["GET"] = getPendingPairings;
