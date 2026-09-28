@@ -43,6 +43,10 @@ namespace file_handler {
   }
 
   int write_file(const char *path, const std::string_view &contents) {
+    // Every caller writes something private (keys, config, apps with host commands): a file this
+    // creates is owner-only, and an existing file keeps its mode when truncated.
+    std::error_code ec;
+    const bool existed = std::filesystem::exists(path, ec);
     std::ofstream out(path);
 
     if (!out.is_open()) {
@@ -50,7 +54,11 @@ namespace file_handler {
     }
 
     out << contents;
+    out.close();
 
-    return 0;
+    if (!existed) {
+      std::filesystem::permissions(path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write, std::filesystem::perm_options::replace, ec);
+    }
+    return out.fail() ? -1 : 0;
   }
 }  // namespace file_handler

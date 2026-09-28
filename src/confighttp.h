@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <array>
+#include <chrono>
 #include <string>
 #include <unordered_map>
 #include <string_view>
@@ -63,6 +64,20 @@ namespace confighttp {
   void send_unauthorized(const resp_https_t &response, const req_https_t &request);
   void send_redirect(const resp_https_t &response, const req_https_t &request, const char *path);
   bool authenticate(const resp_https_t &response, const req_https_t &request);
+  /**
+   * @brief Refuse (403) a request whose source address is outside origin_web_ui_allowed.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * @return True when the source may use the web UI.
+   */
+  bool origin_allowed(const resp_https_t &response, const req_https_t &request);
+  /**
+   * @brief Answer 429 with Retry-After for a source that failed to sign in too often.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * @param wait Remaining lockout.
+   */
+  void send_locked_out(const resp_https_t &response, const req_https_t &request, std::chrono::seconds wait);
   void not_found(const resp_https_t &response, const req_https_t &request, const std::string &error_message = "Not Found");
   void bad_request(const resp_https_t &response, const req_https_t &request, const std::string &error_message = "Bad Request");
   /**

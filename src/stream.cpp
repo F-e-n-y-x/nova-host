@@ -31,6 +31,7 @@ extern "C" {
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
+#include "mic_packet.h"
 #include "network.h"
 #include "platform/common.h"
 #include "process.h"
@@ -1563,60 +1564,36 @@ namespace stream {
    *        Sequence numbers are little-endian on the wire.
    */
   namespace mic {
-    constexpr std::uint8_t kPacketTypeOpus = 0x61;  ///< Legacy 8-bit packet type.
-    constexpr std::uint16_t kPacketTypeExt = 0x5504;  ///< 16-bit extended packet type.
-
-#pragma pack(push, 1)
-
-    /**
-     * @brief Legacy 12-byte mic datagram header (moonlight-common-c mic branch).
-     */
-    struct packet_header_t {
-      std::uint8_t flags;  ///< RTP-style flags byte; unused by Nova.
-      std::uint8_t packetType;  ///< ::kPacketTypeOpus for Opus payloads.
-      std::uint16_t sequenceNumber;  ///< Wire order little-endian.
-      std::uint32_t timestamp;  ///< Sender timestamp; unused by Nova.
-      std::uint32_t ssrc;  ///< RTP synchronization source; unused by Nova.
-    };
-
-    /**
-     * @brief 13-byte mic datagram header carrying the 16-bit extended type.
-     */
-    struct packet_header_ext_t {
-      std::uint8_t header;  ///< RTP-style flags byte; unused by Nova.
-      std::uint16_t packetType;  ///< ::kPacketTypeExt for Opus payloads.
-      std::uint16_t sequenceNumber;  ///< Wire order little-endian.
-      std::uint32_t timestamp;  ///< Sender timestamp; unused by Nova.
-      std::uint32_t ssrc;  ///< RTP synchronization source; unused by Nova.
-    };
-
-#pragma pack(pop)
-
     /**
      * @brief Parse one mic datagram and forward its Opus payload to the audio backend.
      * @param data Raw datagram bytes as received from the mic socket.
      * @param bytes Datagram length in bytes.
      */
     inline void handle_packet(const char *data, std::size_t bytes) {
-      if (bytes > sizeof(packet_header_ext_t)) {
-        auto ext = reinterpret_cast<const packet_header_ext_t *>(data);
-        if (ext->packetType == kPacketTypeExt) {
-          audio::write_mic_data(
-            reinterpret_cast<const std::uint8_t *>(data) + sizeof(packet_header_ext_t),
-            bytes - sizeof(packet_header_ext_t),
-            boost::endian::little_to_native(ext->sequenceNumber));
-          return;
-        }
+      const auto packet = mic_packet::parse(reinterpret_cast<const std::uint8_t *>(data), bytes);
+      if (!packet || !mic_packet::plausible_opus(packet->payload)) {
+        return;
       }
-      if (bytes > sizeof(packet_header_t)) {
-        auto hdr = reinterpret_cast<const packet_header_t *>(data);
-        if (hdr->packetType == kPacketTypeOpus) {
-          audio::write_mic_data(
-            reinterpret_cast<const std::uint8_t *>(data) + sizeof(packet_header_t),
-            bytes - sizeof(packet_header_t),
-            boost::endian::little_to_native(hdr->sequenceNumber));
+      audio::write_mic_data(packet->payload.data(), packet->payload.size(), packet->sequence);
+    }
+
+    /**
+     * @brief Whether @p source is the address of a client with a running stream.
+     * @param ctx Broadcast context holding the session list.
+     * @param source Normalized source address of the datagram.
+     * @return true when some session expects this address.
+     */
+    bool from_session_peer(broadcast_ctx_t &ctx, const std::string &source) {
+      auto lg = ctx.control_server._sessions.lock();
+      return std::ranges::any_of(*ctx.control_server._sessions, [&source](const session_t *session) {
+        if (session->state.load(std::memory_order_relaxed) != session::state_e::RUNNING) {
+          return false;
         }
-      }
+        // RTSP records the raw socket address; compare normalized forms (v4-mapped v6 vs v4).
+        boost::system::error_code ec;
+        const auto expected = boost::asio::ip::make_address(session->control.expected_peer_address, ec);
+        return !ec && net::addr_to_normalized_string(expected) == source;
+      });
     }
   }  // namespace mic
 
@@ -1714,6 +1691,7 @@ namespace stream {
     // Nova: remote microphone receive chain (own buffer/endpoint; plaintext v1)
     udp::endpoint mic_peer;
     std::array<char, 2048> mic_buf;
+    std::chrono::steady_clock::time_point mic_last_drop_log {};
     std::function<void(const boost::system::error_code, size_t)> mic_recv_func;
     mic_recv_func = [&](const boost::system::error_code &ec, size_t bytes) {
       if (ec == boost::asio::error::operation_aborted || ec == boost::asio::error::bad_descriptor) {
@@ -1727,6 +1705,16 @@ namespace stream {
       }
       if (ec || !bytes) {
         BOOST_LOG(error) << "Couldn't receive data from mic udp socket: "sv << ec.message();
+        return;
+      }
+      // Nova does not negotiate SS_ENC_MICROPHONE yet, so every mic datagram is plaintext.
+      const auto source = net::addr_to_normalized_string(mic_peer.address());
+      const bool is_wan = net::from_address(source) == net::WAN;
+      if (!mic_packet::accept_source(mic::from_session_peer(ctx, source), is_wan, false)) {
+        if (const auto now = std::chrono::steady_clock::now(); now - mic_last_drop_log > 30s) {
+          mic_last_drop_log = now;
+          BOOST_LOG(warning) << "nova-mic: dropping datagrams from "sv << source << (is_wan ? " (plaintext mic audio isn't accepted from the internet)"sv : " (no active stream from that address)"sv);
+        }
         return;
       }
       mic::handle_packet(mic_buf.data(), bytes);
