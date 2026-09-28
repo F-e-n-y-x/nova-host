@@ -356,6 +356,82 @@ TEST_F(VirtualHidDeviceTest, AllocatesManualProfileAndTranslatesFullState) {
   platf::virtualhid::gamepad_update(*context(), 1, input_state);
 }
 
+TEST_F(VirtualHidDeviceTest, EachControllerAxisMovesOnlyItsOwnXboxSeriesField) {
+  // A Moonlight MULTI_CONTROLLER packet carries (LT, RT, LX, LY, RX, RY). Send each one on its
+  // own through Nova's gamepad path and check that exactly one libvirtualhid state field and
+  // one Xbox report field moves, so an ordering slip anywhere in the chain fails here.
+  auto *adapter = allocate_gamepad("xseries"sv, LI_CTYPE_XBOX, LI_CCAP_ANALOG_TRIGGERS, 0, 0);
+  ASSERT_NE(adapter, nullptr);
+  ASSERT_NE(adapter->gamepad(), nullptr);
+  const auto profile = adapter->gamepad()->profile();
+  EXPECT_EQ(profile.gamepad_kind, lvh::GamepadProfileKind::xbox_series);
+
+  /**
+   * @brief One packet axis and the state/report field it must drive.
+   */
+  struct axis_case_t {
+    std::string_view name;  ///< Packet field.
+    platf::gamepad_state_t packet;  ///< Packet with only that field set.
+    float lvh::GamepadState::*trigger;  ///< Trigger field that must move, or null for a stick.
+    float lvh::Stick::*stick_axis;  ///< Stick axis that must move, or null for a trigger.
+    lvh::Stick lvh::GamepadState::*stick;  ///< Stick that owns stick_axis.
+    std::size_t report_offset;  ///< Byte offset of the field in the Xbox input report.
+  };
+  constexpr auto max = std::numeric_limits<std::int16_t>::max();
+  const std::array cases {
+    axis_case_t {"leftTrigger"sv, {0, 255, 0, 0, 0, 0, 0}, &lvh::GamepadState::left_trigger, nullptr, nullptr, 8},
+    axis_case_t {"rightTrigger"sv, {0, 0, 255, 0, 0, 0, 0}, &lvh::GamepadState::right_trigger, nullptr, nullptr, 10},
+    axis_case_t {"leftStickX"sv, {0, 0, 0, max, 0, 0, 0}, nullptr, &lvh::Stick::x, &lvh::GamepadState::left_stick, 0},
+    axis_case_t {"leftStickY"sv, {0, 0, 0, 0, max, 0, 0}, nullptr, &lvh::Stick::y, &lvh::GamepadState::left_stick, 2},
+    axis_case_t {"rightStickX"sv, {0, 0, 0, 0, 0, max, 0}, nullptr, &lvh::Stick::x, &lvh::GamepadState::right_stick, 4},
+    axis_case_t {"rightStickY"sv, {0, 0, 0, 0, 0, 0, max}, nullptr, &lvh::Stick::y, &lvh::GamepadState::right_stick, 6},
+  };
+
+  platf::virtualhid::gamepad_update(*context(), 0, {0, 0, 0, 0, 0, 0, 0});
+  const auto neutral_report = lvh::reports::pack_input_report(profile, adapter->state());
+  ASSERT_GE(neutral_report.size(), 12U);
+
+  for (const auto &test_case : cases) {
+    platf::virtualhid::gamepad_update(*context(), 0, test_case.packet);
+    const auto &state = adapter->state();
+    const std::array<float, 6> values {
+      state.left_trigger,
+      state.right_trigger,
+      state.left_stick.x,
+      state.left_stick.y,
+      state.right_stick.x,
+      state.right_stick.y,
+    };
+    float moved = 0.0F;
+    if (test_case.trigger != nullptr) {
+      moved = state.*test_case.trigger;
+    } else {
+      moved = (state.*test_case.stick).*test_case.stick_axis;
+    }
+    EXPECT_FLOAT_EQ(moved, 1.0F) << test_case.name;
+    int moved_fields = 0;
+    for (const auto value : values) {
+      moved_fields += value != 0.0F ? 1 : 0;
+    }
+    EXPECT_EQ(moved_fields, 1) << test_case.name << " moved more than one libvirtualhid field";
+
+    const auto report = lvh::reports::pack_input_report(profile, state);
+    ASSERT_EQ(report.size(), neutral_report.size());
+    for (std::size_t offset = 0; offset < 12U; ++offset) {
+      const auto inside_field = offset == test_case.report_offset || offset == test_case.report_offset + 1U;
+      if (!inside_field) {
+        EXPECT_EQ(report[offset], neutral_report[offset]) << test_case.name << " changed report byte " << offset;
+      }
+    }
+    EXPECT_NE(
+      std::pair(report[test_case.report_offset], report[test_case.report_offset + 1U]),
+      std::pair(neutral_report[test_case.report_offset], neutral_report[test_case.report_offset + 1U])
+    ) << test_case.name << " did not reach its report field";
+  }
+
+  platf::virtualhid::free_gamepad(*context(), 0);
+}
+
 TEST_P(VirtualHidAutoProfileTest, SelectsProfileFromClientMetadata) {
   const auto &test_case = GetParam();
   auto *adapter = allocate_gamepad("auto"sv, test_case.type, test_case.capabilities);
