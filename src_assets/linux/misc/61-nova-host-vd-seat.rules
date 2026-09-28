@@ -1,0 +1,6 @@
+# Nova Virtual display: while a virtual display runs, Nova names its keyboard, mouse,
+# touchscreen and pen tablet "libvirtualhid ... (Nova VD)". Put those on seat-nova, so the
+# desktop's X server (seat0) ignores them and Nova's headless X server (Xorg -seat seat-nova)
+# takes them. Devices with the normal names, and gamepads (games read them directly), stay on
+# the desktop.
+SUBSYSTEM=="input", ATTRS{name}=="libvirtualhid*(Nova VD)*", ENV{ID_SEAT}="seat-nova", TAG+="seat-nova"

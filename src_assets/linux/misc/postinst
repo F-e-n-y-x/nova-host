@@ -7,7 +7,7 @@ modprobe uhid
 # Homebrew installs host integration files inside its Cellar. Copy them to
 # host directories that systemd-udevd and systemd-modules-load monitor.
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-for rule in 60-sunshine.rules 60-nova-host-vdd.rules 60-nova-host-input.rules ; do
+for rule in 60-sunshine.rules 60-nova-host-vdd.rules 60-nova-host-input.rules 61-nova-host-vd-seat.rules ; do
   packaged_udev_rule="$script_dir/../lib/udev/rules.d/$rule"
   if [ -f "$packaged_udev_rule" ]; then
     echo "Installing udev rule $rule."

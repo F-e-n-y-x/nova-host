@@ -212,6 +212,7 @@ set(INTEGRATION_TEST_FILES
     "src_assets/common/assets/web/configs/components/SettingsNav.vue"
     "src_assets/linux/misc/60-sunshine.rules"
     "src_assets/linux/misc/60-nova-host-input.rules"
+    "src_assets/linux/misc/61-nova-host-vd-seat.rules"
 )
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/packaging/linux/copr/Sunshine.spec")

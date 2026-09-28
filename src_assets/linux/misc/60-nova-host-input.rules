@@ -1,4 +1,5 @@
 # The libvirtualhid keyboard enables every EV_KEY code, including the mouse, joystick and
 # digitizer button ranges, so input_id also tags it as a mouse and libinput/X add it a second
 # time as a pointer. Keep it a plain keyboard. Runs after 60-input-id.rules (sorted by name).
-SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="libvirtualhid Keyboard", ENV{ID_INPUT_KEYBOARD}=="1", ENV{ID_INPUT_MOUSE}="", ENV{ID_INPUT_JOYSTICK}="", ENV{ID_INPUT_TABLET}="", ENV{ID_INPUT_TOUCHPAD}="", ENV{ID_INPUT_TOUCHSCREEN}=""
+# The trailing * also covers "libvirtualhid Keyboard (Nova VD)", its name on a Nova virtual display.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="libvirtualhid Keyboard*", ENV{ID_INPUT_KEYBOARD}=="1", ENV{ID_INPUT_MOUSE}="", ENV{ID_INPUT_JOYSTICK}="", ENV{ID_INPUT_TABLET}="", ENV{ID_INPUT_TOUCHPAD}="", ENV{ID_INPUT_TOUCHSCREEN}=""
