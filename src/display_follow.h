@@ -13,8 +13,12 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
+
+// lib includes
+#include <nlohmann/json.hpp>
 
 // local includes
 #include "virtual_display.h"
@@ -47,6 +51,45 @@ namespace display_follow {
     std::string client_name;  ///< Device name, for logging.
     std::string device_key;  ///< Stable id of the device (see device_key()), for its saved display scale.
     int scale = 100;  ///< Display scale for a Virtual display, in percent.
+    int rotation = 0;  ///< Mirror rotation: 90 for a portrait request (height > width), else 0. A Virtual display is simply made portrait.
+  };
+
+  /**
+   * @brief Switches the desktop (Mirror) display natively; used for portrait, which the script can't do.
+   */
+  class mirror_backend_t {
+  public:
+    virtual ~mirror_backend_t() = default;
+
+    /**
+     * @brief Switch the desktop output to the request's size, rate and rotation.
+     *
+     * @param request The request.
+     * @return True on success (the state to restore is saved first).
+     */
+    virtual bool set(const request_t &request) = 0;
+
+    /**
+     * @brief Rotate the desktop output, keeping its size (turned to the new orientation).
+     *
+     * @param angle 0, 90, 180 or 270.
+     * @return True on success.
+     */
+    virtual bool rotate(int angle) = 0;
+
+    /**
+     * @brief Put the desktop output back as it was before the first switch (mode and rotation).
+     *
+     * @return True on success.
+     */
+    virtual bool restore() = 0;
+
+    /**
+     * @brief Restore a switch a previous run left behind.
+     *
+     * @return True if something was restored.
+     */
+    virtual bool recover() = 0;
   };
 
   /**
@@ -150,8 +193,10 @@ namespace display_follow {
      * @param marker File that exists while the display is switched, used to restore after a crash.
      * @param backend Separate-display backend for Virtual display streams, or null when unavailable.
      * @param hooks Callbacks around the virtual display's lifetime.
+     * @param scheduler Linger timer (injected for tests).
+     * @param native Native Mirror switcher for portrait Mirror streams, or null (portrait then goes through `cmd` unrotated).
      */
-    controller_t(runner_t runner, std::filesystem::path marker, std::shared_ptr<virtual_backend_t> backend = nullptr, virtual_hooks_t hooks = {}, scheduler_t scheduler = {});
+    controller_t(runner_t runner, std::filesystem::path marker, std::shared_ptr<virtual_backend_t> backend = nullptr, virtual_hooks_t hooks = {}, scheduler_t scheduler = {}, std::shared_ptr<mirror_backend_t> native = nullptr);
     ~controller_t();
 
     controller_t(const controller_t &) = delete;
@@ -210,6 +255,23 @@ namespace display_follow {
     scale_result_e set_scale(int percent);
 
     /**
+     * @brief Rotate the display the stream shows (Foundation /rotate-display).
+     *
+     * A running virtual display is resized to the turned size; otherwise the desktop output is
+     * rotated by the native switcher. A rotated desktop is restored with the rest after the last
+     * stream ends.
+     *
+     * @param angle 0, 90, 180 or 270.
+     * @return True on success.
+     */
+    bool rotate(int angle);
+
+    /**
+     * @brief Marker file content for a switch made by the native switcher.
+     */
+    static constexpr std::string_view native_marker = "native";
+
+    /**
      * @brief Restore a display left switched by a previous run (crash or kill).
      *
      * Also kills a virtual display a crashed run left behind (through its marker file).
@@ -237,6 +299,7 @@ namespace display_follow {
     class linger_timer_t;
 
     bool restore_locked(const std::string &cmd);
+    void mark_native_locked();
     void stop_virtual_locked();
     bool teardown_locked(const std::string &cmd);
     void cancel_linger_locked();
@@ -252,6 +315,8 @@ namespace display_follow {
     bool lingering_ = false;
     std::uint64_t linger_generation_ = 0;
     scheduler_t scheduler_;
+    std::shared_ptr<mirror_backend_t> native_;
+    bool native_active_ = false;  ///< The current switch was made by native_ (restore through it).
     std::unique_ptr<linger_timer_t> timer_;  ///< Backs scheduler_ when none was injected; last, so it stops first.
   };
 
@@ -320,6 +385,21 @@ namespace display_follow {
    * @brief Config-driven wrapper called when the last stream session ends (honours virtual_display_linger).
    */
   void last_session_ended();
+
+  /**
+   * @brief Config-driven wrapper for Foundation /rotate-display.
+   *
+   * @param angle 0, 90, 180 or 270.
+   * @return True on success.
+   */
+  bool rotate(int angle);
+
+  /**
+   * @brief Foundation /displays reply: the desktop outputs and the running virtual display.
+   *
+   * @return JSON reply.
+   */
+  nlohmann::json displays_json();
 
   /**
    * @brief /display-scale: change the Virtual display's scale and remember it for the device.

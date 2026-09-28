@@ -33,6 +33,7 @@
 #include "clipboard.h"
 #include "config.h"
 #include "display_follow.h"
+#include "display_modeset.h"
 #include "display_device.h"
 #include "file_handler.h"
 #include "globals.h"
@@ -689,6 +690,7 @@ namespace nvhttp {
     request.client_name = session.client_name;
     request.device_key = display_follow::device_key(session.client_cert);
     request.mode = session.display_mode.empty() ? default_display_mode(appid) : session.display_mode;
+    request.rotation = display_modeset::rotation_for_size(session.width, session.height);  // portrait Mirror turns the desktop
 
     bool legacy_prep = false;
     for (const auto &app : proc::proc.get_apps()) {
@@ -2294,7 +2296,7 @@ namespace nvhttp {
     if (!nova_require_device(response, request)) {
       return;
     }
-    nova_json(response, SimpleWeb::StatusCode::success_ok, {{"nova", true}, {"version", PROJECT_VERSION}, {"features", {"apps", "art", "details", "display_mode", "bitrate", "sessions", "display_scale"}}});
+    nova_json(response, SimpleWeb::StatusCode::success_ok, {{"nova", true}, {"version", PROJECT_VERSION}, {"features", {"apps", "art", "details", "display_mode", "bitrate", "sessions", "display_scale", "portrait", "rotate"}}});
   }
 
   /**
@@ -2462,6 +2464,75 @@ namespace nvhttp {
       }
     }
     return {{"status_code", code}, {"success", false}, {"status_message", message}};
+  }
+
+  /**
+   * @brief GET /displays: the host displays, in the Sunshine-Foundation format moonlight-vplus reads.
+   *
+   * Replies `{"status_code":200,"status_message":"OK","displays":[{"display_name","friendly_name",
+   * "device_id",...}]}` with the connected desktop outputs and, while one runs, the virtual display.
+   * There is no "vdd" object: Nova's virtual display is chosen per launch (nova_display), not toggled.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void displays(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    const auto peer = verified_peer_for(request);
+    if (peer.cert.empty()) {
+      nova_json(response, SimpleWeb::StatusCode::success_ok, {{"status_code", 401}, {"status_message", "This device isn't paired"}, {"displays", nlohmann::json::array()}});
+      return;
+    }
+    nova_json(response, SimpleWeb::StatusCode::success_ok, display_follow::displays_json());
+  }
+
+  /**
+   * @brief GET /rotate-display?angle=<0|90|180|270>: rotate the display the calling device streams.
+   *
+   * Sunshine-Foundation compatible (moonlight-vplus `rotateDisplay`): replies
+   * `{"status_code","status_message","success"}` with HTTP 200. A running virtual display is
+   * resized to the turned size; the desktop output is rotated by the native switcher (with
+   * ViewPortIn when needed) and restored after the last stream ends. The device must be streaming
+   * and must not be view-only.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void rotate_display(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    auto reply = [&](int code, const std::string &message) {
+      nova_json(response, SimpleWeb::StatusCode::success_ok, display_modeset::rotate_json(code, message));
+    };
+    const auto peer = verified_peer_for(request);
+    if (peer.cert.empty()) {
+      reply(401, "This device isn't paired");
+      return;
+    }
+    if (get_client_permissions(peer.cert) == client_permissions::view_only) {
+      reply(403, "This device is view-only");
+      return;
+    }
+    const auto args = request->parse_query_string();
+    int angle = -1;
+    try {
+      angle = std::stoi(get_arg(args, "angle", "-1"));
+    } catch (...) {
+      angle = -1;
+    }
+    if (!display_modeset::valid_rotation(angle)) {
+      reply(400, "angle must be 0, 90, 180 or 270");
+      return;
+    }
+    if (!rtsp_stream::has_session_for_cert(peer.cert)) {
+      reply(409, "This device isn't streaming");
+      return;
+    }
+    BOOST_LOG(info) << "Nova: "sv << peer.name << " asked to rotate the display to "sv << angle << " degrees"sv;
+    if (!display_follow::rotate(angle)) {
+      reply(500, "The display couldn't be rotated");
+      return;
+    }
+    reply(200, "OK");
   }
 
   /**
@@ -2644,6 +2715,8 @@ namespace nvhttp {
     https_server.resource["^/cancel$"]["GET"] = cancel;
     https_server.resource["^/bitrate$"]["GET"] = bitrate;
     https_server.resource["^/display-scale$"]["GET"] = display_scale;
+    https_server.resource["^/displays$"]["GET"] = displays;
+    https_server.resource["^/rotate-display$"]["GET"] = rotate_display;
     https_server.resource["^/nova/v1/capabilities$"]["GET"] = nova_capabilities;
     https_server.resource["^/nova/v1/apps$"]["GET"] = nova_apps;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/art/(poster|hero|logo|icon|background)$"]["GET"] = nova_app_art;
