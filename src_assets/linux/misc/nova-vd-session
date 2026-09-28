@@ -6,7 +6,8 @@ Nova starts this on the headless X server (DISPLAY=:N) instead of a bare window 
 
 - the user's Cinnamon wallpaper (org.cinnamon.desktop.background), else Nova's default
 - desktop icons (nemo-desktop), a tint2 panel with a launcher, task list and clock
-- Openbox with a right-click menu: terminal, files, browser, Lutris and the Nova Library games
+- Openbox with a menu (right-click an empty part of the panel, or the desktop when nemo-desktop
+  isn't installed): terminal, files, browser, Lutris and the Nova Library games
 
 The session is kept away from the desktop on :0:
 - It gets its own D-Bus session bus (dbus-run-session). nemo-desktop, nemo and gnome-terminal are

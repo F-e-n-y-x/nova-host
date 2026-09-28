@@ -2952,7 +2952,8 @@ a message naming the file instead of streaming a desktop while the game silently
             What Nova runs on the virtual display (Nova). `desktop` starts Nova's desktop session,
             `nova-vd-session`: the user's Cinnamon wallpaper (`org.cinnamon.desktop.background`,
             else Nova's own), desktop icons (`nemo-desktop`), a `tint2` panel with a launcher, task
-            list and clock, and an Openbox right-click menu with a terminal, the file manager, a
+            list and clock, and an Openbox menu (right-click an empty part of the panel; a
+            right-click on the desktop opens nemo's own menu) with a terminal, the file manager, a
             browser, Lutris and the Nova Library games. Apps with a command still launch directly,
             with the desktop behind them. `bare` starts only `virtual_display_wm`.
             <br><br>

@@ -443,10 +443,10 @@ TEST(VirtualDisplaySeat, RuleDetection) {
 }
 
 TEST_F(VirtualDisplayTest, DesktopSessionGetsItsStateDirAndEnvironment) {
-  vd::x_server_t server {dir, "'/usr/lib/nova-host/nova-vd-session'", sys.ops(), {{"NOVA_VD_SCALE", "150"}, {"NOVA_VD_WM", "openbox"}}};
+  vd::x_server_t server {dir, "/usr/lib/nova-host/nova-vd-session", sys.ops(), {{"NOVA_VD_SCALE", "150"}, {"NOVA_VD_WM", "openbox"}}};
   const auto target = server.start({2340, 1080, 60});
   ASSERT_TRUE(target);
-  EXPECT_EQ(join(sys.wm_argv), "/bin/sh -c exec '/usr/lib/nova-host/nova-vd-session'");
+  EXPECT_EQ(join(sys.wm_argv), "/bin/sh -c exec /usr/lib/nova-host/nova-vd-session");
   EXPECT_EQ(env_value(sys.wm_env, "DISPLAY"), ":20");
   EXPECT_EQ(env_value(sys.wm_env, "NOVA_VD_DIR"), (dir / "X20").string());
   EXPECT_EQ(env_value(sys.wm_env, "NOVA_VD_SCALE"), "150");

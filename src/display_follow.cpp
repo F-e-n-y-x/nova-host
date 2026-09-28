@@ -447,7 +447,8 @@ namespace display_follow {
         if (config::video.virtual_display_session == "desktop") {
           if (helper_available()) {
             desktop_ = true;
-            command = shell_quote(NOVA_VD_SESSION);
+            // Unquoted: crash recovery matches the first word against the process's command line.
+            command = NOVA_VD_SESSION;
             env = {
               {"NOVA_VD_WM", wm.empty() ? "openbox"s : wm},
               {"NOVA_VD_SCALE", std::to_string(scale)},
@@ -504,14 +505,6 @@ namespace display_follow {
       static bool helper_available() {
         std::error_code ec;
         return std::filesystem::exists(NOVA_VD_SESSION, ec);
-      }
-
-      static std::string shell_quote(const std::string &value) {
-        std::string out = "'";
-        for (const char c : value) {
-          out += c == '\'' ? "'\\''"s : std::string(1, c);
-        }
-        return out + "'";
       }
 
       std::filesystem::path state_dir_;
