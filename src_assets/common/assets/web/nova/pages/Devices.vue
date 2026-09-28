@@ -49,7 +49,7 @@ const query = computed({
   get: () => (typeof route.query.q === 'string' ? route.query.q : ''),
   set: (q) => router.replace({ query: { ...route.query, q: q || undefined } }),
 })
-const pendingNames = computed(() => pending.value.map((p) => p.name || t('nova.pair.unknown_device')).join(', '))
+const pendingNames = computed(() => pending.value.map((p) => p.suggested_name || p.name || t('nova.pair.unknown_device')).join(', '))
 const firstLoad = computed(() => store.loading.value && !devices.value.length && !store.error.value)
 const confirmRowUnpair = computed({
   get: () => !!unpairTarget.value,

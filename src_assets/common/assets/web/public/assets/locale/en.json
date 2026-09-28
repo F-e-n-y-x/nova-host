@@ -1535,8 +1535,12 @@
       "how_step3_desc": "The device connects as soon as the PIN matches.",
       "not_listed": "{host} isn’t listed? Add it by address:",
       "request_from": "Pairing request from {name}",
+      "wants_to_pair": "A device wants to pair",
+      "form_phone": "Phone",
+      "form_tablet": "Tablet",
+      "form_tv": "TV",
       "device_name_label": "Device name",
-      "device_name_hint": "Optional. You can rename it later in Devices.",
+      "device_name_hint": "Filled in from the device. Change it now or later in Devices.",
       "device_name_placeholder": "For example: Living room TV",
       "submit_device": "Pair device",
       "expires": "The PIN expires after a few minutes."

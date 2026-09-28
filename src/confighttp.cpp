@@ -2040,6 +2040,9 @@ namespace confighttp {
         {"id", pairing.id},
         {"name", pairing.name},
         {"address", pairing.address},
+        {"app", pairing.app},
+        {"form", pairing.form},
+        {"suggested_name", pairing.suggested_name},
       });
     }
     send_response(response, output_tree);

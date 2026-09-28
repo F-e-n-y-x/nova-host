@@ -88,7 +88,9 @@ export function unpairAllDevices() {
 /**
  * Pairing requests waiting for a PIN.
  *
- * @returns {Promise<Array<{id: string, name: string, address: string}>>} Requests.
+ * @returns {Promise<Array<{id: string, name: string, address: string, app?: string, form?: string,
+ *   suggested_name?: string}>>} Requests. `suggested_name` is what to pre-fill ("Nebula from
+ *   Ayush's S25 Ultra"); older hosts omit it.
  */
 export async function listPairingRequests() {
   return (await call('./api/pin')).pairings || []

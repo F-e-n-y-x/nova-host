@@ -783,3 +783,120 @@ TEST_F(PairingSessionRegistryTest, ConcurrentInsertionAndCancellationLeaveConsis
   EXPECT_EQ(successful_cancellations, session_count);
   EXPECT_TRUE(get_pending_pairings().empty());
 }
+
+TEST(PairingNameTest, OwnerInDeviceNameIsKept) {
+  EXPECT_EQ(suggest_pairing_name("Nebula", "Ayush's S25 Ultra", "ayush"), "Nebula from Ayush's S25 Ultra");
+  EXPECT_EQ(suggest_pairing_name("Nebula", "Ayush\xE2\x80\x99s S25 Ultra", "admin"), "Nebula from Ayush\xE2\x80\x99s S25 Ultra");
+  EXPECT_EQ(suggest_pairing_name("Moonlight", "James' TV", "ayush"), "Moonlight from James' TV");
+}
+
+TEST(PairingNameTest, OwnerIsAddedWhenMissing) {
+  EXPECT_EQ(suggest_pairing_name("Nebula", "Galaxy S25 Ultra", "ayush"), "Nebula from Ayush's Galaxy S25 Ultra");
+  EXPECT_EQ(suggest_pairing_name("Nebula", "Galaxy S25 Ultra", ""), "Nebula from Galaxy S25 Ultra");
+  EXPECT_EQ(suggest_pairing_name("Moonlight", "", "ayush"), "Moonlight from Ayush's device");
+  EXPECT_EQ(suggest_pairing_name("Moonlight", "", ""), "Moonlight");
+  EXPECT_EQ(suggest_pairing_name("", "Pixel 9", ""), "Moonlight from Pixel 9");
+  // A leading apostrophe or a lone "'s" isn't an owner.
+  EXPECT_EQ(suggest_pairing_name("Nebula", "'s tablet", "ayush"), "Nebula from Ayush's 's tablet");
+}
+
+TEST(PairingNameTest, ClientThatNamedItselfIsKept) {
+  EXPECT_EQ(suggest_pairing_name("Nebula", "Nebula from Den TV", "ayush"), "Nebula from Den TV");
+  EXPECT_EQ(suggest_pairing_name("Nebula", "nebula", "ayush"), "nebula");
+  EXPECT_EQ(suggest_pairing_name("Nebula", "Nebulae Pad", "ayush"), "Nebula from Ayush's Nebulae Pad");
+}
+
+TEST(PairingNameTest, NamesAreTrimmedAndCut) {
+  EXPECT_EQ(suggest_pairing_name(" Nebula ", "  Galaxy \t S25\nUltra  ", "  ayush "), "Nebula from Ayush's Galaxy S25 Ultra");
+  const auto name = suggest_pairing_name("Nebula", std::string(200, 'x'), "ayush");
+  EXPECT_EQ(name.size(), MAX_SUGGESTED_PAIRING_NAME_CHARS);
+  EXPECT_TRUE(name.starts_with("Nebula from Ayush's xxx"));
+  // A cut that lands on a space doesn't leave it dangling.
+  const auto spaced = suggest_pairing_name("Nebula", std::string(43, 'x') + " yyyy", "ayush");
+  EXPECT_NE(spaced.back(), ' ');
+}
+
+TEST(PairingNameTest, UnicodeAndEmojiSurviveCuts) {
+  EXPECT_EQ(suggest_pairing_name("Nebula", "Zoë's 📱 Phone", "ayush"), "Nebula from Zoë's 📱 Phone");
+  // Owner names that don't start with an ASCII letter are left as they are.
+  EXPECT_EQ(suggest_pairing_name("Nebula", "Tablet", "élodie"), "Nebula from élodie's Tablet");
+  std::string emoji;
+  for (int i = 0; i < 80; ++i) {
+    emoji += "\xF0\x9F\x8E\xAE";  // U+1F3AE, 4 bytes
+  }
+  const auto name = suggest_pairing_name("Nebula", emoji, "");
+  EXPECT_LE(name.size(), MAX_PAIRING_CLIENT_NAME_SIZE);
+  EXPECT_EQ(name.size() % 4, std::string("Nebula from ").size() % 4);  // no split code point
+  EXPECT_EQ(clean_pairing_label("\xF0\x9F\x8E\xAE\xF0\x9F\x8E\xAE", 6), "\xF0\x9F\x8E\xAE");
+}
+
+TEST(PairingNameTest, DeviceNameSkipsMoonlightPlaceholder) {
+  EXPECT_EQ(pairing_device_name("roth", "Ayush's S25 Ultra"), "Ayush's S25 Ultra");
+  EXPECT_EQ(pairing_device_name("ROTH", ""), "");
+  EXPECT_EQ(pairing_device_name("Steam Deck", "ignored"), "Steam Deck");
+  EXPECT_EQ(pairing_device_name(" \x01 ", "Pixel\x7F 9"), "Pixel 9");
+}
+
+TEST(PairingNameTest, AppIsDetected) {
+  EXPECT_EQ(detect_pairing_app("Nebula", "", ""), "Nebula");
+  EXPECT_EQ(detect_pairing_app("nebula", "Phone", ""), "Nebula");
+  EXPECT_EQ(detect_pairing_app("vplus", "", ""), "V+");
+  EXPECT_EQ(detect_pairing_app("MyClient", "", ""), "MyClient");
+  EXPECT_EQ(detect_pairing_app("", "", "Artemis/1.0 okhttp"), "Artemis");
+  EXPECT_EQ(detect_pairing_app("", "Ayush's S25", "okhttp/4.12"), "V+");
+  EXPECT_EQ(detect_pairing_app("", "", ""), "Moonlight");
+  EXPECT_EQ(detect_pairing_app("  ", "  ", "Moonlight/6"), "Moonlight");
+}
+
+TEST(PairingNameTest, FormFactorIsNormalized) {
+  EXPECT_EQ(normalize_pairing_form("phone"), "phone");
+  EXPECT_EQ(normalize_pairing_form("Tablet"), "tablet");
+  EXPECT_EQ(normalize_pairing_form(" tv "), "tv");
+  EXPECT_EQ(normalize_pairing_form("watch"), "");
+  EXPECT_EQ(normalize_pairing_form(""), "");
+}
+
+TEST_F(PairingHttpHandlerTest, PendingRequestCarriesClientIdentity) {
+  const auto original_username = config::sunshine.username;
+  config::sunshine.username = "ayush";
+  std::packaged_task<std::string()> request_task {[this]() {
+    return request(server_certificate_target("nebula") + "&clientname=Galaxy%20S25%20Ultra&clientapp=Nebula&clientver=0.3.0-dev7&clientform=phone");
+  }};
+  auto response = request_task.get_future();
+  std::jthread request_thread {std::move(request_task)};
+
+  ASSERT_FALSE(wait_for_pending_pairing().empty());
+  const auto pending = get_pending_pairings();
+  ASSERT_EQ(pending.size(), 1);
+  EXPECT_EQ(pending.front().name, "TestClient");
+  EXPECT_EQ(pending.front().app, "Nebula");
+  EXPECT_EQ(pending.front().form, "phone");
+  EXPECT_EQ(pending.front().suggested_name, "Nebula from Ayush's TestClient");
+  EXPECT_TRUE(cancel_pairing(pending.front().id));
+  response.get();
+  config::sunshine.username = original_username;
+}
+
+TEST_F(PairingHttpHandlerTest, StockMoonlightRequestGetsOwnerName) {
+  const auto original_username = config::sunshine.username;
+  config::sunshine.username = "ayush";
+  std::packaged_task<std::string()> request_task {[this]() {
+    return request(std::format(
+      "/pair?uniqueid=0123456789ABCDEF&phrase=getservercert&clientcert={}&salt=ff5dc6eda99339a8a0793e216c4257c4&devicename=roth",
+      util::hex_vec(PUBLIC_CERT, true)
+    ));
+  }};
+  auto response = request_task.get_future();
+  std::jthread request_thread {std::move(request_task)};
+
+  ASSERT_FALSE(wait_for_pending_pairing().empty());
+  const auto pending = get_pending_pairings();
+  ASSERT_EQ(pending.size(), 1);
+  EXPECT_EQ(pending.front().name, "");
+  EXPECT_EQ(pending.front().app, "Moonlight");
+  EXPECT_EQ(pending.front().form, "");
+  EXPECT_EQ(pending.front().suggested_name, "Moonlight from Ayush's device");
+  EXPECT_TRUE(cancel_pairing(pending.front().id));
+  response.get();
+  config::sunshine.username = original_username;
+}

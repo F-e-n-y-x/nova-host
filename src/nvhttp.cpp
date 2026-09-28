@@ -7,6 +7,8 @@
 
 // standard includes
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -882,6 +884,170 @@ namespace nvhttp {
     return !name.empty() && name.size() <= MAX_PAIRING_CLIENT_NAME_SIZE;
   }
 
+  namespace {
+    /**
+     * @brief Cut @p value to at most @p max_bytes without splitting a UTF-8 sequence.
+     */
+    std::string_view utf8_prefix_bytes(std::string_view value, std::size_t max_bytes) {
+      if (value.size() <= max_bytes) {
+        return value;
+      }
+      std::size_t end = max_bytes;
+      while (end > 0 && (static_cast<unsigned char>(value[end]) & 0xC0) == 0x80) {
+        --end;
+      }
+      return value.substr(0, end);
+    }
+
+    /**
+     * @brief Cut @p value to at most @p max_chars code points.
+     */
+    std::string_view utf8_prefix_chars(std::string_view value, std::size_t max_chars) {
+      std::size_t chars = 0;
+      for (std::size_t i = 0; i < value.size(); ++i) {
+        if ((static_cast<unsigned char>(value[i]) & 0xC0) != 0x80) {
+          if (chars == max_chars) {
+            return value.substr(0, i);
+          }
+          ++chars;
+        }
+      }
+      return value;
+    }
+
+    std::string ascii_lower(std::string_view value) {
+      std::string out {value};
+      std::ranges::transform(out, out.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+      });
+      return out;
+    }
+
+    /**
+     * @brief Whether @p name already names its owner ("Ayush's S25", "Ayush’s S25", "James' TV").
+     */
+    bool has_possessive(std::string_view name) {
+      for (const std::string_view mark : {"'s"sv, "\xE2\x80\x99s"sv, "s'"sv, "s\xE2\x80\x99"sv}) {
+        for (auto pos = name.find(mark); pos != std::string_view::npos; pos = name.find(mark, pos + 1)) {
+          const auto after = pos + mark.size();
+          const bool word_before = pos > 0 && name[pos - 1] != ' ';
+          const bool word_end = after == name.size() || name[after] == ' ';
+          if (word_before && word_end) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+  }  // namespace
+
+  std::string clean_pairing_label(const std::string_view value, const std::size_t max_bytes) {
+    std::string out;
+    out.reserve(value.size());
+    bool pending_space = false;
+    for (const char ch : value) {
+      const auto c = static_cast<unsigned char>(ch);
+      if (c < 0x20 || c == 0x7F || c == ' ') {
+        // Control characters (tabs, newlines) count as whitespace.
+        pending_space = !out.empty();
+        continue;
+      }
+      if (pending_space) {
+        out.push_back(' ');
+        pending_space = false;
+      }
+      out.push_back(ch);
+    }
+    std::string cut {utf8_prefix_bytes(out, max_bytes)};
+    while (!cut.empty() && cut.back() == ' ') {
+      cut.pop_back();
+    }
+    return cut;
+  }
+
+  std::string pairing_device_name(const std::string_view device_name, const std::string_view client_name) {
+    auto name = clean_pairing_label(device_name);
+    if (name.empty() || ascii_lower(name) == "roth") {
+      name = clean_pairing_label(client_name);
+    }
+    return name;
+  }
+
+  std::string detect_pairing_app(const std::string_view client_app, const std::string_view client_name, const std::string_view user_agent) {
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 6> known {{
+      {"nebula", "Nebula"},
+      {"moonlight", "Moonlight"},
+      {"artemis", "Artemis"},
+      {"v+", "V+"},
+      {"vplus", "V+"},
+      {"moonlight-vplus", "V+"},
+    }};
+    if (const auto app = clean_pairing_label(client_app, 32); !app.empty()) {
+      const auto lower = ascii_lower(app);
+      for (const auto &[key, label] : known) {
+        if (lower == key) {
+          return std::string {label};
+        }
+      }
+      return app;
+    }
+    const auto agent = ascii_lower(user_agent);
+    if (agent.find("artemis") != std::string::npos) {
+      return "Artemis";
+    }
+    if (agent.find("nebula") != std::string::npos) {
+      return "Nebula";
+    }
+    // Only the V+ engine appends clientname to its requests.
+    if (!clean_pairing_label(client_name).empty()) {
+      return "V+";
+    }
+    return "Moonlight";
+  }
+
+  std::string normalize_pairing_form(const std::string_view form) {
+    const auto lower = ascii_lower(clean_pairing_label(form, 16));
+    if (lower == "phone" || lower == "tablet" || lower == "tv") {
+      return lower;
+    }
+    return {};
+  }
+
+  std::string suggest_pairing_name(const std::string_view app_in, const std::string_view device_in, const std::string_view owner_in) {
+    auto app = clean_pairing_label(app_in, 32);
+    if (app.empty()) {
+      app = "Moonlight";
+    }
+    const auto device = clean_pairing_label(device_in);
+    auto owner = clean_pairing_label(owner_in, 32);
+    if (!owner.empty()) {
+      owner[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(owner[0])));
+    }
+
+    std::string name;
+    const auto lower_device = ascii_lower(device);
+    const auto lower_app = ascii_lower(app);
+    if (!device.empty() && lower_device.starts_with(lower_app) &&
+        (lower_device.size() == lower_app.size() || lower_device[lower_app.size()] == ' ')) {
+      name = device;  // The client already named itself ("Nebula from ...").
+    } else if (!device.empty() && (has_possessive(device) || owner.empty())) {
+      name = std::format("{} from {}", app, device);
+    } else if (!device.empty()) {
+      name = std::format("{} from {}'s {}", app, owner, device);
+    } else if (!owner.empty()) {
+      name = std::format("{} from {}'s device", app, owner);
+    } else {
+      name = app;
+    }
+
+    std::string cut {utf8_prefix_chars(name, MAX_SUGGESTED_PAIRING_NAME_CHARS)};
+    cut = std::string {utf8_prefix_bytes(cut, MAX_PAIRING_CLIENT_NAME_SIZE)};
+    while (!cut.empty() && cut.back() == ' ') {
+      cut.pop_back();
+    }
+    return cut;
+  }
+
   void expire_pair_sessions(const std::chrono::steady_clock::time_point now) {
     std::scoped_lock lock {map_id_sess_mutex()};
     expire_pair_sessions_unlocked(now);
@@ -909,6 +1075,9 @@ namespace nvhttp {
         .id = sess->async_insert_pin.id,
         .name = sess->async_insert_pin.device_name,
         .address = sess->async_insert_pin.address,
+        .app = sess->async_insert_pin.app,
+        .form = sess->async_insert_pin.form,
+        .suggested_name = suggest_pairing_name(sess->async_insert_pin.app, sess->async_insert_pin.device_name, config::sunshine.username),
       });
     }
     return result;
@@ -1225,7 +1394,15 @@ namespace nvhttp {
     sess.client.uniqueID = unique_id;
     sess.client.cert = util::from_hex_vec(get_arg(args, "clientcert"), true);
     sess.async_insert_pin.salt = get_arg(args, "salt");
-    sess.async_insert_pin.device_name = get_arg(args, "devicename");
+    const auto client_name = get_arg(args, "clientname", "");
+    sess.async_insert_pin.device_name = pairing_device_name(get_arg(args, "devicename", ""), client_name);
+    const auto user_agent = request->header.find("User-Agent");
+    sess.async_insert_pin.app = detect_pairing_app(
+      get_arg(args, "clientapp", ""),
+      client_name,
+      user_agent == request->header.end() ? std::string_view {} : std::string_view {user_agent->second}
+    );
+    sess.async_insert_pin.form = normalize_pairing_form(get_arg(args, "clientform", ""));
     sess.async_insert_pin.address = net::addr_to_normalized_string(request->remote_endpoint().address());
 
     BOOST_LOG(debug) << sess.client.cert;

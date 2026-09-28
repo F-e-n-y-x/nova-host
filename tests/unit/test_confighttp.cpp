@@ -618,6 +618,9 @@ TEST_F(ConfigHttpTest, PairingRestApiListsAuthenticatedPendingRequests) {
   EXPECT_EQ(body.at("pairings").front().at("id"), pairing_id);
   EXPECT_EQ(body.at("pairings").front().at("name"), "REST client");
   EXPECT_EQ(body.at("pairings").front().at("address"), "192.0.2.30");
+  EXPECT_EQ(body.at("pairings").front().at("app"), "");
+  EXPECT_EQ(body.at("pairings").front().at("form"), "");
+  EXPECT_EQ(body.at("pairings").front().at("suggested_name"), "Moonlight from Testuser's REST client");
 }
 
 TEST_F(ConfigHttpTest, PairingRestApiRejectsMalformedFieldsWithoutConsumingRequest) {

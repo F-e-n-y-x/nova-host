@@ -155,6 +155,8 @@ namespace nvhttp {
       std::string id = {};  ///< Unguessable identifier used by the Web UI to approve this session.
       std::string device_name = {};  ///< Untrusted device name reported by the pairing client.
       std::string address = {};  ///< Network address from which the pairing request originated.
+      std::string app = {};  ///< Client app detected from the request (Nebula, Moonlight, Artemis, V+).
+      std::string form = {};  ///< Client form factor (phone, tablet, tv) or empty when not reported.
       std::chrono::steady_clock::time_point expires_at = std::chrono::steady_clock::time_point::max();  ///< Deadline for completing this pairing session.
     } async_insert_pin;  ///< Async insert pin.
 
@@ -172,7 +174,71 @@ namespace nvhttp {
     std::string id;  ///< Unguessable approval identifier.
     std::string name;  ///< Untrusted device name reported by the pairing client.
     std::string address;  ///< Network address from which the request originated.
+    std::string app;  ///< Client app detected from the request.
+    std::string form;  ///< Client form factor (phone, tablet, tv) or empty.
+    std::string suggested_name;  ///< Name to pre-fill in the Web UI ("Nebula from Ayush's S25 Ultra").
   };
+
+  /**
+   * @brief Longest name, in code points, suggested for a pairing client (the Web UI limit).
+   */
+  constexpr std::size_t MAX_SUGGESTED_PAIRING_NAME_CHARS = 64;
+
+  /**
+   * @brief Clean an untrusted client-supplied label: drop control characters, collapse
+   * whitespace runs to one space, trim, and cut to @p max_bytes on a UTF-8 boundary.
+   *
+   * @param value Raw value from the request.
+   * @param max_bytes Byte limit for the result.
+   * @return Cleaned label, possibly empty.
+   */
+  std::string clean_pairing_label(std::string_view value, std::size_t max_bytes = MAX_PAIRING_CLIENT_NAME_SIZE);
+
+  /**
+   * @brief Name of the device from the pairing query. Moonlight sends the placeholder
+   * `devicename=roth`; V+-based clients also send `clientname` with the real device name.
+   *
+   * @param device_name `devicename` query value.
+   * @param client_name `clientname` query value.
+   * @return Cleaned device name, or empty when the client sent none.
+   */
+  std::string pairing_device_name(std::string_view device_name, std::string_view client_name);
+
+  /**
+   * @brief Detect which client app is pairing.
+   *
+   * Uses `clientapp` when the client sends it (Nebula does), then the User-Agent, then the
+   * `clientname` parameter that only the V+ engine adds. Anything else is Moonlight.
+   *
+   * @param client_app `clientapp` query value.
+   * @param client_name `clientname` query value.
+   * @param user_agent User-Agent header value.
+   * @return Display name of the app.
+   */
+  std::string detect_pairing_app(std::string_view client_app, std::string_view client_name, std::string_view user_agent);
+
+  /**
+   * @brief Normalize the `clientform` query value.
+   *
+   * @param form Raw value.
+   * @return `phone`, `tablet`, `tv`, or empty for anything else.
+   */
+  std::string normalize_pairing_form(std::string_view form);
+
+  /**
+   * @brief Suggest a paired-device name in the form "{App} from {Owner}'s {Device}".
+   *
+   * A device name that already has a possessive owner ("Ayush's S25 Ultra") is kept as is;
+   * otherwise @p owner (the Web UI username, capitalised) is added. A device name that already
+   * starts with the app name is returned unchanged. The result is at most
+   * @ref MAX_SUGGESTED_PAIRING_NAME_CHARS code points.
+   *
+   * @param app Client app name.
+   * @param device_name Cleaned device name, possibly empty.
+   * @param owner Owner name (usually the Web UI username), possibly empty.
+   * @return Suggested name, never empty.
+   */
+  std::string suggest_pairing_name(std::string_view app, std::string_view device_name, std::string_view owner);
 
   /**
    * @brief Result of inserting a new pairing session into bounded pending storage.
