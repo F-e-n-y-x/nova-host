@@ -28,6 +28,10 @@ install(PROGRAMS "${CMAKE_SOURCE_DIR}/tools/display/helpers/nova-drm-vdd"
 # Desktop session on a Virtual display (wallpaper, icons, panel, menu; see src/display_follow.cpp).
 install(PROGRAMS "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/nova-vd-session"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host")
+# Root helper for one-click updates (see src/nova_update.h). Only usable through a sudoers rule the
+# owner adds; without it the web UI shows the apt command to run instead.
+install(PROGRAMS "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/nova-install-update"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host/helpers")
 
 # Opt-in polkit rule so /pcsleep can suspend without a password (see src/host_power.h).
 install(PROGRAMS "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/nova-allow-suspend"

@@ -13,14 +13,15 @@ import NvAlert from '../components/NvAlert.vue'
 import NvStatBand from '../components/NvStatBand.vue'
 import NvAttention from '../components/NvAttention.vue'
 import NvConfirmDialog from '../components/NvConfirmDialog.vue'
-import { checkForUpdates, postJson } from '../api'
+import { postJson } from '../api'
+import { useUpdateStatus } from '../update'
 import { useLiveSession } from '../live'
 import { toast } from '../toast'
-import SunshineVersion from '../../sunshine_version'
 import { useOverview } from './overview/useOverview'
 import { previewState } from './overview/usePreview'
 import { attentionFromHealth, captureLabel, encoderLabel, shortVersion } from './overview/format'
 import StreamBar from './overview/StreamBar.vue'
+import UpdateBanner from './overview/UpdateBanner.vue'
 import PreviewCard from './overview/PreviewCard.vue'
 import StreamHealthCard from './overview/StreamHealthCard.vue'
 import LibraryCard from './overview/LibraryCard.vue'
@@ -38,20 +39,21 @@ const session = computed(() => live.current.value)
 const streaming = computed(() => live.active.value)
 const streamingUuids = computed(() => new Set(live.sessions.value.map((s) => s.client_uuid).filter(Boolean)))
 
-const release = ref(null)
-watch(() => o.config.data.value, async (cfg) => {
-  if (!cfg) return
-  const pre = ['true', 'enabled', true].includes(cfg.notify_pre_releases)
-  release.value = await checkForUpdates(pre)
-}, { immediate: true })
+// The host checks the (private) release repository; the browser never calls GitHub.
+const updates = useUpdateStatus()
 
 const version = computed(() => o.hostInfo.data.value?.version || o.config.data.value?.version || '')
+// Tag of a real update, '' when the check succeeded with nothing newer, null when unknown (no check, error).
 const update = computed(() => {
-  const r = release.value
-  if (!version.value || !r?.latest) return null
-  const mine = new SunshineVersion(null, version.value)
-  const latest = new SunshineVersion(r.latest, null)
-  return latest.isGreater(mine) ? latest.versionTag : ''
+  const s = updates.status.value
+  if (!s?.enabled || s.error || !s.checked_at) return null
+  return updates.available.value ? s.latest.tag : ''
+})
+
+const updateHint = computed(() => {
+  const error = updates.status.value?.error
+  if (error === 'private' || error === 'not_found' || error === 'unauthorized' || error === 'bad_token') return t('nova.update.needs_token')
+  return ''
 })
 
 const encoderCell = computed(() => {
@@ -89,7 +91,8 @@ const cells = computed(() => {
       value: t('nova.overview.paired', { n: devices.length }, devices.length),
       sub: streaming.value ? t('nova.overview.streaming_count', { n: streamingUuids.value.size }) : (enabled === devices.length ? t('nova.overview.all_allowed') : t('nova.overview.allowed_count', { n: enabled })) },
     { key: 'nova', label: 'Nova', icon: ShieldCheck, value: shortVersion(version.value) || '—', loading,
-      sub: update.value ? t('nova.overview.update_to', { version: update.value }) : (update.value === '' ? t('nova.overview.up_to_date') : '') },
+      sub: update.value ? t('nova.overview.update_to', { version: update.value }) : (update.value === '' ? t('nova.overview.up_to_date') : updateHint.value),
+      to: updateHint.value ? '/settings#updates' : undefined },
   ]
 })
 
@@ -158,6 +161,8 @@ function showDetails() {
 
     <template v-else>
       <NvStatBand :cells="cells" :label="t('nova.overview.status_label')" class="nv-ov__full" />
+      <UpdateBanner :status="updates.status.value" :streaming="streaming" :starting="updates.starting.value"
+                    :install-error="updates.installError.value" :install="updates.install" class="nv-ov__full" />
       <StreamBar v-if="streaming && session" :session="session" :thumbnail="previewState.url" :more="live.sessions.value.length - 1"
                  class="nv-ov__full" @end="(s) => (endTarget = s)" />
       <NvAttention v-if="issues.length" :issues="issues" class="nv-ov__full" />

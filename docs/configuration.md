@@ -812,6 +812,70 @@ a message naming the file instead of streaming a desktop while the game silently
     </tr>
 </table>
 
+### update_check
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Check the Nova release repository (`F-e-n-y-x/nova-host`) for a newer `nova-vX.Y.Z` release (Nova).
+            The host does the check, not the browser, so a private repository works with
+            [update_github_token](#update_github_token). The result is cached for 6 hours ("Check now" forces
+            one at most once a minute) and the Overview shows a banner only when the release is strictly newer by
+            semver; local builds such as `0.1.0-1d43d4a3-dirty` count as their `X.Y.Z`. Pre-releases count only
+            with [notify_pre_releases](#notify_pre_releases).
+            <br><br>
+            **Install update** downloads the release's `.deb` to `~/.cache/nova-host/updates`, checks it against the
+            SHA-256 published with the release (GitHub's asset `digest`, or a `<deb>.sha256` / `SHA256SUMS` asset;
+            a release without one is not installed), checks that it is the `nova-host` package of that version,
+            and installs it only while no device is streaming, then restarts Nova. The previous download is kept
+            for rollback. Installing runs `sudo -n nova-install-update` (shipped in
+            `/usr/lib/<arch>/nova-host/helpers/`); unless the owner added a sudoers rule for that one helper, the
+            web UI shows the `apt-get` command to run instead.
+            @warning{The sudoers rule lets any program running as your user install a `nova-host` package as root.
+            Leave it out if you prefer to run the command yourself.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            update_check = enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            update_check = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### update_github_token
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            GitHub token used by [update_check](#update_check) (Nova). Create a fine-grained personal access token
+            limited to the `F-e-n-y-x/nova-host` repository with **Contents: Read-only** and nothing else. It is sent
+            only to `api.github.com` (libcurl drops it on the redirect to GitHub's download storage), is masked in
+            the web UI, and lives in the config file with the other keys. Empty works only for a public repository.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            update_github_token =
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            update_github_token = github_pat_11AAAAAAA0123456789_abcdef
+            @endcode</td>
+    </tr>
+</table>
+
 ## Input
 
 ### controller
@@ -2132,6 +2196,112 @@ a message naming the file instead of streaming a desktop while the game silently
     <tr>
         <td>1-1000</td>
         <td>Clamp the client's requested framerate to this value.</td>
+    </tr>
+</table>
+
+### power_mode
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Streaming power mode (Nova). On the first device connecting, apply the options below; after the last
+            device disconnects, put everything back. The previous GPU and CPU values are kept in
+            `power_mode.active` in the state directory so a crash is undone at the next start.
+            Off by default: on a GPU that already boosts under an encode load it may make no measurable difference.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            power_mode = disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            power_mode = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### power_mode_gpu
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            With [power_mode](#power_mode), set NVIDIA PowerMizer to "prefer maximum performance"
+            (`nvidia-settings -c :0 -a [gpu:0]/GpuPowerMizerMode=1`) and restore the previous mode afterwards.
+            Skipped when nvidia-settings is missing or the mode is already 1.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            power_mode_gpu = enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            power_mode_gpu = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### power_mode_cpu
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            With [power_mode](#power_mode), select the `performance` profile through power-profiles-daemon
+            (`powerprofilesctl`) or `latency-performance` through tuned, and restore the previous profile
+            afterwards. Without either daemon the cpufreq governor is only read and logged: changing it needs root,
+            so set it yourself (for example `sudo cpupower frequency-set -g performance`).
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            power_mode_cpu = enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            power_mode_cpu = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### power_mode_inhibit
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            With [power_mode](#power_mode), hold a logind `sleep:idle` inhibitor and an
+            `org.freedesktop.ScreenSaver` inhibit (GNOME, Cinnamon, KDE, Xfce) while streaming. Both are released
+            by the system if Nova stops.
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            power_mode_inhibit = enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            power_mode_inhibit = disabled
+            @endcode</td>
     </tr>
 </table>
 

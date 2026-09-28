@@ -467,6 +467,18 @@
     "steamgriddb_api_key_desc": "Optional. Adds SteamGridDB posters, banners, logos and icons when you import games. Get a free key from your SteamGridDB profile. The stored key is shown as ********.",
     "windows_exe_launcher": "Custom launch command",
     "windows_exe_launcher_desc": "Command that starts Windows games when the launcher is set to Custom. {exe} is replaced by the game's executable. Leave empty to use GE-Proton.",
+    "update_check": "Check for Nova updates",
+    "update_check_desc": "Nova asks GitHub for new releases of F-e-n-y-x/nova-host about every 6 hours while the web UI is open, and the Overview shows a banner only when a newer release exists. Nothing is downloaded until you choose Install update.",
+    "update_github_token": "GitHub token for updates",
+    "update_github_token_desc": "The release repository is private, so the check needs a fine-grained personal access token with read-only access to Contents of F-e-n-y-x/nova-host (nothing else). It is stored in Nova's config, never shown again, and only sent to api.github.com.",
+    "power_mode": "Streaming power mode",
+    "power_mode_desc": "While a device is streaming, raise the host's performance settings below and put them back after the last device disconnects (also after a crash, at the next start). Off by default: measure first, it may not lower latency on your PC.",
+    "power_mode_gpu": "GPU: prefer maximum performance",
+    "power_mode_gpu_desc": "Set NVIDIA PowerMizer to \"prefer maximum performance\" with nvidia-settings on display :0, then restore the previous mode.",
+    "power_mode_cpu": "CPU: performance profile",
+    "power_mode_cpu_desc": "Select the performance profile through power-profiles-daemon or tuned, then restore the previous one. Without either, the CPU governor is only reported (changing it needs root).",
+    "power_mode_inhibit": "Keep the PC awake",
+    "power_mode_inhibit_desc": "Block system sleep and the screensaver (logind and org.freedesktop.ScreenSaver) while streaming. Released automatically if Nova stops.",
     "windows_launcher": "Run Windows games with",
     "windows_launcher_custom": "Custom command",
     "windows_launcher_desc": "How Nova starts Windows games it finds or you add. GE-Proton runs each game in its own prefix with the game's Steam fixes, NVAPI and a shader cache. Games imported from Lutris always use Lutris.",
@@ -1156,6 +1168,14 @@
           "title": "Library & artwork",
           "summary": "Where Nova gets game details, posters and banners, and the keys for optional sources."
         },
+        "updates": {
+          "title": "Updates",
+          "summary": "Whether Nova checks its private GitHub releases, and the read-only token it uses."
+        },
+        "power": {
+          "title": "Streaming power",
+          "summary": "Performance settings Nova raises while a device streams and restores afterwards."
+        },
         "compat": {
           "title": "Windows games",
           "summary": "How Nova runs Windows games on this PC: GE-Proton, Wine or your own command."
@@ -1641,6 +1661,25 @@
       "label": "Needs attention",
       "count": "{n} thing needs attention | {n} things need attention",
       "show_less": "Show less"
+    },
+    "update": {
+      "install": "Install update",
+      "confirm_title": "Install Nova {version}?",
+      "confirm_desc": "Nova downloads the package from the release, checks its SHA-256, installs it and restarts. You're running {current}. Devices can't connect for about a minute; the install is refused while one is streaming.",
+      "downloading": "Downloading Nova {version}… {pct}%",
+      "verifying": "Checking Nova {version}",
+      "installing": "Installing Nova {version}",
+      "restarting": "Nova {version} is installed",
+      "manual_title": "Nova {version} is ready to install",
+      "failed_title": "Couldn't install Nova {version}",
+      "wait_streaming": "Install it when no device is streaming.",
+      "refused_streaming": "A device is streaming. Install the update after it disconnects.",
+      "refused": "The host refused the install. Check for updates again, then retry.",
+      "start_failed": "Couldn't reach the host to start the install.",
+      "copy_command": "Copy command",
+      "copied": "Command copied",
+      "copy_failed": "Couldn't copy the command",
+      "needs_token": "Update check needs a GitHub token"
     },
     "overview": {
       "title": "Overview",

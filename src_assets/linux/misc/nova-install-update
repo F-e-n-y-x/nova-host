@@ -1,0 +1,53 @@
+#!/bin/sh
+# Nova: install a nova-host .deb that Nova's updater downloaded and verified.
+#
+# Usage (as root, normally through a scoped sudoers rule):
+#   nova-install-update <path/to/nova-host_X.Y.Z_amd64.deb> <sha256>
+#
+# Nova runs this with `sudo -n` only after the owner confirmed "Install update" in the web UI and
+# no stream is active. The package is copied into a root-owned directory first and its SHA-256 and
+# package name are checked on that copy, so the file can't be swapped between the check and apt.
+#
+# Enabling it means the owner's account can install nova-host packages without a password. That is
+# the point of one-click updates, but it is a real privilege: a program running as that user could
+# use it to install a crafted "nova-host" package. It is off unless the owner adds the sudoers rule
+# (see docs/configuration.md#update_check).
+set -eu
+
+die() {
+    echo "nova-install-update: $*" >&2
+    exit 2
+}
+
+[ "$(id -u)" -eq 0 ] || die "must run as root"
+[ "$#" -eq 2 ] || die "usage: nova-install-update <package.deb> <sha256>"
+deb=$1
+expected=$2
+
+case "$deb" in
+    /*.deb) ;;
+    *) die "expected an absolute path to a .deb" ;;
+esac
+case "$expected" in
+    *[!0-9a-f]*|"") die "expected a lowercase hex SHA-256" ;;
+esac
+[ "${#expected}" -eq 64 ] || die "expected a 64-character SHA-256"
+[ -f "$deb" ] || die "not a regular file: $deb"
+
+work=$(mktemp -d /var/cache/nova-host-update.XXXXXX)
+trap 'rm -rf "$work"' EXIT INT TERM
+chmod 0755 "$work"
+pkg="$work/nova-host.deb"
+cat -- "$deb" > "$pkg"
+chmod 0644 "$pkg"
+
+actual=$(sha256sum "$pkg" | cut -d' ' -f1)
+[ "$actual" = "$expected" ] || die "SHA-256 mismatch (expected $expected, got $actual)"
+
+name=$(dpkg-deb -f "$pkg" Package)
+[ "$name" = "nova-host" ] || die "not a nova-host package: $name"
+version=$(dpkg-deb -f "$pkg" Version)
+
+echo "Installing nova-host $version"
+DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades --no-install-recommends "$pkg"
+logger -t nova-install-update "installed nova-host $version ($expected)" 2>/dev/null || true

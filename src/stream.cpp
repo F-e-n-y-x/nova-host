@@ -28,6 +28,7 @@ extern "C" {
 #include "config.h"
 #include "display_device.h"
 #include "display_follow.h"
+#include "power_mode.h"
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
@@ -2559,6 +2560,8 @@ namespace stream {
 
         // Nova: put the display back the way it was before this stream switched it.
         display_follow::last_session_ended();
+        // Nova: undo the streaming power mode (PowerMizer, power profile, inhibitors).
+        power_mode::last_session_ended();
 
         platf::streaming_will_stop();
       }
@@ -2607,6 +2610,7 @@ namespace stream {
       // If this is the first session, invoke the platform callbacks
       if (++running_sessions == 1) {
         platf::streaming_will_start();
+        power_mode::first_session_started(session.stats_info.client_name);
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
         system_tray::update_tray_playing(proc::proc.get_last_run_app_name());
 #endif

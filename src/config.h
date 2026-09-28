@@ -433,6 +433,18 @@ namespace config {
     std::string rawg_api_key;  ///< Nova: optional RAWG API key, a fallback source of game details; never returned in plain text by /api/config.
   };
 
+  /**
+   * @brief Nova host extras: streaming power mode and update checks.
+   */
+  struct nova_t {
+    bool power_mode;  ///< Nova: raise GPU/CPU performance and inhibit sleep while a stream is active; restored after the last disconnect.
+    bool power_mode_gpu;  ///< Nova: set NVIDIA PowerMizer to "prefer maximum performance" while streaming.
+    bool power_mode_cpu;  ///< Nova: select the performance profile (power-profiles-daemon or tuned) while streaming.
+    bool power_mode_inhibit;  ///< Nova: inhibit system sleep and the screensaver while streaming.
+    bool update_check;  ///< Nova: check the Nova GitHub releases for updates (host side).
+    std::string update_github_token;  ///< Nova: optional read-only GitHub token for the private release repository; never returned in plain text by /api/config.
+  };
+
   extern video_t video;
   extern audio_t audio;
   extern stream_t stream;
@@ -440,6 +452,7 @@ namespace config {
   extern input_t input;
   extern sunshine_t sunshine;
   extern library_t library;  ///< Game library scanning and artwork settings.
+  extern nova_t nova;  ///< Nova power mode and update settings.
 
 #ifdef SUNSHINE_TESTS
   /**

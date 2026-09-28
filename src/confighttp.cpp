@@ -63,6 +63,7 @@
 #include "login_guard.h"
 #include "network.h"
 #include "nova_client_api.h"
+#include "nova_update_http.h"
 #include "nvhttp.h"
 #include "platform/common.h"
 #include "process.h"
@@ -3735,6 +3736,7 @@ namespace confighttp {
     server.resource["^/api/host-commands$"]["GET"] = getHostCommands;
     server.resource["^/api/host-commands/runs$"]["GET"] = getHostCommandRuns;
     server.resource["^/api/host-commands/run$"]["POST"] = postHostCommandRun;
+    nova_update::register_routes(server);
 
     // static/dynamic resources
     server.resource["^/images/sunshine.ico$"]["GET"] = getFaviconImage;
