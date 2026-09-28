@@ -2959,7 +2959,7 @@ a message naming the file instead of streaming a desktop while the game silently
             The session is kept apart from the desktop on `:0`: it has its own D-Bus session bus
             (`dbus-run-session`), because nemo, nemo-desktop and gnome-terminal are single-instance
             apps that would otherwise open their windows on `:0`; it reads and writes a copy of the
-            user's dconf database (`~/.config/dconf/nova-virtual-display`); and the browser uses its
+            user's dconf database (`~/.config/dconf/nova_virtual_display`); and the browser uses its
             own profile (`~/.config/nova-host/virtual-display-browser`), since Chrome hands a window
             to the instance already running on `:0`. Missing tools are skipped (no panel without
             tint2, no icons without nemo-desktop, a plain background without ImageMagick).

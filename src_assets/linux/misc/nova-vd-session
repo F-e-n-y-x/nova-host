@@ -171,11 +171,11 @@ def draw_wallpaper(d):
     return out
 
 
-DCONF_DB = "nova-virtual-display"
+DCONF_DB = "nova_virtual_display"  # a D-Bus object path element: letters, digits, _ only
 
 
 def isolate_dconf(d):
-    """Give the session its own copy of the user's dconf database (~/.config/dconf/nova-virtual-display).
+    """Give the session its own copy of the user's dconf database (~/.config/dconf/nova_virtual_display).
 
     Readers see the user's settings; writes (a second dconf-service runs on the private bus) land in
     the copy, so they can never race the desktop's dconf-service over ~/.config/dconf/user.
@@ -200,17 +200,11 @@ def write_nemo_config(d, wallpaper, pct):
     cfg = os.path.join(d, "nemo-config")
     os.makedirs(os.path.join(cfg, "gtk-3.0"), exist_ok=True)
     # dconf-service resolves the database under its own config home, so share the real directory
-    # (the session reads and writes only its nova-virtual-display copy there).
+    # (the session reads and writes only its nova_virtual_display copy there).
     link = os.path.join(cfg, "dconf")
     if not os.path.islink(link):
         shutil.rmtree(link, ignore_errors=True)
         os.symlink(os.path.join(user_config_home(), "dconf"), link)
-    profile = os.path.join(d, "dconf-profile")
-    # Larger labels need a wider icon grid, or they overlap. Written to the session's copy only.
-    env = dict(os.environ, XDG_CONFIG_HOME=cfg, DCONF_PROFILE=profile)
-    grid = f"{min(2.0, max(1.0, pct / 100)):.2f}"
-    for key in ("horizontal-grid-adjust", "vertical-grid-adjust"):
-        run_quiet(["gsettings", "set", "org.nemo.desktop", key, grid], env=env)
     for name in ("settings.ini", "bookmarks"):
         src = os.path.join(user_config_home(), "gtk-3.0", name)
         if os.path.isfile(src):
@@ -228,6 +222,12 @@ def write_nemo_config(d, wallpaper, pct):
     with open(os.path.join(cfg, "gtk-3.0", "gtk.css"), "w", encoding="utf-8") as f:
         f.write("\n".join(css) + "\n")
     return cfg
+
+
+def nemo_env(cfg):
+    """nemo-desktop's icon grid doesn't grow with larger text, so its labels would overlap at
+    125-175 %: it keeps normal text and only takes the integer GDK_SCALE (200 %)."""
+    return {"XDG_CONFIG_HOME": cfg, "GDK_DPI_SCALE": "1"}
 
 
 def browser_command():
@@ -513,7 +513,7 @@ class Session:
             self.spawn("tint2", ["tint2", "-c", write_tint2rc(self.d, pct)])
         if shutil.which("nemo-desktop"):
             cfg = write_nemo_config(self.d, wallpaper, pct)
-            self.spawn("nemo-desktop", ["nemo-desktop"], {"XDG_CONFIG_HOME": cfg})
+            self.spawn("nemo-desktop", ["nemo-desktop"], nemo_env(cfg))
 
     def reload(self):
         pct = read_scale(self.d)
@@ -560,7 +560,7 @@ class Session:
                 if "nemo-desktop" in self.children:
                     self.stop_child("nemo-desktop")
                     cfg = write_nemo_config(self.d, wallpaper, read_scale(self.d))
-                    self.spawn("nemo-desktop", ["nemo-desktop"], {"XDG_CONFIG_HOME": cfg})
+                    self.spawn("nemo-desktop", ["nemo-desktop"], nemo_env(cfg))
             if self.wm is None or self.wm.poll() is not None:
                 log("the window manager exited; ending the session")
                 break
@@ -570,7 +570,7 @@ class Session:
                 if proc and proc.poll() is not None and restarts.get(name, 0) < 3:
                     restarts[name] = restarts.get(name, 0) + 1
                     args = proc.args
-                    extra = {"XDG_CONFIG_HOME": os.path.join(self.d, "nemo-config")} if name == "nemo-desktop" else None
+                    extra = nemo_env(os.path.join(self.d, "nemo-config")) if name == "nemo-desktop" else None
                     self.spawn(name, args, extra)
             try:
                 time.sleep(0.5)
