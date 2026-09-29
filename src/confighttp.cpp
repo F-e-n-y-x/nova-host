@@ -65,6 +65,7 @@
 #include "login_guard.h"
 #include "network.h"
 #include "nova_client_api.h"
+#include "nova_perf.h"
 #include "nova_update_http.h"
 #include "nvhttp.h"
 #include "platform/common.h"
@@ -1780,6 +1781,12 @@ namespace confighttp {
         } else {
           *it = std::move(normalized);
         }
+      }
+
+      // Nova: keep the performance profile in one clean "nova-perf" object (clamped, defaults
+      // dropped, legacy "nova-compat" FSR/frame cap/MangoHud keys moved into it).
+      if (input_tree.is_object() && (input_tree.contains("nova-perf") || input_tree.contains("nova-compat"))) {
+        nova_perf::store(input_tree, nova_perf::for_app(input_tree));
       }
 
       if (input_tree["prep-cmd"].empty()) {

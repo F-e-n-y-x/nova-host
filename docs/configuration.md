@@ -396,9 +396,10 @@ supported on the current platform.
             gets its own Wine prefix (`~/Games/nova/<game>` unless set), `GAMEID=umu-<steam app id>` so the game's
             Steam protonfixes apply, NTSYNC, DXVK-NVAPI on NVIDIA GPUs, GameMode when installed and a per-game shader
             cache in `~/.cache/nova/shaders/<game>`. Per-game options are read from the app's `nova-compat` object in
-            apps.json: `prefix`, `fsr` (0 = off, 1-5 = Proton fullscreen FSR, 1 is sharpest), `fps_cap`,
-            `mangohud`, `proton_version` (`latest` or a GE-Proton release name) and `extra_env` (list of
-            `KEY=VALUE`). Falls back to the old detection order when the wrapper is not installed.</td>
+            apps.json: `prefix`, `proton_version` (`latest` or a GE-Proton release name) and `extra_env` (list of
+            `KEY=VALUE`). FSR, the frame rate cap and MangoHud live in the app's performance profile
+            (`nova-perf`, see below); older `nova-compat` `fsr`/`fps_cap`/`mangohud` values still apply until the
+            profile is saved. Falls back to the old detection order when the wrapper is not installed.</td>
     </tr>
     <tr>
         <td>wine</td>
@@ -412,6 +413,30 @@ supported on the current platform.
 
 Apps with a `nova-exe` path in apps.json are checked before launch: if that file is missing, the launch fails with
 a message naming the file instead of streaming a desktop while the game silently exits.
+
+#### Per-game performance profiles
+
+Any app (native or Windows) can carry a `nova-perf` object in apps.json. Nova turns its launch settings into
+environment variables on the game process when it launches it (nothing runs through gamescope), and applies its
+stream settings to every stream of that game. Edit it in the web UI's app editor (Performance) or from Nebula's
+Game settings (`/nova/v1/apps/<id>/profile`, needs the device's "Change game settings" permission). Without a
+profile the global settings apply.
+
+| Key | Values | Effect |
+|---|---|---|
+| `fps_cap` | 0 (off) – 1000 | `DXVK_FRAME_RATE` and `VKD3D_FRAME_RATE`; native games also get MangoHud's `fps_limit` (hidden overlay unless `mangohud` is on) |
+| `fsr` | 0 (off), 1 (sharpest) – 5 | `WINE_FULLSCREEN_FSR=1` and `WINE_FULLSCREEN_FSR_STRENGTH`; works for Proton games running fullscreen below the display resolution |
+| `vkbasalt` | `true`/`false` | `ENABLE_VKBASALT=1` with a per-game config in `~/.cache/nova/vkbasalt/<game>.conf` (contrast-adaptive sharpening) |
+| `vkbasalt_cas` | 0 – 100 (default 50) | vkBasalt `casSharpness` |
+| `mangohud` | `true`/`false` | `MANGOHUD=1` (your `MangoHud.conf` still applies) |
+| `bitrate_kbps` | 0 (off), 500 – 800000 | Stream bitrate cap while this game runs: a device asking for more (at stream start or through `/bitrate`) gets this |
+| `power` | `default`, `performance`, `balanced` | Streaming power mode for this game: `performance` raises GPU/CPU performance even when `power_mode` is off, `balanced` leaves power settings alone even when it is on, `default` follows `power_mode` |
+
+On a virtual display, which sets its own frame cap at the stream's rate, the lower of the two caps is used.
+
+Steam games started through a `steam://` URL are launched by Steam, so these variables never reach them; set launch
+options in Steam instead. Lutris games get them only when Lutris isn't already open. The variables replace any global
+value from apps.json `env` for that game only.
 
 ### proton_auto_update
 

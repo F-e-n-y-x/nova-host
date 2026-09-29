@@ -218,4 +218,25 @@ namespace power_mode {
    * @brief Undo a previous run's changes; called once at startup.
    */
   void recover_at_startup();
+
+  /**
+   * @brief Whether the power mode should be on for a stream.
+   *
+   * @param setting_enabled The host setting (config `power_mode`).
+   * @param app_override The running game's override: true (raise), false (leave alone), nullopt (follow the setting).
+   * @return The decision.
+   */
+  constexpr bool wanted(bool setting_enabled, std::optional<bool> app_override) {
+    return app_override.value_or(setting_enabled);
+  }
+
+  /**
+   * @brief Set the running game's power-mode override (its performance profile's "power").
+   *
+   * Called when a game starts (and with nullopt when it ends). While a stream runs, the power mode
+   * switches right away to match; otherwise the next stream start uses it.
+   *
+   * @param app_override true (raise), false (leave alone) or nullopt (follow the host setting).
+   */
+  void set_app_override(std::optional<bool> app_override);
 }  // namespace power_mode

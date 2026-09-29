@@ -49,6 +49,7 @@
 #include "network_probe.h"
 #include "library/metadata.h"
 #include "nova_client_api.h"
+#include "nova_perf.h"
 #include "nvhttp.h"
 #include "platform/common.h"
 #include "process.h"
@@ -569,8 +570,11 @@ namespace nvhttp {
         // State files written before permissions existed have no node: keep full access.
         if (const auto permissions_node = el.get_child_optional("permissions")) {
           client_permissions::mask_t mask = 0;
+          // A flag added after the file was written: host control stays off, "app_profiles"
+          // follows "launch_apps" and the rest default to on.
+          const bool launch = permissions_node->get<bool>("launch_apps", true);
           for (const auto &[flag_name, flag] : client_permissions::flag_names) {
-            if (permissions_node->get<bool>(std::string {flag_name}, client_permissions::default_when_missing(flag))) {
+            if (permissions_node->get<bool>(std::string {flag_name}, client_permissions::default_when_missing(flag, launch))) {
               mask |= flag;
             }
           }
@@ -2614,6 +2618,91 @@ namespace nvhttp {
   }
 
   /**
+   * @brief Whether the device on this connection may change app performance profiles.
+   *
+   * @param request HTTPS request.
+   * @return `true` with both "launch_apps" and "app_profiles".
+   */
+  bool nova_can_edit_profiles(const req_https_t &request) {
+    const auto mask = permissions_for_request(request);
+    return client_permissions::has(mask, client_permissions::launch_apps | client_permissions::app_profiles);
+  }
+
+  /**
+   * @brief GET /nova/v1/apps/<id>/profile: the app's host performance profile.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void nova_app_profile_get(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    const auto app = nova_find_app(request, request->path_match[1].str());
+    if (!app) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_not_found, {{"error", "app not found"}});
+      return;
+    }
+    nova_json(response, SimpleWeb::StatusCode::success_ok, nova_perf::api_reply(*app, nova_can_edit_profiles(request)));
+  }
+
+  /**
+   * @brief POST (or PUT) /nova/v1/apps/<id>/profile: change the app's host performance profile.
+   *
+   * The body holds any of {fps_cap, fsr, vkbasalt, vkbasalt_cas, mangohud}; keys left out keep
+   * their value. It takes effect the next time the app starts. Needs the "app_profiles" permission.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void nova_app_profile_set(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    const auto id = request->path_match[1].str();
+    if (!nova_find_app(request, id)) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_not_found, {{"error", "app not found"}});
+      return;
+    }
+    if (!nova_can_edit_profiles(request)) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_forbidden, {{"error", "this device may not change game profiles"}});
+      return;
+    }
+    const auto body = request->content.string();
+    try {
+      std::scoped_lock lock(library::apps_file_mutex());
+      auto tree = nlohmann::json::parse(file_handler::read_file(config::stream.file_apps.c_str()));
+      auto &apps = tree["apps"];
+      if (!apps.is_array()) {
+        nova_json(response, SimpleWeb::StatusCode::client_error_not_found, {{"error", "app not found"}});
+        return;
+      }
+      const auto it = std::find_if(apps.begin(), apps.end(), [&](const nlohmann::json &a) {
+        return nova_api::app_id(a) == id;
+      });
+      if (it == apps.end()) {
+        nova_json(response, SimpleWeb::StatusCode::client_error_not_found, {{"error", "app not found"}});
+        return;
+      }
+      const auto before = nova_perf::for_app(*it);
+      const auto after = nova_perf::update_app(*it, body);
+      if (!(before == after)) {
+        file_handler::write_file(config::stream.file_apps.c_str(), tree.dump(4));
+        proc::refresh(config::stream.file_apps);
+        BOOST_LOG(info) << "Nova API: profile of ["sv << it->value("name", std::string {}) << "] set to "sv << nova_perf::to_json(after).dump();
+      }
+      nova_json(response, SimpleWeb::StatusCode::success_ok, nova_perf::api_reply(*it, true));
+    } catch (const std::invalid_argument &e) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"error", e.what()}});
+    } catch (const std::exception &e) {
+      BOOST_LOG(error) << "Nova API: couldn't save a profile: "sv << e.what();
+      nova_json(response, SimpleWeb::StatusCode::server_error_internal_server_error, {{"error", "couldn't save the profile"}});
+    }
+  }
+
+  /**
    * @brief GET /nova/v1/apps/<id>/screenshot/<n>: a store screenshot, re-encoded and cached on the host.
    *
    * @param response HTTPS response.
@@ -2659,7 +2748,11 @@ namespace nvhttp {
     } catch (...) {
       requested = 0;
     }
-    const auto kbps = nova_api::clamp_bitrate(requested, config::video.max_bitrate);
+    auto kbps = nova_api::clamp_bitrate(requested, config::video.max_bitrate);
+    // Nova: the running game's bitrate cap (its performance profile) applies to live changes too.
+    if (kbps) {
+      kbps = nova_perf::cap_bitrate(*kbps, proc::proc.running_bitrate_cap());
+    }
     if (peer.cert.empty() || !kbps) {
       tree.put("root.bitrate", 0);
       tree.put("root.<xmlattr>.status_code", peer.cert.empty() ? 401 : 400);
@@ -3358,6 +3451,9 @@ namespace nvhttp {
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/art/(poster|hero|logo|icon|background)$"]["GET"] = nova_app_art;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/details$"]["GET"] = nova_app_details;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/screenshot/([0-9]{1,2})$"]["GET"] = nova_app_screenshot;
+    https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/profile$"]["GET"] = nova_app_profile_get;
+    https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/profile$"]["POST"] = nova_app_profile_set;
+    https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/profile$"]["PUT"] = nova_app_profile_set;
     https_server.resource["^/api/v1/clipboard/blob$"]["POST"] = clipboard_blob_post;
     https_server.resource["^/api/v1/clipboard/blob/([a-fA-F0-9-]+)$"]["GET"] = clipboard_blob_get;
     https_server.resource["^/clipboard/file/([a-fA-F0-9-]+)$"]["GET"] = clipboard_file_get;

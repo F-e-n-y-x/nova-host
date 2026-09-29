@@ -14,16 +14,23 @@ describe('Windows game compatibility options', () => {
   })
 
   it('round-trips options and drops defaults', () => {
-    const stored = { prefix: '~/Games/nova/gta-v', fsr: 2, fps_cap: 60, mangohud: true, proton_version: 'GE-Proton11-7', extra_env: ['A=1'] }
+    const stored = { prefix: '~/Games/nova/gta-v', proton_version: 'GE-Proton11-7', extra_env: ['A=1'] }
     expect(compatPayload(compatForm(stored))).toEqual(stored)
     expect(compatPayload(compatForm())).toBeNull()
-    expect(compatPayload({ ...compatForm(), proton_version: 'latest', fsr: '9', extra_env: 'bad\n1X=2\nOK=1' })).toEqual({ extra_env: ['OK=1'] })
+    expect(compatPayload({ ...compatForm(), proton_version: 'latest', extra_env: 'bad\n1X=2\nOK=1' })).toEqual({ extra_env: ['OK=1'] })
+  })
+
+  it('moves the legacy FSR, frame cap and MangoHud options into the performance profile', () => {
+    const app = { name: 'GTA V', cmd: '"/w/nova-proton-run" "/g/GTA5.exe"', 'nova-exe': '/g/GTA5.exe', 'nova-compat': { prefix: '/p', fsr: 2, fps_cap: 60, mangohud: true } }
+    const payload = buildPayload(formFromApp(app, 0, 'linux'))
+    expect(payload['nova-compat']).toEqual({ prefix: '/p' })
+    expect(payload['nova-perf']).toEqual({ fsr: 2, fps_cap: 60, mangohud: true })
   })
 
   it('stores nova-compat only when something is set', () => {
     const app = { name: 'GTA V', cmd: '"/w/nova-proton-run" "/g/GTA5.exe"', 'nova-exe': '/g/GTA5.exe', 'nova-compat': { prefix: '/p' } }
     const form = formFromApp(app, 0, 'linux')
-    expect(form['nova-compat'].fsr).toBe('0')
+    expect(form['nova-perf'].fsr).toBe('0')
     expect(buildPayload(form)['nova-compat']).toEqual({ prefix: '/p' })
     form['nova-compat'].prefix = ''
     expect(buildPayload(form)).not.toHaveProperty('nova-compat')

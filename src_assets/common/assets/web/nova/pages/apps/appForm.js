@@ -38,16 +38,14 @@ export function isWindowsGame(app) {
 
 /**
  * Editable copy of an app's `nova-compat` options (see docs/configuration.md, windows_launcher).
+ * FSR, the frame rate limit and MangoHud moved to the performance profile (perfForm()).
  *
  * @param {object} [compat] Stored `nova-compat` object.
- * @returns {{prefix: string, fsr: string, fps_cap: number|null, mangohud: boolean, proton_version: string, extra_env: string}} Form state.
+ * @returns {{prefix: string, proton_version: string, extra_env: string}} Form state.
  */
 export function compatForm(compat = {}) {
   return {
     prefix: compat.prefix ?? '',
-    fsr: String(compat.fsr ?? 0),
-    fps_cap: compat.fps_cap > 0 ? Number(compat.fps_cap) : null,
-    mangohud: Boolean(compat.mangohud),
     proton_version: compat.proton_version ?? '',
     extra_env: (compat.extra_env ?? []).join('\n'),
   }
@@ -63,16 +61,97 @@ export function compatPayload(form) {
   const out = {}
   const prefix = String(form.prefix ?? '').trim()
   if (prefix) out.prefix = prefix
-  const fsr = Number(form.fsr)
-  if (fsr >= 1 && fsr <= 5) out.fsr = fsr
-  const fps = Number(form.fps_cap)
-  if (Number.isInteger(fps) && fps > 0) out.fps_cap = fps
-  if (form.mangohud) out.mangohud = true
   const version = String(form.proton_version ?? '').trim()
   if (version && version !== 'latest') out.proton_version = version
   const env = String(form.extra_env ?? '').split('\n').map((l) => l.trim()).filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
   if (env.length) out.extra_env = env
   return Object.keys(out).length ? out : null
+}
+
+/** Limits of the performance profile, matching src/nova_perf.h. */
+export const PERF_LIMITS = { fpsCap: 1000, fsr: 5, minBitrateMbps: 0.5, maxBitrateMbps: 800, defaultCas: 50 }
+
+/** Power modes a profile can ask for ('default' follows the host's power mode setting). */
+export const PERF_POWER_MODES = ['default', 'performance', 'balanced']
+
+/**
+ * How the host starts an app, like src/nova_perf.cpp launcher_of(). Launch variables (frame rate
+ * limit, FSR, sharpening, overlay) don't reach games Steam starts; the stream settings apply anyway.
+ *
+ * @param {object} app Application or form.
+ * @returns {'command'|'proton'|'steam'|'lutris'|'none'} Launcher kind.
+ */
+export function perfLauncher(app) {
+  const cmd = String(app?.cmd ?? '')
+  const lower = cmd.toLowerCase()
+  if (lower.includes('lutris:') || app?.['nova-source'] === 'lutris') return 'lutris'
+  if (lower.includes('steam://')) return 'steam'
+  if (app?.['nova-exe'] || lower.includes('nova-proton-run')) return 'proton'
+  if (!cmd.trim()) return 'none'
+  return 'command'
+}
+
+/**
+ * Editable copy of an app's performance profile (`nova-perf`, see docs/configuration.md). Apps
+ * saved before it existed keep the FSR, frame rate limit and MangoHud options `nova-compat` held.
+ *
+ * @param {object} [app] Stored application.
+ * @returns {{fps_cap: number|null, fsr: string, vkbasalt: boolean, vkbasalt_cas: number, mangohud: boolean, bitrate_mbps: number|null, power: string}} Form state.
+ */
+export function perfForm(app = {}) {
+  const stored = app?.['nova-perf'] && typeof app['nova-perf'] === 'object'
+    ? app['nova-perf']
+    : (({ fsr, fps_cap, mangohud }) => ({ fsr, fps_cap, mangohud }))(app?.['nova-compat'] ?? {})
+  const kbps = Number(stored.bitrate_kbps)
+  return {
+    fps_cap: Number(stored.fps_cap) > 0 ? Number(stored.fps_cap) : null,
+    fsr: String(Number(stored.fsr) >= 1 && Number(stored.fsr) <= PERF_LIMITS.fsr ? Number(stored.fsr) : 0),
+    vkbasalt: stored.vkbasalt === true,
+    vkbasalt_cas: Number.isFinite(Number(stored.vkbasalt_cas)) && stored.vkbasalt_cas !== undefined ? Number(stored.vkbasalt_cas) : PERF_LIMITS.defaultCas,
+    mangohud: stored.mangohud === true,
+    bitrate_mbps: kbps > 0 ? kbps / 1000 : null,
+    power: PERF_POWER_MODES.includes(stored.power) ? stored.power : 'default',
+  }
+}
+
+/**
+ * Turn the editable profile back into the stored `nova-perf` object (defaults left out).
+ *
+ * @param {object} form Output of perfForm().
+ * @returns {object|null} Stored object, or null when every setting is at its default.
+ */
+export function perfPayload(form) {
+  const out = {}
+  const fps = Number(form?.fps_cap)
+  if (Number.isInteger(fps) && fps > 0) out.fps_cap = Math.min(fps, PERF_LIMITS.fpsCap)
+  const fsr = Number(form?.fsr)
+  if (Number.isInteger(fsr) && fsr >= 1 && fsr <= PERF_LIMITS.fsr) out.fsr = fsr
+  if (form?.vkbasalt) out.vkbasalt = true
+  const cas = Math.round(Number(form?.vkbasalt_cas))
+  if (Number.isFinite(cas) && cas !== PERF_LIMITS.defaultCas) out.vkbasalt_cas = Math.min(100, Math.max(0, cas))
+  if (form?.mangohud) out.mangohud = true
+  const mbps = Number(form?.bitrate_mbps)
+  if (form?.bitrate_mbps !== null && form?.bitrate_mbps !== '' && Number.isFinite(mbps) && mbps > 0) {
+    out.bitrate_kbps = Math.round(Math.min(PERF_LIMITS.maxBitrateMbps, Math.max(PERF_LIMITS.minBitrateMbps, mbps)) * 1000)
+  }
+  if (form?.power === 'performance' || form?.power === 'balanced') out.power = form.power
+  return Object.keys(out).length ? out : null
+}
+
+/**
+ * Short summary of a stored profile for cards ("60 fps · FSR 2 · 40 Mbps").
+ *
+ * @param {object} app Application.
+ * @returns {string[]} Parts; empty when the app has no profile.
+ */
+export function perfSummary(app) {
+  const p = perfPayload(perfForm(app)) || {}
+  const parts = []
+  if (p.fps_cap) parts.push(`${p.fps_cap} fps`)
+  if (p.fsr) parts.push(`FSR ${p.fsr}`)
+  if (p.vkbasalt) parts.push('CAS')
+  if (p.bitrate_kbps) parts.push(`${p.bitrate_kbps / 1000} Mbps`)
+  return parts
 }
 
 /** Seconds the host waits for app processes to exit when no timeout is stored. */
@@ -99,6 +178,7 @@ export function newAppForm() {
     'menu-cmd': [],
     detached: [],
     'image-path': '',
+    'nova-perf': perfForm(),
   }
 }
 
@@ -127,6 +207,7 @@ export function formFromApp(app, index, platform) {
   form['auto-detach'] = form['auto-detach'] ?? true
   form['wait-all'] = form['wait-all'] ?? true
   form['exit-timeout'] = form['exit-timeout'] ?? DEFAULT_EXIT_TIMEOUT
+  form['nova-perf'] = perfForm(app)
   if (isWindowsGame(form)) form['nova-compat'] = compatForm(form['nova-compat'])
   return form
 }
@@ -155,6 +236,15 @@ export function validateForm(form) {
   if (timeout !== null && timeout !== undefined && timeout !== '' &&
       (!Number.isInteger(Number(timeout)) || Number(timeout) < 0)) {
     errors.exitTimeout = 'nova.apps.error_exit_timeout'
+  }
+  const perf = form['nova-perf']
+  const blank = (v) => v === null || v === undefined || v === ''
+  if (perf && !blank(perf.fps_cap) && (!Number.isInteger(Number(perf.fps_cap)) || Number(perf.fps_cap) < 0 || Number(perf.fps_cap) > PERF_LIMITS.fpsCap)) {
+    errors.perfFps = 'nova.apps.perf_error_fps'
+  }
+  if (perf && !blank(perf.bitrate_mbps) && Number(perf.bitrate_mbps) !== 0 &&
+      !(Number(perf.bitrate_mbps) >= PERF_LIMITS.minBitrateMbps && Number(perf.bitrate_mbps) <= PERF_LIMITS.maxBitrateMbps)) {
+    errors.perfBitrate = 'nova.apps.perf_error_bitrate'
   }
   return errors
 }
@@ -188,6 +278,11 @@ export function buildPayload(form) {
     if (compat) payload['nova-compat'] = compat
     else delete payload['nova-compat']
   }
+  if (payload['nova-perf']) {
+    const perf = perfPayload(payload['nova-perf'])
+    if (perf) payload['nova-perf'] = perf
+    else delete payload['nova-perf']
+  }
   return payload
 }
 
@@ -214,6 +309,7 @@ export function appFlags(app) {
   if (app.detached?.length) flags.push('nova.apps.flag_detached')
   if (app['prep-cmd']?.length) flags.push('nova.apps.flag_prep')
   if (app['exclude-global-prep-cmd']) flags.push('nova.apps.flag_no_global_prep')
+  if (perfPayload(perfForm(app))) flags.push('nova.apps.flag_perf')
   return flags
 }
 

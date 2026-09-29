@@ -30,7 +30,9 @@
 #include "input.h"
 #include "logging.h"
 #include "nova_compat.h"
+#include "nova_perf.h"
 #include "platform/common.h"
+#include "power_mode.h"
 #include "process.h"
 #include "system_tray.h"
 #include "utility.h"
@@ -174,6 +176,47 @@ namespace proc {
 #endif
   }
 
+  void proc_t::undo_perf_env() {
+    // Put back whatever the previous game's profile replaced (a user's global MANGOHUD=1 survives).
+    for (const auto &[key, old] : _perf_saved) {
+      if (old) {
+        _env[key] = *old;
+      } else {
+        _env.erase(key);
+      }
+    }
+    _perf_saved.clear();
+  }
+
+  void proc_t::apply_perf_env() {
+    undo_perf_env();
+    if (nova_perf::is_default(_app.perf)) {
+      return;
+    }
+    // A frame cap already in force (the virtual display's, or a global one) is kept when it is lower.
+    int outer_cap = 0;
+    if (const auto it = _env.find("DXVK_FRAME_RATE"); it != _env.end()) {
+      try {
+        outer_cap = std::max(0, std::stoi(it->to_string()));
+      } catch (const std::exception &) {
+        outer_cap = 0;
+      }
+    }
+    std::optional<std::filesystem::path> vkbasalt;
+    if (_app.perf.vkbasalt) {
+      vkbasalt = nova_perf::write_vkbasalt_config(nova_perf::vkbasalt_dir(), _app.name, _app.perf);
+      if (!vkbasalt) {
+        BOOST_LOG(warning) << "Couldn't write the vkBasalt config for ["sv << _app.name << "]; starting without vkBasalt"sv;
+      }
+    }
+    for (const auto &[key, value] : nova_perf::build_env(_app.perf, _app.launcher, vkbasalt, outer_cap)) {
+      const auto it = _env.find(key);
+      _perf_saved.emplace_back(key, it != _env.end() ? std::optional<std::string> {it->to_string()} : std::nullopt);
+      _env[key] = value;
+    }
+    BOOST_LOG(info) << "Performance profile for ["sv << _app.name << "]: "sv << nova_perf::to_json(_app.perf).dump();
+  }
+
   int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t> launch_session) {
     _executing = true;
     auto executing_guard = util::fail_guard([this]() {
@@ -233,9 +276,17 @@ namespace proc {
     for (const auto &key : nova_compat::env_keys()) {
       _env.erase(key);
     }
-    for (const auto &[key, value] : nova_compat::build_env(_app.name, _app.steam_appid, _app.compat, config::library.proton_auto_update)) {
+    // The performance profile owns FSR, the frame cap and MangoHud, so the wrapper doesn't set them twice.
+    auto compat = _app.compat;
+    compat.fsr = 0;
+    compat.fps_cap = 0;
+    compat.mangohud = false;
+    for (const auto &[key, value] : nova_compat::build_env(_app.name, _app.steam_appid, compat, config::library.proton_auto_update)) {
       _env[key] = value;
     }
+    // The previous game's profile variables go before the desktop values are read below; this
+    // game's are applied once the virtual display has set its own frame cap.
+    undo_perf_env();
 
     // Nova virtual display: the app gets DISPLAY/XAUTHORITY of the virtual display, PULSE_SINK and a
     // frame cap. Put the desktop values back first so a desktop launch never inherits them.
@@ -263,6 +314,7 @@ namespace proc {
         adapt_for_virtual_display();
       }
     }
+    apply_perf_env();
 
     // Fail the launch with a clear reason instead of streaming a desktop while the game silently exits.
     if (auto missing = nova_compat::check_launch_target(_app.nova_exe)) {
@@ -271,6 +323,9 @@ namespace proc {
       _app_id = 0;
       return 404;
     }
+
+    // Nova: this game's streaming power mode (raise, leave alone, or follow the host setting).
+    power_mode::set_app_override(nova_perf::power_override(_app.perf));
 
     if (!_app.output.empty() && _app.output != "null"sv) {
 #ifdef _WIN32
@@ -551,6 +606,12 @@ namespace proc {
 
     _app_id = -1;
     _app_started_at = 0;
+    // Nova: no game, no per-game power mode.
+    power_mode::set_app_override(std::nullopt);
+  }
+
+  int proc_t::running_bitrate_cap() const {
+    return _app_id > 0 ? _app.perf.bitrate_kbps : 0;
   }
 
   std::int64_t proc_t::started_at() const {
@@ -564,6 +625,7 @@ namespace proc {
       // keeps the one its undo commands expect.
       _env = std::move(parsed._env);
       _vd_base_env = std::move(parsed._vd_base_env);
+      _perf_saved.clear();
     }
   }
 
@@ -988,6 +1050,32 @@ namespace proc {
         }
         ctx.steam_appid = steam_appid.value_or(0);
         ctx.vd_share_profile = app_node.get<bool>("nova-vd-share-profile"s, false);
+        // The launcher kind and performance profile come from the same rules the Nova API uses.
+        {
+          nlohmann::json view = nlohmann::json::object();
+          view["cmd"] = ctx.cmd;
+          view["nova-exe"] = ctx.nova_exe;
+          view["nova-source"] = app_node.get<std::string>("nova-source"s, "");
+          if (auto perf = app_node.get_child_optional("nova-perf"s)) {
+            view["nova-perf"] = {
+              {"fps_cap", perf->get<int>("fps_cap"s, 0)},
+              {"fsr", perf->get<int>("fsr"s, 0)},
+              {"vkbasalt", perf->get<bool>("vkbasalt"s, false)},
+              {"vkbasalt_cas", perf->get<int>("vkbasalt_cas"s, nova_perf::DEFAULT_CAS)},
+              {"mangohud", perf->get<bool>("mangohud"s, false)},
+              {"bitrate_kbps", perf->get<int>("bitrate_kbps"s, 0)},
+              {"power", perf->get<std::string>("power"s, "default")},
+            };
+          } else if (auto compat = app_node.get_child_optional("nova-compat"s)) {
+            view["nova-compat"] = {
+              {"fsr", compat->get<int>("fsr"s, 0)},
+              {"fps_cap", compat->get<int>("fps_cap"s, 0)},
+              {"mangohud", compat->get<bool>("mangohud"s, false)},
+            };
+          }
+          ctx.perf = nova_perf::for_app(view);
+          ctx.launcher = nova_perf::launcher_of(view);
+        }
         if (auto compat = app_node.get_child_optional("nova-compat"s)) {
           ctx.compat.prefix = compat->get<std::string>("prefix"s, "");
           ctx.compat.fsr = compat->get<int>("fsr"s, 0);

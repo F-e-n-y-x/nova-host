@@ -265,6 +265,8 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/app_processes.h"
         "${CMAKE_SOURCE_DIR}/src/vd_app_launch.cpp"
         "${CMAKE_SOURCE_DIR}/src/vd_app_launch.h"
+        "${CMAKE_SOURCE_DIR}/src/nova_perf.cpp"
+        "${CMAKE_SOURCE_DIR}/src/nova_perf.h"
         "${CMAKE_SOURCE_DIR}/src/display_follow.cpp"
         "${CMAKE_SOURCE_DIR}/src/display_follow.h"
         "${CMAKE_SOURCE_DIR}/src/display_modeset.cpp"

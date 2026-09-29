@@ -21,6 +21,7 @@
 #include "library/title.h"
 #include "logging.h"
 #include "nova_client_api.h"
+#include "nova_perf.h"
 
 using namespace std::literals;
 namespace fs = std::filesystem;
@@ -379,6 +380,12 @@ namespace nova_api {
       };
       if (const auto mode = parse_display_mode(str(app, "nova-display-mode"))) {
         entry["mode_default"] = *mode;
+      }
+      // The host performance profile, or null when the app has none.
+      if (const auto perf = nova_perf::for_app(app); !nova_perf::is_default(perf)) {
+        entry["profile"] = nova_perf::to_json(perf);
+      } else {
+        entry["profile"] = nullptr;
       }
       if (const auto it = stats.find(name); it != stats.end()) {
         if (it->second.last_played > 0) {
@@ -1010,7 +1017,7 @@ namespace nova_api {
   }
 
   nlohmann::json capabilities(const std::string &version, const host_features_t &features, const client_permissions::mask_t permissions) {
-    nlohmann::json list = {"apps", "art", "details", "display_mode", "bitrate", "sessions", "display_scale", "portrait", "rotate", "wol", "rumble", "trigger_rumble", "running"};
+    nlohmann::json list = {"apps", "art", "details", "display_mode", "bitrate", "sessions", "display_scale", "portrait", "rotate", "wol", "rumble", "trigger_rumble", "running", "app_profiles"};
     if (features.pcsleep) {
       list.push_back("pcsleep");
     }
