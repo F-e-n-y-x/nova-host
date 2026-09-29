@@ -7,6 +7,9 @@
 
 // standard includes
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 // local includes
 #include <src/app_lifecycle.h>
@@ -135,11 +138,27 @@ TEST(AppLifecycle, RunningJsonWithoutANovaId) {
 }
 
 TEST(AppLifecycle, IdleQuitHoursDefaultsToNeverAndIsBounded) {
+  // The apps file points at a scratch file so applying the config copies nothing into HOME.
+  const auto saved_stream = config::stream;
+  const auto saved_sunshine = config::sunshine;
+  const auto saved_nova = config::nova;
+  const auto saved_modified = config::modified_config_settings;
+  const auto apps = std::filesystem::temp_directory_path() / "nova-lifecycle-test-apps.json";
+  std::ofstream(apps) << R"({"apps":[]})";
+  const auto apply = [&apps](const std::string &line) {
+    config::apply_config_for_test("file_apps = " + apps.generic_string() + "\n" + line + "\n");
+  };
   EXPECT_EQ(config::nova.app_idle_quit_hours, 0);
-  config::apply_config_for_test("app_idle_quit_hours = 6\n");
+  apply("app_idle_quit_hours = 6");
   EXPECT_EQ(config::nova.app_idle_quit_hours, 6);
-  config::apply_config_for_test("app_idle_quit_hours = -3\n");
+  apply("app_idle_quit_hours = -3");
   EXPECT_EQ(config::nova.app_idle_quit_hours, 6) << "out of range keeps the previous value";
-  config::apply_config_for_test("app_idle_quit_hours = 0\n");
+  apply("app_idle_quit_hours = 0");
   EXPECT_EQ(config::nova.app_idle_quit_hours, 0);
+  config::stream = saved_stream;
+  config::sunshine = saved_sunshine;
+  config::nova = saved_nova;
+  config::modified_config_settings = saved_modified;
+  std::error_code ec;
+  std::filesystem::remove(apps, ec);
 }
