@@ -179,6 +179,28 @@ namespace cuda {
 
     CU_CHECK(cdf->cuInit(0), "Couldn't initialize cuda");
 
+    // FFmpeg NVENC shares the primary context and refuses one that is already active with flags
+    // other than blocking sync. The native encoder and the CUDA runtime would otherwise activate it
+    // with the default flags first, and FFmpeg NVENC could then never start in this process (no
+    // fallback after a native session). Set FFmpeg's flags before anything activates the context.
+    int device_count = 0;
+    if (cdf->cuDeviceGetCount(&device_count) == CUDA_SUCCESS) {
+      for (int i = 0; i < device_count; ++i) {
+        CUdevice device;
+        unsigned int flags = 0;
+        int active = 0;
+        if (cdf->cuDeviceGet(&device, i) != CUDA_SUCCESS ||
+            cdf->cuDevicePrimaryCtxGetState(device, &flags, &active) != CUDA_SUCCESS) {
+          continue;
+        }
+        if (!active && flags != CU_CTX_SCHED_BLOCKING_SYNC) {
+          CU_CHECK_IGNORE(cdf->cuDevicePrimaryCtxSetFlags(device, CU_CTX_SCHED_BLOCKING_SYNC), "Couldn't set the CUDA primary context flags");
+        } else if (active && flags != CU_CTX_SCHED_BLOCKING_SYNC) {
+          BOOST_LOG(warning) << "CUDA primary context of device "sv << i << " is already active with flags "sv << flags << "; FFmpeg NVENC may fail to start"sv;
+        }
+      }
+    }
+
     return 0;
   }
 
