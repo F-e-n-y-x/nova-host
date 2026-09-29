@@ -2748,11 +2748,9 @@ namespace nvhttp {
     } catch (...) {
       requested = 0;
     }
-    auto kbps = nova_api::clamp_bitrate(requested, config::video.max_bitrate);
-    // Nova: the running game's bitrate cap (its performance profile) applies to live changes too.
-    if (kbps) {
-      kbps = nova_perf::cap_bitrate(*kbps, proc::proc.running_bitrate_cap());
-    }
+    // Nova: the running game's bitrate cap (its performance profile) applies to live changes too,
+    // and before abr::note_bitrate, so the ABR ceiling it sets stays under the cap.
+    const auto kbps = nova_api::live_bitrate(requested, config::video.max_bitrate, proc::proc.running_bitrate_cap());
     if (peer.cert.empty() || !kbps) {
       tree.put("root.bitrate", 0);
       tree.put("root.<xmlattr>.status_code", peer.cert.empty() ? 401 : 400);
@@ -2842,7 +2840,10 @@ namespace nvhttp {
       return;
     }
 
-    const auto range = abr::resolve_range(req->mode, *current, req->min_kbps, req->max_kbps, config::video.abr_min_bitrate, config::video.max_bitrate);
+    // The host cap is max_bitrate lowered by the running game's profile cap: ABR decisions go
+    // straight to request_bitrate_by_cert and never pass the /bitrate clamp.
+    const int host_cap = nova_api::stream_bitrate_cap(config::video.max_bitrate, proc::proc.running_bitrate_cap());
+    const auto range = abr::resolve_range(req->mode, *current, req->min_kbps, req->max_kbps, config::video.abr_min_bitrate, host_cap);
     const int initial = std::clamp(*current, range.min_kbps, range.max_kbps);
     // Only the native NVENC encoder retargets in place; FFmpeg NVENC (and other encoders) start a
     // keyframe on each change, so ABR changes less often there.
@@ -2855,7 +2856,7 @@ namespace nvhttp {
     BOOST_LOG(info) << "ABR: on for "sv << peer->name << ", mode "sv << abr::mode_name(req->mode) << ", "sv << initial << " kbps in ["sv
                     << range.min_kbps << ", "sv << range.max_kbps << ']' << (costly ? " (encoder keyframes on change: fewer, larger steps)"sv : ""sv);
 
-    const int host_max = std::max(config::video.max_bitrate, 0);
+    const int host_max = host_cap;
     nlohmann::json body {
       {"success", true},
       {"enabled", true},

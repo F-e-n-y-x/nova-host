@@ -341,6 +341,21 @@ namespace nova_api {
     return static_cast<int>(std::clamp<long long>(kbps, MIN_BITRATE_KBPS, std::max<long long>(ceiling, MIN_BITRATE_KBPS)));
   }
 
+  int stream_bitrate_cap(int host_max_kbps, int app_cap_kbps) {
+    if (host_max_kbps <= 0) {
+      return std::max(app_cap_kbps, 0);
+    }
+    return app_cap_kbps > 0 ? std::min(host_max_kbps, app_cap_kbps) : host_max_kbps;
+  }
+
+  std::optional<int> live_bitrate(long long kbps, int host_max_kbps, int app_cap_kbps) {
+    const auto clamped = clamp_bitrate(kbps, host_max_kbps);
+    if (!clamped) {
+      return std::nullopt;
+    }
+    return nova_perf::cap_bitrate(*clamped, app_cap_kbps);
+  }
+
   nlohmann::json apps_list(
     const nlohmann::json &apps,
     const std::vector<std::string> &gamestream_ids,

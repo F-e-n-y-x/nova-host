@@ -429,7 +429,7 @@ profile the global settings apply.
 | `vkbasalt` | `true`/`false` | `ENABLE_VKBASALT=1` with a per-game config in `~/.cache/nova/vkbasalt/<game>.conf` (contrast-adaptive sharpening) |
 | `vkbasalt_cas` | 0 – 100 (default 50) | vkBasalt `casSharpness` |
 | `mangohud` | `true`/`false` | `MANGOHUD=1` (your `MangoHud.conf` still applies) |
-| `bitrate_kbps` | 0 (off), 500 – 800000 | Stream bitrate cap while this game runs: a device asking for more (at stream start or through `/bitrate`) gets this |
+| `bitrate_kbps` | 0 (off), 500 – 800000 | Stream bitrate cap while this game runs: a device asking for more (at stream start or through `/bitrate`) gets this, and adaptive bitrate never climbs above it |
 | `power` | `default`, `performance`, `balanced` | Streaming power mode for this game: `performance` raises GPU/CPU performance even when `power_mode` is off, `balanced` leaves power settings alone even when it is on, `default` follows `power_mode` |
 
 On a virtual display, which sets its own frame cap at the stream's rate, the lower of the two caps is used.
@@ -2340,7 +2340,8 @@ value from apps.json `env` for that game only.
             Sunshine-Foundation, used by Nebula and Moonlight V+). While a device streams, it reports packet
             loss and latency about once a second and Nova lowers or raises the stream bitrate below the bitrate
             the device streams at (its slider, a per-game bitrate, or a later manual change), which is the cap;
-            never above `max_bitrate`. Decisions are rule-based: heavy loss drops at once,
+            never above `max_bitrate` or the running game's `bitrate_kbps` cap (its performance profile).
+            Decisions are rule-based: heavy loss drops at once,
             sustained loss or a rising round-trip time drops in small steps, and the bitrate climbs back only
             after the link has stayed clean for a while, more slowly near the bitrate that last caused loss.
             The live bitrate change keeps the encoder running (no new keyframe with NVENC).

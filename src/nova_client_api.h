@@ -80,6 +80,30 @@ namespace nova_api {
   std::optional<int> clamp_bitrate(long long kbps, int host_max_kbps);
 
   /**
+   * @brief The highest bitrate a running stream may use: the host `max_bitrate` and the running
+   * game's profile cap (nova-perf `bitrate_kbps`), whichever is lower.
+   *
+   * Adaptive bitrate passes it to `abr::resolve_range` as the host cap, so ABR decisions (which go
+   * straight to `rtsp_stream::request_bitrate_by_cert`) never climb above the game's cap.
+   *
+   * @param host_max_kbps Host `max_bitrate` (0 or less = none).
+   * @param app_cap_kbps Running game's bitrate cap (0 or less = none).
+   * @return The lower of the two set values, or 0 when neither is set.
+   */
+  int stream_bitrate_cap(int host_max_kbps, int app_cap_kbps);
+
+  /**
+   * @brief Bitrate for a live change (`GET /bitrate`): clamped to what Nova allows, then to the
+   * running game's cap.
+   *
+   * @param kbps Requested bitrate.
+   * @param host_max_kbps Host `max_bitrate` (0 = none).
+   * @param app_cap_kbps Running game's bitrate cap (0 = none).
+   * @return The bitrate to apply (and to hand to `abr::note_bitrate`), or nullopt when @p kbps isn't positive.
+   */
+  std::optional<int> live_bitrate(long long kbps, int host_max_kbps, int app_cap_kbps);
+
+  /**
    * @brief Build the `/nova/v1/apps` reply.
    *
    * @param apps The "apps" array of apps.json.

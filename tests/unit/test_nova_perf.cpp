@@ -5,11 +5,14 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 
 #include "src/nova_client_api.h"
 #include "src/nova_perf.h"
+#include "src/power_mode.h"
+#include "src/virtual_display.h"
 
 #include "../tests_common.h"
 
@@ -319,4 +322,67 @@ TEST(NovaPerf, ProfileApiStoresStreamSettings) {
   EXPECT_EQ(app["nova-perf"], (nlohmann::json {{"bitrate_kbps", 35000}, {"power", "balanced"}}));
   update_app(app, R"({"bitrate_kbps": 0, "power": "default"})");
   EXPECT_FALSE(app.contains("nova-perf"));
+}
+
+namespace {
+  /**
+   * @brief The launch environment the way proc_t::execute builds it: the virtual display's
+   * variables first, then the game's profile over them with the display's frame cap as outer cap.
+   *
+   * @param p Profile.
+   * @param launcher Launcher kind.
+   * @param display_fps Frame rate of the virtual display (the client's).
+   * @return Final variables.
+   */
+  std::map<std::string, std::string> launch_env_on_virtual_display(const profile_t &p, launcher_e launcher, int display_fps) {
+    std::map<std::string, std::string> env;
+    virtual_display::target_t target;
+    target.display = ":20";
+    target.xauthority = "/tmp/xauth";
+    target.fps = display_fps;
+    for (const auto &[k, v] : virtual_display::app_env(target, 0, "", "", "/usr/$LIB/mangohud/libMangoHud_opengl.so")) {
+      env[k] = v;
+    }
+    int outer = 0;
+    if (const auto it = env.find("DXVK_FRAME_RATE"); it != env.end()) {
+      outer = std::stoi(it->second);
+    }
+    for (const auto &[k, v] : build_env(p, launcher, std::nullopt, outer)) {
+      env[k] = v;
+    }
+    return env;
+  }
+}  // namespace
+
+TEST(NovaPerf, LaunchFrameCapMergesWithTheVirtualDisplayCap) {
+  // A 120 Hz virtual display and a game capped at 60: the game's lower cap wins everywhere.
+  auto env = launch_env_on_virtual_display({.fps_cap = 60}, launcher_e::proton, 120);
+  EXPECT_EQ(env["DXVK_FRAME_RATE"], "60");
+  EXPECT_EQ(env["VKD3D_FRAME_RATE"], "60");
+  EXPECT_EQ(env["__GL_SYNC_TO_VBLANK"], "0");
+
+  // A game cap above the display rate never lifts the display's cap.
+  env = launch_env_on_virtual_display({.fps_cap = 144}, launcher_e::proton, 120);
+  EXPECT_EQ(env["DXVK_FRAME_RATE"], "120");
+  EXPECT_EQ(env["VKD3D_FRAME_RATE"], "120");
+
+  // Native games: MangoHud's limiter carries the lower cap too.
+  env = launch_env_on_virtual_display({.fps_cap = 45}, launcher_e::command, 60);
+  EXPECT_EQ(env["MANGOHUD_CONFIG"], "no_display,fps_limit=45");
+
+  // No game cap: the display's own cap stays as it is.
+  env = launch_env_on_virtual_display({.bitrate_kbps = 20000, .power = power_e::performance}, launcher_e::proton, 90);
+  EXPECT_EQ(env["DXVK_FRAME_RATE"], "90");
+}
+
+TEST(NovaPerf, PowerOverrideDecidesTheStreamPowerMode) {
+  // What proc_t::execute hands to power_mode::set_app_override, against both host settings.
+  EXPECT_TRUE(power_mode::wanted(false, power_override({.power = power_e::performance})));
+  EXPECT_FALSE(power_mode::wanted(true, power_override({.power = power_e::balanced})));
+  EXPECT_TRUE(power_mode::wanted(true, power_override({})));
+  EXPECT_FALSE(power_mode::wanted(false, power_override({})));
+  // The power choice and the bitrate cap are independent fields of one profile.
+  const profile_t both {.bitrate_kbps = 25000, .power = power_e::performance};
+  EXPECT_TRUE(power_mode::wanted(false, power_override(both)));
+  EXPECT_EQ(cap_bitrate(60000, both.bitrate_kbps), 25000);
 }
