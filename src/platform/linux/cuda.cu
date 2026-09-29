@@ -268,6 +268,16 @@ namespace cuda {
     return 0;
   }
 
+  int download_texture(cudaTextureObject_t texture, int height, int pitch, std::uint8_t *dst) {
+    cudaResourceDesc res {};
+    CU_CHECK(cudaGetTextureObjectResourceDesc(&res, texture), "Couldn't query the texture's array");
+    if (res.resType != cudaResourceTypeArray) {
+      return -1;
+    }
+    CU_CHECK(cudaMemcpy2DFromArray(dst, pitch, res.res.array.array, 0, 0, pitch, height, cudaMemcpyDeviceToHost), "Couldn't copy the cuda array to system memory");
+    return 0;
+  }
+
   std::optional<tex_t> tex_t::make(int height, int pitch) {
     tex_t tex;
 

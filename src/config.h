@@ -322,6 +322,7 @@ namespace config {
     bool high_resolution_scrolling;  ///< Enable high-resolution mouse-wheel events.
     bool native_pen_touch;  ///< Enable native pen and touch injection.
     bool clipboard_sync;  ///< Sync clipboard with clients (Nova; Linux in-session only).
+    bool local_cursor;  ///< Nova: offer the local cursor (control message 21): send cursor shapes and leave the cursor out of the video for clients that draw it.
   };
 
   namespace flag {

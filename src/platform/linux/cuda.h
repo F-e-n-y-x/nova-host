@@ -102,6 +102,16 @@ namespace cuda {
    */
   std::shared_ptr<platf::img_t> make_img_from_ram(int width, int height, const std::uint8_t *bgra);
 
+  /**
+   * @brief Read a captured CUDA image back into system memory (tests and diagnostics).
+   * @param texture Texture of the image (img_texture(img, false)).
+   * @param height Image height in rows.
+   * @param pitch Bytes per row (`width * 4`).
+   * @param dst Destination, at least `height * pitch` bytes.
+   * @return 0 on success, -1 on a CUDA error.
+   */
+  int download_texture(cudaTextureObject_t texture, int height, int pitch, std::uint8_t *dst);
+
   struct viewport_t {
     int width;
     int height;

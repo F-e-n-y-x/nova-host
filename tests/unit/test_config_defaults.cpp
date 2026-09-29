@@ -19,6 +19,7 @@ TEST(ConfigDefaults, InputBoolsMatchDocumentedDefaults) {
   EXPECT_TRUE(config::input.high_resolution_scrolling);
   EXPECT_TRUE(config::input.native_pen_touch);
   EXPECT_TRUE(config::input.clipboard_sync);
+  EXPECT_TRUE(config::input.local_cursor);
 
   // Documented default is disabled; it was silently enabled by initializer drift.
   EXPECT_FALSE(config::input.key_rightalt_to_key_win);

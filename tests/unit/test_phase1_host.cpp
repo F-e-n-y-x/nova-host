@@ -323,13 +323,13 @@ TEST(Phase1Sleep, RefusalsFollowPermissionConfigAndOtherStreams) {
 }
 
 TEST(Phase1Capabilities, FeaturesAndCallerPermissions) {
-  nova_api::host_features_t features {.mic = true, .clipboard = true, .motion = true, .pcsleep = true, .commands = true, .abr = true, .network_probe = true};
+  nova_api::host_features_t features {.mic = true, .clipboard = true, .motion = true, .pcsleep = true, .commands = true, .abr = true, .network_probe = true, .local_cursor = true};
   auto caps = nova_api::capabilities("0.3.0", features, client_permissions::standard);
   EXPECT_TRUE(caps["nova"].get<bool>());
   const auto has = [](const nlohmann::json &list, const char *name) {
     return std::find(list.begin(), list.end(), nlohmann::json(name)) != list.end();
   };
-  for (const auto *name : {"apps", "bitrate", "pcsleep", "commands", "supercmd", "mic", "clipboard", "motion", "rumble", "trigger_rumble", "wol", "running", "abr", "network_probe"}) {
+  for (const auto *name : {"apps", "bitrate", "pcsleep", "commands", "supercmd", "mic", "clipboard", "motion", "rumble", "trigger_rumble", "wol", "running", "abr", "network_probe", "local_cursor"}) {
     EXPECT_TRUE(has(caps["features"], name)) << name;
   }
   EXPECT_TRUE(has(caps["permissions"], "clipboard"));
@@ -342,6 +342,7 @@ TEST(Phase1Capabilities, FeaturesAndCallerPermissions) {
   EXPECT_FALSE(has(caps["features"], "commands"));
   EXPECT_FALSE(has(caps["features"], "abr"));
   EXPECT_FALSE(has(caps["features"], "network_probe"));
+  EXPECT_FALSE(has(caps["features"], "local_cursor"));
   EXPECT_TRUE(has(caps["permissions"], "power"));
   EXPECT_TRUE(has(caps["permissions"], "host_commands"));
 }

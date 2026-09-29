@@ -26,6 +26,7 @@ extern "C" {
 // local includes
 #include "abr.h"
 #include "clipboard.h"
+#include "cursor.h"
 #include "config.h"
 #include "display_device.h"
 #include "display_follow.h"
@@ -61,6 +62,7 @@ constexpr int IDX_SET_RGB_LED = 14;  ///< Control-stream message index for set r
 constexpr int IDX_SET_ADAPTIVE_TRIGGERS = 15;  ///< Control-stream message index for set adaptive triggers.
 constexpr int IDX_SET_PLAYER_LEDS = 16;  ///< Control-stream message index for set player indicator LEDs.
 constexpr int IDX_CLIPBOARD = 20;  ///< Clipboard sync frames (Sunshine-Foundation ecosystem; indexes 17-19 reserved for parity).
+constexpr int IDX_CURSOR = 21;  ///< Local cursor mode (client) and shape/visibility updates (host); see src/cursor.h.
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -84,6 +86,7 @@ static const short packetTypes[] = {
   0x5506,  // Dynamic parameter change (reserved)
   0x5507,  // Resolution change (reserved)
   0x5508,  // Clipboard sync (Sunshine-Foundation ecosystem; see src/clipboard.h)
+  0x5509,  // Local cursor mode/update (Sunshine protocol extension; see src/cursor.h)
 };
 
 namespace asio = boost::asio;
@@ -562,6 +565,11 @@ namespace stream {
       platf::feedback_queue_t feedback_queue;  ///< Queue of controller feedback awaiting control-channel delivery.
       safe::mail_raw_t::event_t<video::hdr_info_t> hdr_queue;  ///< Queue of HDR metadata awaiting control-channel delivery.
     } control;  ///< Runtime state for the encrypted GameStream control channel.
+
+    struct {
+      cursor::sender_t sender;  ///< Mode the client asked for and the shapes it already has.
+      bool acquired = false;  ///< Holds a cursor::acquire() while in local mode.
+    } local_cursor;  ///< Local cursor state (control message 21), owned by the control thread.
 
     std::uint32_t launch_session_id;  ///< RTSP launch-session ID associated with this stream.
     std::string client_cert;  ///< PEM certificate for the paired client owning the stream.
@@ -1219,6 +1227,57 @@ namespace stream {
   }
 
   /**
+   * @brief Send one local-cursor packet (see src/cursor.h) over the control channel.
+   * @param session Active streaming session.
+   * @param wire Packet bytes produced by cursor::encode_shape() or cursor::encode_state().
+   * @return 0 when queued; nonzero when the peer is missing or the send fails.
+   */
+  int send_cursor(session_t *session, const std::vector<std::uint8_t> &wire) {
+    if (!session->control.peer || wire.empty() || wire.size() > 65500 - sizeof(control_header_v2)) {
+      return -1;
+    }
+
+    std::vector<std::uint8_t> plaintext(sizeof(control_header_v2) + wire.size());
+    auto hdr = (control_header_v2 *) plaintext.data();
+    hdr->type = packetTypes[IDX_CURSOR];
+    hdr->payloadLength = wire.size();
+    std::copy(wire.begin(), wire.end(), plaintext.begin() + sizeof(control_header_v2));
+
+    std::vector<std::uint8_t> encrypted;
+    auto payload = encode_control_dyn(session, std::string_view {(char *) plaintext.data(), plaintext.size()}, encrypted);
+    if (payload.empty()) {
+      return -1;
+    }
+    if (session->broadcast_ref->control_server.send(payload, session->control.peer)) {
+      BOOST_LOG(warning) << "cursor: couldn't send a cursor update"sv;
+      return -1;
+    }
+    return 0;
+  }
+
+  /**
+   * @brief Apply a local-cursor mode change for one session.
+   * @param session Session whose client changed mode.
+   * @param mode Mode the client asked for.
+   */
+  void set_cursor_mode(session_t *session, cursor::mode_e mode) {
+    auto &state = session->local_cursor;
+    if (mode == cursor::mode_e::local && !config::input.local_cursor) {
+      BOOST_LOG(info) << "cursor: local cursor is turned off in the settings (local_cursor); the video keeps the cursor"sv;
+      mode = cursor::mode_e::video;
+    }
+    const bool local = mode == cursor::mode_e::local;
+    if (local && !state.acquired) {
+      cursor::acquire();
+      state.acquired = true;
+    } else if (!local && state.acquired) {
+      cursor::release();
+      state.acquired = false;
+    }
+    state.sender.set_mode(mode);
+  }
+
+  /**
    * @brief Send the selected HDR mode to the connected client over the control channel.
    *
    * @param session Active streaming or pairing session for the request.
@@ -1275,6 +1334,16 @@ namespace stream {
         return;
       }
       clipboard::on_inbound((const std::uint8_t *) payload.data(), payload.size());
+    });
+
+    server->map(packetTypes[IDX_CURSOR], [](session_t *session, const std::string_view &payload) {
+      auto mode = cursor::parse_mode_request((const std::uint8_t *) payload.data(), payload.size());
+      if (!mode) {
+        BOOST_LOG(warning) << "cursor: ignoring a malformed cursor mode request ("sv << payload.size() << " bytes)"sv;
+        return;
+      }
+      BOOST_LOG(info) << "cursor: client asked for the "sv << (*mode == cursor::mode_e::local ? "local"sv : "video"sv) << " cursor"sv;
+      set_cursor_mode(session, *mode);
     });
 
     server->map(packetTypes[IDX_START_A], [&](session_t *session, const std::string_view &payload) {
@@ -1440,6 +1509,11 @@ namespace stream {
       // Local clipboard changes and file offers fan out to every session.
       auto clipboard_frames = clipboard::drain_outbound();
 
+      // Latest host cursor for sessions drawing it locally.
+      const bool cursor_local = cursor::local_active();
+      const auto cursor_now = cursor_local ? cursor::current() : cursor::snapshot_t {};
+      const auto cursor_scale = cursor::video_scale();
+
       {
         auto lg = server->_sessions.lock();
 
@@ -1464,6 +1538,11 @@ namespace stream {
 
           if (session->state.load(std::memory_order_acquire) == session::state_e::STOPPING) {
             pos = server->_sessions->erase(pos);
+
+            if (session->local_cursor.acquired) {
+              cursor::release();
+              session->local_cursor.acquired = false;
+            }
 
             if (session->control.peer) {
               {
@@ -1507,6 +1586,12 @@ namespace stream {
               }
               send_clipboard(session, frame);
             }
+
+            if (session->local_cursor.acquired) {
+              for (const auto &packet : session->local_cursor.sender.update(cursor_now, cursor_scale)) {
+                send_cursor(session, packet);
+              }
+            }
           }
 
           ++pos;
@@ -1519,10 +1604,12 @@ namespace stream {
         break;
       }
 
-      server->iterate(150ms);
+      // Shape changes should reach a local-cursor client quickly; the loop otherwise idles.
+      server->iterate(cursor_local ? 20ms : 150ms);
     }
 
     clipboard::stop();
+    cursor::release_all();
 
     // Let all remaining connections know the server is shutting down
     // reason: graceful termination

@@ -242,7 +242,8 @@ if(X11_FOUND)
     list(APPEND PLATFORM_LIBRARIES ${X11_LIBRARIES})
     list(APPEND PLATFORM_TARGET_FILES
             "${CMAKE_SOURCE_DIR}/src/platform/linux/x11grab.h"
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/x11grab.cpp")
+            "${CMAKE_SOURCE_DIR}/src/platform/linux/x11grab.cpp"
+            "${CMAKE_SOURCE_DIR}/src/platform/linux/cursor_x11.cpp")
 endif()
 
 # GIO

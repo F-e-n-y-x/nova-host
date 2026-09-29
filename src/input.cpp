@@ -31,6 +31,7 @@ extern "C" {
 
 // local includes
 #include "config.h"
+#include "cursor.h"
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
@@ -486,7 +487,7 @@ namespace input {
 
     switch (keyCode) {
       case 0x4E /* VKEY_N */:
-        display_cursor = !display_cursor;
+        cursor::toggle_user_composite();
         return 1;
     }
 

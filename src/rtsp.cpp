@@ -26,6 +26,7 @@ extern "C" {
 // local includes
 #include "abr.h"
 #include "clipboard.h"
+#include "cursor.h"
 #include "config.h"
 #include "globals.h"
 #include "input.h"
@@ -1078,6 +1079,12 @@ namespace rtsp_stream {
         BOOST_LOG(info) << "clipboard: advertising sync capability to the client"sv;
       } else {
         BOOST_LOG(info) << "clipboard: not advertising sync (disabled, or no clipboard tool on this host)"sv;
+      }
+      // Local cursor (0x5509): only when the cursor shape can actually be read on the captured
+      // display, so a client never hides its in-video cursor for nothing.
+      if (cursor::available()) {
+        caps |= cursor::kFeatureFlag;
+        BOOST_LOG(info) << "cursor: advertising local cursor to the client"sv;
       }
       ss << "a=x-ss-general.featureFlags:" << caps << std::endl;
     }

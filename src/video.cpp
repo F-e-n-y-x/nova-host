@@ -28,6 +28,7 @@ extern "C" {
 // local includes
 #include "cbs.h"
 #include "config.h"
+#include "cursor.h"
 #include "display_device.h"
 #include "globals.h"
 #include "input.h"
@@ -2765,6 +2766,20 @@ namespace video {
   }
 
   /**
+   * @brief Stream pixels per captured desktop pixel (the encoder keeps the aspect ratio).
+   *
+   * @param display Captured display.
+   * @param config Stream configuration.
+   * @return Scale factor, or 1 when the display size is unknown.
+   */
+  static double stream_scale(const platf::display_t *display, const config_t &config) {
+    if (display->width <= 0 || display->height <= 0 || config.width <= 0 || config.height <= 0) {
+      return 1.0;
+    }
+    return std::fmin((double) config.width / display->width, (double) config.height / display->height);
+  }
+
+  /**
    * @brief Create a port object or message.
    *
    * @param display Display object or identifier associated with the operation.
@@ -2898,6 +2913,7 @@ namespace video {
 
     // absolute mouse coordinates require that the dimensions of the screen are known
     ctx.touch_port_events->raise(make_port(disp, ctx.config));
+    cursor::set_video_scale(stream_scale(disp, ctx.config));
 
     // Update client with our current HDR display state
     hdr_info_t hdr_info = std::make_unique<hdr_info_raw_t>(false);
@@ -3202,6 +3218,7 @@ namespace video {
 
       // absolute mouse coordinates require that the dimensions of the screen are known
       touch_port_event->raise(make_port(display.get(), config));
+      cursor::set_video_scale(stream_scale(display.get(), config));
 
       // Update client with our current HDR display state
       hdr_info_t hdr_info = std::make_unique<hdr_info_raw_t>(false);

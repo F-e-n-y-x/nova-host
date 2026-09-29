@@ -1055,6 +1055,9 @@ namespace nova_api {
     if (features.network_probe) {
       list.push_back("network_probe");
     }
+    if (features.local_cursor) {
+      list.push_back("local_cursor");
+    }
     nlohmann::json granted = nlohmann::json::array();
     for (const auto &[name, flag] : client_permissions::flag_names) {
       if (client_permissions::has(permissions, flag)) {

@@ -323,6 +323,7 @@ export const OPTIONS = {
   high_resolution_scrolling: { type: 'bool', when: mouseOn },
   native_pen_touch: { type: 'bool', when: mouseOn },
   clipboard_sync: { type: 'bool' },
+  local_cursor: { type: 'bool' },
 
   // Network
   upnp: { type: 'bool' },
@@ -482,7 +483,7 @@ export const SECTIONS = [
     options: ['controller', 'gamepad_driver', 'gamepad', 'gamepad_motion_profile', 'motion_as_ds4', 'touchpad_as_ds4', 'ds4_back_as_touchpad_click',
       'virtualhid_randomize_mac', 'back_button_timeout', 'keyboard', 'key_repeat_delay', 'key_repeat_frequency',
       'always_send_scancodes', 'key_rightalt_to_key_win', 'keybindings', 'mouse', 'high_resolution_scrolling',
-      'native_pen_touch', 'clipboard_sync'],
+      'native_pen_touch', 'local_cursor', 'clipboard_sync'],
   },
   {
     id: 'network',

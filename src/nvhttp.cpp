@@ -34,6 +34,7 @@
 #include "app_lifecycle.h"
 #include "client_permissions.h"
 #include "clipboard.h"
+#include "cursor.h"
 #include "config.h"
 #include "display_follow.h"
 #include "display_modeset.h"
@@ -2399,6 +2400,7 @@ namespace nvhttp {
       .commands = any_host_command(),
       .abr = config::video.abr_enabled,
       .network_probe = config::nvhttp.network_probe_enabled,
+      .local_cursor = cursor::available(),
     };
   }
 

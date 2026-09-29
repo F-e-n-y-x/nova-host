@@ -211,6 +211,8 @@
     "channels_desc_2": "Some hardware encoders may have limitations that reduce performance with multiple streams.",
     "clipboard_sync": "Clipboard sync",
     "clipboard_sync_desc": "Share the clipboard with capable Moonlight clients (VoidLink, Foundation-family apps) in both directions: text and images. Currently active on Linux hosts with wl-clipboard (Wayland) or xclip (X11) installed.",
+    "local_cursor": "Local cursor",
+    "local_cursor_desc": "Let devices that ask for it (Nebula, Moonlight V+) draw the mouse pointer themselves, so it moves the moment you move it instead of one stream delay later. Nova then sends the pointer's shape and leaves it out of the video, so you never see two pointers. The shape is read from the display being streamed: the Virtual display's own X server, or the desktop in Mirror mode. Linux X11 only. Turn it off to always draw the pointer into the video.",
     "coder_cabac": "cabac -- context adaptive binary arithmetic coding - higher quality",
     "coder_cavlc": "cavlc -- context adaptive variable-length coding - faster decode",
     "configuration": "Configuration",

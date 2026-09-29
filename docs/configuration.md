@@ -1432,6 +1432,36 @@ value from apps.json `env` for that game only.
     </tr>
 </table>
 
+### local_cursor
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Offer the local cursor (control message 21) to clients that support it (Nebula,
+            Moonlight V+). The client draws the mouse pointer itself, so it responds at once
+            instead of one stream delay later. Nova sends the pointer's shape, hotspot and
+            visibility and leaves the pointer out of the captured video while such a client is
+            connected, so there is never a second pointer. The shape is read, never changed,
+            through XFixes on the X display being streamed: the Virtual display's own X server
+            (`:N`) or the desktop (`$DISPLAY`) in Mirror mode.
+            @note{Linux X11 only. If the pointer can't be read, the video keeps drawing it.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            local_cursor = disabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### keybindings
 
 <table>
