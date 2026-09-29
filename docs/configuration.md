@@ -3488,6 +3488,18 @@ a message naming the file instead of streaming a desktop while the game silently
             8-bit (4:2:0 and 4:4:4); it has no 10-bit input, so HDR streams use FFmpeg NVENC.
             With `auto`, Nova tries the native encoder when it probes encoders and uses FFmpeg NVENC when that
             fails; a stream whose native session fails to start also switches to FFmpeg NVENC.
+
+            Measured on a GTX 1080 Ti (Pascal, driver 580) at 1920x1080 and 2340x1080, 120 fps, 40-50 Mbps,
+            P1 with quarter-resolution two-pass and spatial AQ, with 3 frames lost three times in 3 s:
+            the loss-free quality of both implementations is identical (same NVENC settings), encode time
+            is the same or up to 0.1-0.2 ms lower on the native path, and there is no size spike in either
+            (the one-frame VBV caps an IDR frame at the size of a P-frame). The difference is what the
+            client sees after a loss: the native RFI recovery frame is within 0.1 dB of the loss-free stream,
+            while the FFmpeg IDR frame is 2.1-2.3 dB worse and the picture needs about 50-60 frames to
+            catch up. Pascal reports no "multiple reference frames" capability; Nova still keeps a 5-frame
+            DPB there because RFI needs it and works with it (a stream with the lost frames removed decodes
+            cleanly). A loss report has to arrive within 4 frames of the lost frame (33 ms at 120 fps) for
+            RFI; later reports get an IDR frame.
             The `nvenc_preset`, `nvenc_twopass`, `nvenc_spatial_aq`, `nvenc_vbv_increase` and
             `nvenc_h264_cavlc` options apply to both implementations.
             @note{This option only applies when using NVENC [encoder](#encoder).}
@@ -3497,7 +3509,7 @@ a message naming the file instead of streaming a desktop while the game silently
     <tr>
         <td>Default</td>
         <td colspan="2">@code{}
-            ffmpeg
+            auto
             @endcode</td>
     </tr>
     <tr>
@@ -3832,13 +3844,17 @@ a message naming the file instead of streaming a desktop while the game silently
     <tr>
         <td>Description</td>
         <td colspan="2">
-            Enable intra-refresh for every H.264 and HEVC stream. Instead of periodic or on-demand IDR frames,
-            the encoder refreshes a band of intra blocks in each frame, so the picture heals from loss over a
-            wave of frames without a bitrate spike. Clients can request intra-refresh themselves; this option
-            turns it on for all clients. It needs GPU support (the encoder logs it when it's unavailable) and
-            works next to reference frame invalidation.
+            Enable intra-refresh for every H.264 and HEVC stream. The encoder codes a band of blocks as intra
+            in each frame, one wave every 300 frames, so leftover corruption heals by itself. It is not a loss
+            recovery method on its own: Moonlight clients still report lost frames and get reference frame
+            invalidation or an IDR frame. Clients can request intra-refresh themselves; this option turns it
+            on for all clients. It needs GPU support (the encoder logs it when it's unavailable).
+            On Pascal (measured on a GTX 1080 Ti, driver 580) the encoder rejects reference frame invalidation
+            for H.264 while intra-refresh is on, so H.264 losses then get IDR frames; HEVC keeps RFI. Without
+            loss it costs about 0.03 dB (H.264) to 0.09 dB (HEVC) of PSNR. Leave it off unless a client shows
+            artifacts that last.
             @note{This option only applies when using the native NVENC encoder (Windows, or Linux with
-            [nvenc_backend](#nvenc_backend) native).}
+            [nvenc_backend](#nvenc_backend) `auto` or `native`).}
         </td>
     </tr>
     <tr>

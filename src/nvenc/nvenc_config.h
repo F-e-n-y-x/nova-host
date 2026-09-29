@@ -71,7 +71,7 @@ namespace nvenc {
     bool intra_refresh = false;  ///< Enable intra-refresh for every stream, not only when the client requests it.
 
     // Linux: native CUDA encoder (reference frame invalidation) or FFmpeg NVENC
-    nvenc_backend backend = nvenc_backend::ffmpeg;  ///< NVENC implementation selection.
+    nvenc_backend backend = nvenc_backend::automatic;  ///< NVENC implementation selection.
   };
 
 }  // namespace nvenc

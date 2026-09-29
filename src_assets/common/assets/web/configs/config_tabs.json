@@ -148,7 +148,7 @@
     "id": "nv",
     "nameKey": "config.category_nvidia_nvenc_encoder",
     "options": {
-      "nvenc_backend": "ffmpeg",
+      "nvenc_backend": "auto",
       "nvenc_preset": 1,
       "nvenc_twopass": "quarter_res",
       "nvenc_spatial_aq": "disabled",

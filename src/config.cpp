@@ -114,14 +114,14 @@ namespace config {
      * @brief Parse the `nvenc_backend` configuration value.
      *
      * @param value Backend value supplied by the configuration.
-     * @return Parsed backend, or `ffmpeg` (the default) when the text is unknown.
+     * @return Parsed backend, or `auto` (the default) when the text is unknown.
      */
     nvenc::nvenc_backend backend_from_view(const std::string_view &value) {
       if (auto backend = nvenc::nvenc_backend_from_view(value)) {
         return *backend;
       }
       BOOST_LOG(warning) << "config: unknown nvenc_backend value: " << value;
-      return nvenc::nvenc_backend::ffmpeg;
+      return nvenc::nvenc_backend::automatic;
     }
 
   }  // namespace nv
