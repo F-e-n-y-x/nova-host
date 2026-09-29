@@ -750,6 +750,8 @@ namespace video {
     bool av1_main10 = false;  ///< Whether AV1 10-bit (HDR) passed the probe.
     std::array<bool, 3> yuv444 = {};  ///< YUV 4:4:4 support for H.264, HEVC and AV1.
     platf::mem_type_e mem_type = platf::mem_type_e::unknown;  ///< Memory type the encoder consumes.
+    std::string implementation;  ///< Linux NVENC: `native` (CUDA, RFI) or `ffmpeg`; empty for other encoders.
+    bool ref_frame_invalidation = false;  ///< Lost frames are answered with RFI instead of an IDR frame.
   };
 
   /**

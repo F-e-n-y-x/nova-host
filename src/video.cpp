@@ -2572,7 +2572,14 @@ namespace video {
   }
 
   std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, const std::vector<int> &recover_at, int loss_span, std::vector<std::uint8_t> *bitstream) {
-    const encoder_t &encoder = native ? nvenc_native : nvenc;
+    encoder_t &encoder = native ? nvenc_native : nvenc;
+    // No probe ran offline, so mark the codec as validated for the length of this encode.
+    auto &codec = const_cast<encoder_t::codec_t &>(encoder.codec_from_config(config));
+    const auto saved_capabilities = codec.capabilities;
+    codec[encoder_t::PASSED] = true;
+    auto restore_capabilities = util::fail_guard([&]() {
+      codec.capabilities = saved_capabilities;
+    });
     auto encode_device = make_encode_device(disp, encoder, config);
     if (!encode_device || images.empty()) {
       return std::nullopt;
@@ -3777,6 +3784,12 @@ namespace video {
       summary.av1_main10 = encoder.av1[encoder_t::PASSED] && encoder.av1[encoder_t::DYNAMIC_RANGE];
       summary.yuv444 = last_encoder_probe_supported_yuv444_for_codec;
       summary.mem_type = encoder.platform_formats->dev_type;
+#ifndef __APPLE__
+      if (nvenc_has_native && encoder.name == nvenc.name) {
+        summary.implementation = &encoder == nvenc_native_p ? "native" : "ffmpeg";
+      }
+#endif
+      summary.ref_frame_invalidation = encoder.flags & REF_FRAMES_INVALIDATION;
       std::lock_guard lock {encoder_summary_mutex};
       encoder_summary = std::move(summary);
     }

@@ -682,6 +682,8 @@ namespace host_info {
                     }},
       {"yuv444", {{"h264", encoder.yuv444[0]}, {"hevc", encoder.yuv444[1]}, {"av1", encoder.yuv444[2]}}},
       {"memory", mem_type_name(encoder.mem_type)},
+      {"implementation", encoder.implementation},
+      {"ref_frame_invalidation", encoder.ref_frame_invalidation},
     };
 
     const auto zero_copy = zero_copy_for(capture, encoder.mem_type);

@@ -32,6 +32,10 @@ const items = computed(() => {
     const enc = info.encoders || {}
     rows.push({ term: t('nova.overview.encoder'), value: enc.active ? `${encoderLabel(enc.active)} · ${(enc.codecs || []).join(', ')}` : t('nova.overview.none_detected'), muted: !enc.active })
     rows.push({ term: 'AV1', value: enc.av1 ? t('nova.overview.supported') : t('nova.overview.not_supported'), muted: !enc.av1 })
+    // Linux NVENC names its implementation: native CUDA repairs loss with RFI, FFmpeg sends a keyframe.
+    if (enc.implementation) {
+      rows.push({ term: t('nova.overview.loss_recovery'), value: t(enc.implementation === 'native' ? 'nova.overview.loss_recovery_rfi' : 'nova.overview.loss_recovery_idr'), muted: enc.implementation !== 'native' })
+    }
     if (info.capture?.method) {
       rows.push({ term: t('nova.overview.capture'), value: `${captureLabel(info.capture.method)}${info.capture.zero_copy ? ` · ${t('nova.overview.zero_copy')}` : ''}` })
     }

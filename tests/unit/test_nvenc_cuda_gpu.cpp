@@ -204,7 +204,9 @@ TEST_F(NvencCudaGpuTest, FfmpegTurnsLossIntoIdr) {
   std::cout << std::format("[rfi] HEVC ffmpeg: frame 30 {} bytes (IDR), P {} bytes", result->bytes[29], result->bytes[40]) << std::endl;
 }
 
-TEST_F(NvencCudaGpuTest, NativeIntraRefreshStreamHasOneIdr) {
+TEST_F(NvencCudaGpuTest, NativeIntraRefreshRecoversFromLoss) {
+  // With intra-refresh on, Pascal rejects reference frame invalidation (NV_ENC_ERR_UNSUPPORTED_PARAM),
+  // so a loss must still end in exactly one recovery frame: RFI where the GPU allows it, else an IDR.
   config::video.nv.intra_refresh = true;
   offline_cuda_display display {1920, 1080};
   auto frames = synthetic_frames(1920, 1080, 8);
@@ -212,8 +214,11 @@ TEST_F(NvencCudaGpuTest, NativeIntraRefreshStreamHasOneIdr) {
   for (int format : {0, 1}) {
     auto result = video::encode_offline_nvenc(display, true, stream_config(1920, 1080, format), frames, 120, 60);
     ASSERT_TRUE(result) << format;
-    EXPECT_EQ(std::count(result->idr.begin(), result->idr.end(), true), 1);
-    EXPECT_TRUE(result->after_rfi[59]);
+    const auto idr_frames = std::count(result->idr.begin(), result->idr.end(), true);
+    EXPECT_TRUE(result->idr[0]);
+    EXPECT_TRUE(result->after_rfi[59] || result->idr[59]) << format;
+    EXPECT_EQ(idr_frames, result->idr[59] ? 2 : 1) << format;
+    std::cout << std::format("[ir] {} intra-refresh + loss: recovery by {}", format ? "HEVC" : "H.264", result->idr[59] ? "IDR (RFI rejected)" : "RFI") << std::endl;
   }
 }
 
@@ -458,6 +463,7 @@ TEST(NvencCudaGpuBench, LossRecoveryNativeVsFfmpeg) {
         bool native;
         bool losses;  // request recovery before each recover_at frame
         bool drop;  // remove the lost frames from the received stream
+        bool intra_refresh = false;  // nvenc_intra_refresh on
       };
       const scenario_t scenarios[] = {
         {"native_clean", true, false, false},
@@ -465,8 +471,11 @@ TEST(NvencCudaGpuBench, LossRecoveryNativeVsFfmpeg) {
         {"native_rfi", true, true, true},
         {"ffmpeg_idr", false, true, true},
         {"native_norecovery", true, false, true},
+        {"nativeir_clean", true, false, false, true},
+        {"nativeir_loss", true, true, true, true},
       };
       for (const auto &sc : scenarios) {
+        config::video.nv.intra_refresh = sc.intra_refresh;
         auto config = stream_config(mode.width, mode.height, format, mode.bitrate_kbps);
         config.framerate = mode.fps;
         std::vector<std::uint8_t> bitstream;
@@ -514,7 +523,7 @@ TEST(NvencCudaGpuBench, LossRecoveryNativeVsFfmpeg) {
         summary.flush();
         std::cout << std::format("[loss] {} idr={} median_p={:.0f} B recovery={:.0f} B ({:.2f}x) encode {:.3f} ms", base, idr_count, median_p, rec_mean, rec_mean / median_p, mean_ms) << std::endl;
 
-        if (sc.native && sc.losses) {
+        if (sc.native && sc.losses && !sc.intra_refresh) {
           EXPECT_EQ(idr_count, 1) << base << ": RFI must not fall back to an IDR";
           for (int r : recover_at) {
             EXPECT_TRUE(result->after_rfi[r - 1]) << base << " frame " << r;
