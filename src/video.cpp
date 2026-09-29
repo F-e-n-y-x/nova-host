@@ -624,6 +624,16 @@ namespace video {
     }
 
     /**
+     * @brief Retarget the NVENC rate control in place with `NvEncReconfigureEncoder()`.
+     *
+     * @param bitrate_kbps New bitrate in kilobits per second.
+     * @return True when the encoder accepted the new bitrate.
+     */
+    bool set_bitrate(int bitrate_kbps) override {
+      return device && device->nvenc && device->nvenc->set_bitrate(bitrate_kbps);
+    }
+
+    /**
      * @brief Submit the next frame to NVENC and return the encoded payload.
      *
      * @param frame_index Monotonic frame index assigned by the video pipeline.
@@ -895,6 +905,67 @@ namespace video {
     },
     PARALLEL_ENCODING | YUV444_SUPPORT
   };
+#endif
+
+#if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
+  /**
+   * @brief Native NVENC on CUDA input (Linux).
+   *
+   * Shares the `nvenc` name with the FFmpeg encoder above, so `encoder = nvenc` covers both:
+   * the probe tries this one first and keeps FFmpeg as the fallback (see `nvenc_backend`).
+   * Only CUDA capture backends that hand out textures (NvFBC) can feed it; the converters
+   * write 8-bit NV12 or YUV 4:4:4, so there is no 10-bit format.
+   */
+  encoder_t nvenc_native {
+    "nvenc"sv,
+    std::make_unique<encoder_platform_formats_nvenc>(
+      platf::mem_type_e::cuda,
+      platf::pix_fmt_e::nv12,
+      platf::pix_fmt_e::unknown,
+      platf::pix_fmt_e::yuv444p,
+      platf::pix_fmt_e::unknown
+    ),
+    {
+      {},  // Common options
+      {},  // SDR-specific options
+      {},  // HDR-specific options
+      {},  // YUV444 SDR-specific options
+      {},  // YUV444 HDR-specific options
+      {},  // Fallback options
+      "av1_nvenc"s,
+      {},  // capabilities
+    },
+    {
+      {},  // Common options
+      {},  // SDR-specific options
+      {},  // HDR-specific options
+      {},  // YUV444 SDR-specific options
+      {},  // YUV444 HDR-specific options
+      {},  // Fallback options
+      "hevc_nvenc"s,
+      {},  // capabilities
+    },
+    {
+      {},  // Common options
+      {},  // SDR-specific options
+      {},  // HDR-specific options
+      {},  // YUV444 SDR-specific options
+      {},  // YUV444 HDR-specific options
+      {},  // Fallback options
+      "h264_nvenc"s,
+      {},  // capabilities
+    },
+    PARALLEL_ENCODING | REF_FRAMES_INVALIDATION | YUV444_SUPPORT
+  };
+
+  /**
+   * @brief Native NVENC encoder, or null when this build doesn't have one.
+   */
+  constexpr encoder_t *nvenc_native_p = &nvenc_native;
+  constexpr bool nvenc_has_native = true;  ///< This build has the native Linux NVENC encoder.
+#elif !defined(__APPLE__)
+  constexpr encoder_t *nvenc_native_p = nullptr;  ///< This build has no second NVENC implementation.
+  constexpr bool nvenc_has_native = false;  ///< This build has no native Linux NVENC encoder.
 #endif
 
 #ifdef _WIN32
@@ -1488,6 +1559,9 @@ namespace video {
 #endif
 
   static const std::vector encoders {
+#if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
+    &nvenc_native,
+#endif
 #ifndef __APPLE__
     &nvenc,
 #endif
@@ -2449,6 +2523,88 @@ namespace video {
   }
 
   /**
+   * @brief Create the platform encode device for an encoder.
+   *
+   * @param disp Display being encoded.
+   * @param encoder Encoder configuration or encoder instance.
+   * @param config Configuration values to apply.
+   * @return Encode device, or nullptr on failure.
+   */
+  std::unique_ptr<platf::encode_device_t> make_encode_device(platf::display_t &disp, const encoder_t &encoder, const config_t &config);
+
+  /**
+   * @brief Start a stream on FFmpeg NVENC after its native NVENC session failed to start.
+   *
+   * The probe picked native NVENC, but a session can still fail later (session limit,
+   * resolution, driver state). With `nvenc_backend = auto` the stream then uses FFmpeg NVENC,
+   * which loses reference frame invalidation but keeps the stream running.
+   *
+   * @param disp Display being encoded.
+   * @param encoder Encoder whose session failed.
+   * @param config Stream configuration.
+   * @param width Encoded frame width.
+   * @param height Encoded frame height.
+   * @return FFmpeg NVENC session, or nullptr when no fallback applies or it failed too.
+   */
+  std::unique_ptr<encode_session_t> make_nvenc_fallback_session(platf::display_t *disp, const encoder_t &encoder, const config_t &config, int width, int height) {
+#if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
+    if (&encoder != &nvenc_native || !nvenc::session_fallback_allowed(config::video.nv.backend)) {
+      return nullptr;
+    }
+    BOOST_LOG(warning) << "NvEnc: native session failed to start; this stream falls back to FFmpeg NVENC (no reference frame invalidation)"sv;
+    auto encode_device = make_encode_device(*disp, nvenc, config);
+    if (!encode_device) {
+      return nullptr;
+    }
+    return make_encode_session(disp, nvenc, config, width, height, std::move(encode_device));
+#else
+    return nullptr;
+#endif
+  }
+
+#if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
+  std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, int invalidate_at, std::vector<std::uint8_t> *bitstream) {
+    const encoder_t &encoder = native ? nvenc_native : nvenc;
+    auto encode_device = make_encode_device(disp, encoder, config);
+    if (!encode_device || images.empty()) {
+      return std::nullopt;
+    }
+    auto session = make_encode_session(&disp, encoder, config, disp.width, disp.height, std::move(encode_device));
+    if (!session) {
+      return std::nullopt;
+    }
+
+    offline_encode_result_t result;
+    auto packets = mail::man->queue<packet_t>(mail::video_packets);
+    session->request_idr_frame();
+    for (int frame_nr = 1; frame_nr <= frames; ++frame_nr) {
+      if (frame_nr == invalidate_at && frame_nr >= 3) {
+        session->invalidate_ref_frames(frame_nr - 2, frame_nr - 1);
+      }
+      const auto start = std::chrono::steady_clock::now();
+      if (session->convert(*images[(frame_nr - 1) % images.size()])) {
+        return std::nullopt;
+      }
+      while (!packets->peek()) {
+        if (encode(frame_nr, *session, packets, nullptr, {})) {
+          return std::nullopt;
+        }
+      }
+      auto packet = packets->pop();
+      result.frame_ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+      result.bytes.push_back(packet->data_size());
+      result.idr.push_back(packet->is_idr());
+      result.after_rfi.push_back(packet->after_ref_frame_invalidation);
+      if (bitstream) {
+        bitstream->insert(bitstream->end(), packet->data(), packet->data() + packet->data_size());
+      }
+      session->request_normal_frame();
+    }
+    return result;
+  }
+#endif
+
+  /**
    * @brief Run one encode loop for a display capture stream.
    *
    * @param frame_nr Frame counter updated as frames are encoded.
@@ -2473,6 +2629,9 @@ namespace video {
     void *channel_data
   ) {
     auto session = make_encode_session(disp.get(), encoder, config, disp->width, disp->height, std::move(encode_device));
+    if (!session) {
+      session = make_nvenc_fallback_session(disp.get(), encoder, config, disp->width, disp->height);
+    }
     if (!session) {
       return;
     }
@@ -2729,6 +2888,9 @@ namespace video {
     ctx.hdr_events->raise(std::move(hdr_info));
 
     auto session = make_encode_session(disp, encoder, ctx.config, img.width, img.height, std::move(encode_device));
+    if (!session) {
+      session = make_nvenc_fallback_session(disp, encoder, ctx.config, img.width, img.height);
+    }
     if (!session) {
       return std::nullopt;
     }
@@ -3001,8 +3163,16 @@ namespace video {
       }
 
       auto &encoder = *chosen_encoder;
+      const encoder_t *session_encoder = ref->encoder_p;
 
       auto encode_device = make_encode_device(*display, encoder, config);
+#if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
+      if (!encode_device && &encoder == &nvenc_native && nvenc::session_fallback_allowed(config::video.nv.backend)) {
+        BOOST_LOG(warning) << "NvEnc: native encode device unavailable; this stream falls back to FFmpeg NVENC"sv;
+        session_encoder = &nvenc;
+        encode_device = make_encode_device(*display, nvenc, config);
+      }
+#endif
       if (!encode_device) {
         return;
       }
@@ -3029,7 +3199,7 @@ namespace video {
         display,
         std::move(encode_device),
         ref->reinit_event,
-        *ref->encoder_p,
+        *session_encoder,
         channel_data
       );
     }
@@ -3359,6 +3529,10 @@ namespace video {
     }
 
     auto encoder_list = encoders;
+#ifndef __APPLE__
+    // Linux has a native and an FFmpeg NVENC encoder; keep the ones nvenc_backend allows.
+    nvenc::filter_nvenc_encoders(encoder_list, config::video.nv.backend, nvenc_native_p, &nvenc);
+#endif
 
     // If we already have a good encoder, check to see if another probe is required
     if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platf::needs_encoder_reenumeration()) {
@@ -3417,10 +3591,11 @@ namespace video {
         auto encoder = *pos;
 
         if (encoder->name == config::video.encoder) {
-          // Remove the encoder from the list entirely if it fails validation
+          // Remove the encoder from the list entirely if it fails validation. Keep looking:
+          // on Linux `nvenc` names both the native and the FFmpeg encoder.
           if (!validate_encoder(*encoder, previous_encoder && previous_encoder != encoder)) {
             pos = encoder_list.erase(pos);
-            break;
+            continue;
           }
 
           // We will return an encoder here even if it fails one of the codec requirements specified by the user
@@ -3535,6 +3710,13 @@ namespace video {
     BOOST_LOG(info);
 
     auto &encoder = *chosen_encoder;
+
+#ifndef __APPLE__
+    if (nvenc_has_native && encoder.name == nvenc.name) {
+      BOOST_LOG(info) << "NVENC backend: "sv << (&encoder == nvenc_native_p ? "native CUDA (reference frame invalidation)"sv : "FFmpeg"sv)
+                      << " [nvenc_backend = "sv << nvenc::to_string(config::video.nv.backend) << ']';
+    }
+#endif
 
     last_encoder_probe_supported_ref_frames_invalidation = (encoder.flags & REF_FRAMES_INVALIDATION);
     last_encoder_probe_supported_yuv444_for_codec[0] = encoder.h264[encoder_t::PASSED] &&

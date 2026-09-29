@@ -18,7 +18,8 @@ if(NOT APPLE)
     unset(SUNSHINE_PREPARED_NV_CODEC_HEADERS)
 endif()
 
-if(WIN32)
+# Windows and the Linux native CUDA encoder compile one implementation per SDK and pick one at runtime.
+if(WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND SUNSHINE_ENABLE_CUDA))
     CPMGetPackage(nv_codec_headers_13)
     CPMGetPackage(nv_codec_headers_11)
     CPMGetPackage(nv_codec_headers_12)

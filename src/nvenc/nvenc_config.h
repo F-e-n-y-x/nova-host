@@ -4,6 +4,9 @@
  */
 #pragma once
 
+// local includes
+#include "nvenc_backend.h"
+
 namespace nvenc {
 
   /**
@@ -63,6 +66,12 @@ namespace nvenc {
 
     // Enable split-frame encoding if the gpu has multiple NVENC hardware clusters
     nvenc_split_frame_encoding split_frame_encoding = nvenc_split_frame_encoding::driver_decides;  ///< Split frame encoding.
+
+    // Spread intra blocks over a wave of frames even when the client didn't ask for it, for H.264 and HEVC
+    bool intra_refresh = false;  ///< Enable intra-refresh for every stream, not only when the client requests it.
+
+    // Linux: native CUDA encoder (reference frame invalidation) or FFmpeg NVENC
+    nvenc_backend backend = nvenc_backend::ffmpeg;  ///< NVENC implementation selection.
   };
 
 }  // namespace nvenc

@@ -75,6 +75,20 @@ namespace NVENC_NAMESPACE {
      */
     bool invalidate_ref_frames(uint64_t first_frame, uint64_t last_frame) override;
 
+    /**
+     * @brief Change the CBR target of the running encoder with `NvEncReconfigureEncoder()`.
+     *        The VBV buffer keeps its single-frame size (plus `vbv_percentage_increase`) at the new rate.
+     * @param bitrate_kbps New bitrate in kilobits per second.
+     * @return `true` on success, `false` when there is no encoder or the driver rejected the change.
+     */
+    bool set_bitrate(int bitrate_kbps) override;
+
+    /**
+     * @brief Report RFI and intra-refresh support and state for the created encoder.
+     * @return Capabilities of the current encoder, all false before creation.
+     */
+    ::nvenc::nvenc_capabilities capabilities() const override;
+
   protected:
     /**
      * @brief Required. Used for loading NvEnc library and setting `nvenc` variable with `NvEncodeAPICreateInstance()`.
@@ -128,7 +142,10 @@ namespace NVENC_NAMESPACE {
       NV_ENC_BUFFER_FORMAT buffer_format = NV_ENC_BUFFER_FORMAT_UNDEFINED;
       uint32_t ref_frames_in_dpb = 0;
       bool rfi = false;
-    } encoder_params;  ///< Current encoder dimensions, pixel format, and reference-frame settings.
+      bool rfi_supported = false;
+      bool intra_refresh_supported = false;
+      bool intra_refresh = false;
+    } encoder_params;  ///< Current encoder dimensions, pixel format, reference-frame and intra-refresh settings.
 
     std::string last_nvenc_error_string;  ///< Last NVENC error string.
 
@@ -211,6 +228,7 @@ namespace NVENC_NAMESPACE {
      *
      * @tparam FormatConfig Codec-specific NVENC configuration type.
      * @param format_config Codec-specific encoder configuration to update.
+     * @param config NVENC encoder configuration.
      * @param client_config Stream configuration requested by the client.
      * @param colorspace NVENC colorspace metadata.
      * @param buffer_format Selected NVENC input format.
@@ -219,6 +237,7 @@ namespace NVENC_NAMESPACE {
     template<typename FormatConfig>
     void configure_h264_hevc_metadata(
       FormatConfig &format_config,
+      const ::nvenc::nvenc_config &config,
       const video::config_t &client_config,
       const nvenc_colorspace_t &colorspace,
       NV_ENC_BUFFER_FORMAT buffer_format,
@@ -329,6 +348,14 @@ namespace NVENC_NAMESPACE {
     ) const;
 
     NV_ENC_OUTPUT_PTR output_bitstream = nullptr;
+
+    struct {
+      NV_ENC_INITIALIZE_PARAMS init_params = {};
+      NV_ENC_CONFIG enc_config = {};
+      int framerate = 0;
+      int vbv_percentage_increase = 0;
+      bool custom_vbv = false;
+    } reconfigure_state;  ///< Parameters the encoder was initialized with, reused by `set_bitrate()`.
 
     struct {
       uint64_t last_encoded_frame_index = 0;

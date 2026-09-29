@@ -17,7 +17,9 @@
 
 namespace platf {
   struct avcodec_encode_device_t;
+  struct nvenc_encode_device_t;
   struct img_t;
+  enum class pix_fmt_e;
 }  // namespace platf
 
 namespace cuda {
@@ -37,6 +39,15 @@ namespace cuda {
    * @return FFmpeg encoding device context.
    */
   std::unique_ptr<platf::avcodec_encode_device_t> make_avcodec_gl_encode_device(int width, int height, int offset_x, int offset_y);
+
+  /**
+   * @brief Create a native NVENC encoding device for captured CUDA frames (NvFBC).
+   * @param width Width of captured frames.
+   * @param height Height of captured frames.
+   * @param pix_fmt Encoder input format; only NV12 and 8-bit YUV 4:4:4 are supported.
+   * @return Native NVENC encoding device, or nullptr when native NVENC isn't available.
+   */
+  std::unique_ptr<platf::nvenc_encode_device_t> make_nvenc_encode_device(int width, int height, platf::pix_fmt_e pix_fmt);
 
   int init();
 }  // namespace cuda
@@ -67,6 +78,29 @@ namespace cuda {
   using stream_t = std::unique_ptr<CUstream_st, freeCudaStream_t>;
 
   stream_t make_stream(int flags = 0);
+
+  /**
+   * @brief Get the CUDA runtime's current device ordinal.
+   * @return Device ordinal, or -1 on error.
+   */
+  int current_device();
+
+  /**
+   * @brief Get the texture of a captured CUDA image for the colour converters.
+   * @param img Image allocated by a CUDA capture backend.
+   * @param linear Use linear filtering (scaling) instead of point sampling.
+   * @return CUDA texture object of the image.
+   */
+  cudaTextureObject_t img_texture(platf::img_t &img, bool linear);
+
+  /**
+   * @brief Create a CUDA capture image from a BGRA frame in system memory (tests and benchmarks).
+   * @param width Width in pixels.
+   * @param height Height in pixels.
+   * @param bgra Pixels, `width * 4` bytes per row.
+   * @return Image the CUDA encode devices can convert, or nullptr on error.
+   */
+  std::shared_ptr<platf::img_t> make_img_from_ram(int width, int height, const std::uint8_t *bgra);
 
   struct viewport_t {
     int width;

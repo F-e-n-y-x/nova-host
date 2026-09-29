@@ -3473,6 +3473,54 @@ a message naming the file instead of streaming a desktop while the game silently
 
 ## NVIDIA NVENC Encoder
 
+### nvenc_backend
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Choose the NVENC implementation on Linux. The native encoder takes the CUDA frames from NvFBC
+            straight to NVENC and answers a client's loss report with reference frame invalidation (RFI):
+            the encoder stops referencing the lost frames and keeps sending small P-frames instead of a full
+            IDR frame, so there is no bitrate spike after loss. FFmpeg NVENC (`h264_nvenc`/`hevc_nvenc`)
+            can't invalidate reference frames and sends an IDR frame for every loss.
+            The native encoder needs NvFBC capture and NVIDIA driver 470 or newer. It encodes H.264 and HEVC
+            8-bit (4:2:0 and 4:4:4); it has no 10-bit input, so HDR streams use FFmpeg NVENC.
+            With `auto`, Nova tries the native encoder when it probes encoders and uses FFmpeg NVENC when that
+            fails; a stream whose native session fails to start also switches to FFmpeg NVENC.
+            The `nvenc_preset`, `nvenc_twopass`, `nvenc_spatial_aq`, `nvenc_vbv_increase` and
+            `nvenc_h264_cavlc` options apply to both implementations.
+            @note{This option only applies when using NVENC [encoder](#encoder).}
+            @note{Applies to Linux only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            ffmpeg
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            nvenc_backend = native
+            @endcode</td>
+    </tr>
+    <tr>
+        <td rowspan="3">Choices</td>
+        <td>auto</td>
+        <td>Native encoder, FFmpeg NVENC when native doesn't work.</td>
+    </tr>
+    <tr>
+        <td>native</td>
+        <td>Native encoder only. When it doesn't work, Nova probes the other encoders but never FFmpeg NVENC.</td>
+    </tr>
+    <tr>
+        <td>ffmpeg</td>
+        <td>FFmpeg NVENC only, without reference frame invalidation.</td>
+    </tr>
+</table>
+
 ### nvenc_preset
 
 <table>
@@ -3774,6 +3822,35 @@ a message naming the file instead of streaming a desktop while the game silently
         <td>Example</td>
         <td colspan="2">@code{}
             nvenc_h264_cavlc = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### nvenc_intra_refresh
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Enable intra-refresh for every H.264 and HEVC stream. Instead of periodic or on-demand IDR frames,
+            the encoder refreshes a band of intra blocks in each frame, so the picture heals from loss over a
+            wave of frames without a bitrate spike. Clients can request intra-refresh themselves; this option
+            turns it on for all clients. It needs GPU support (the encoder logs it when it's unavailable) and
+            works next to reference frame invalidation.
+            @note{This option only applies when using the native NVENC encoder (Windows, or Linux with
+            [nvenc_backend](#nvenc_backend) native).}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            nvenc_intra_refresh = enabled
             @endcode</td>
     </tr>
 </table>

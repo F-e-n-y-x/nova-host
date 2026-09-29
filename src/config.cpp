@@ -110,6 +110,20 @@ namespace config {
       return driver_decides;
     }
 
+    /**
+     * @brief Parse the `nvenc_backend` configuration value.
+     *
+     * @param value Backend value supplied by the configuration.
+     * @return Parsed backend, or `ffmpeg` (the default) when the text is unknown.
+     */
+    nvenc::nvenc_backend backend_from_view(const std::string_view &value) {
+      if (auto backend = nvenc::nvenc_backend_from_view(value)) {
+        return *backend;
+      }
+      BOOST_LOG(warning) << "config: unknown nvenc_backend value: " << value;
+      return nvenc::nvenc_backend::ffmpeg;
+    }
+
   }  // namespace nv
 
   namespace amd {
@@ -1671,11 +1685,13 @@ namespace config {
     }
     string_f(vars, "sw_tune", video.sw.sw_tune);
 
+    generic_f(vars, "nvenc_backend", video.nv.backend, nv::backend_from_view);
     int_between_f(vars, "nvenc_preset", video.nv.quality_preset, {1, 7});
     int_between_f(vars, "nvenc_vbv_increase", video.nv.vbv_percentage_increase, {0, 400});
     bool_f(vars, "nvenc_spatial_aq", video.nv.adaptive_quantization);
     generic_f(vars, "nvenc_twopass", video.nv.two_pass, nv::twopass_from_view);
     bool_f(vars, "nvenc_h264_cavlc", video.nv.h264_cavlc);
+    bool_f(vars, "nvenc_intra_refresh", video.nv.intra_refresh);
     generic_f(vars, "nvenc_split_encode", video.nv.split_frame_encoding, nv::split_encode_from_view);
     bool_f(vars, "nvenc_realtime_hags", video.nv_realtime_hags);
     bool_f(vars, "nvenc_opengl_vulkan_on_dxgi", video.nv_opengl_vulkan_on_dxgi);

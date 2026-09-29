@@ -8,6 +8,7 @@
 // standard includes
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <format>
@@ -223,6 +224,8 @@ namespace NVENC_NAMESPACE {
       async_event_handle = nullptr;
     }
     encoder_params.rfi = get_encoder_cap(encode_guid, NV_ENC_CAPS_SUPPORT_REF_PIC_INVALIDATION);
+    encoder_params.rfi_supported = encoder_params.rfi;
+    encoder_params.intra_refresh_supported = get_encoder_cap(encode_guid, NV_ENC_CAPS_SUPPORT_INTRA_REFRESH);
     return true;
   }
 
@@ -303,6 +306,7 @@ namespace NVENC_NAMESPACE {
   template<typename FormatConfig>
   void nvenc_base::configure_h264_hevc_metadata(
     FormatConfig &format_config,
+    const ::nvenc::nvenc_config &config,
     const video::config_t &client_config,
     const nvenc_colorspace_t &colorspace,
     NV_ENC_BUFFER_FORMAT buffer_format,
@@ -328,13 +332,14 @@ namespace NVENC_NAMESPACE {
       configure_vui(format_config.hevcVUIParameters);
     }
 
-    if (client_config.enableIntraRefresh != 1) {
+    if (client_config.enableIntraRefresh != 1 && !config.intra_refresh) {
       return;
     }
-    if (!get_encoder_cap(encode_guid, NV_ENC_CAPS_SUPPORT_INTRA_REFRESH)) {
-      BOOST_LOG(error) << "NvEnc: Client asked for intra-refresh but the encoder does not support intra-refresh";
+    if (!encoder_params.intra_refresh_supported) {
+      BOOST_LOG(error) << "NvEnc: intra-refresh was requested but the encoder does not support intra-refresh";
       return;
     }
+    encoder_params.intra_refresh = true;
     format_config.enableIntraRefresh = 1;
     format_config.intraRefreshPeriod = 300;
     format_config.intraRefreshCnt = 299;
@@ -379,7 +384,7 @@ namespace NVENC_NAMESPACE {
       enc_config.rcParams.minQP.qpIntra = config.min_qp_h264;
     }
 
-    configure_h264_hevc_metadata(format_config, client_config, colorspace, buffer_format, encode_guid);
+    configure_h264_hevc_metadata(format_config, config, client_config, colorspace, buffer_format, encode_guid);
   }
 
   void nvenc_base::configure_hevc(
@@ -415,7 +420,7 @@ namespace NVENC_NAMESPACE {
       enc_config.rcParams.minQP.qpIntra = config.min_qp_hevc;
     }
 
-    configure_h264_hevc_metadata(format_config, client_config, colorspace, buffer_format, encode_guid);
+    configure_h264_hevc_metadata(format_config, config, client_config, colorspace, buffer_format, encode_guid);
   }
 
 #if NVENC_SDK_VERSION >= 1200
@@ -534,6 +539,9 @@ namespace NVENC_NAMESPACE {
     }
     if (encoder_params.rfi) {
       extra += " rfi";
+    }
+    if (encoder_params.intra_refresh) {
+      extra += " intra-refresh";
     }
     if (init_params.enableWeightedPrediction) {
       extra += " weighted-prediction";
@@ -667,6 +675,13 @@ namespace NVENC_NAMESPACE {
       return false;
     }
 
+    reconfigure_state.init_params = init_params;
+    reconfigure_state.enc_config = enc_config;
+    reconfigure_state.init_params.encodeConfig = &reconfigure_state.enc_config;
+    reconfigure_state.framerate = client_config.framerate;
+    reconfigure_state.vbv_percentage_increase = config.vbv_percentage_increase;
+    reconfigure_state.custom_vbv = get_encoder_cap(init_params.encodeGUID, NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE);
+
     auto frame_size_format = stat_trackers::two_digits_after_decimal();
     BOOST_LOG(debug) << "NvEnc: requested encoded frame size "
                      << frame_size_format % (client_config.bitrate / 8. / client_config.framerate) << " kB";
@@ -706,6 +721,7 @@ namespace NVENC_NAMESPACE {
 
     encoder_state = {};
     encoder_params = {};
+    reconfigure_state = {};
   }
 
   ::nvenc::nvenc_encoded_frame nvenc_base::encode_frame(uint64_t frame_index, bool force_idr) {
@@ -827,6 +843,49 @@ namespace NVENC_NAMESPACE {
     }
 
     return true;
+  }
+
+  bool nvenc_base::set_bitrate(int bitrate_kbps) {
+    if (!encoder || bitrate_kbps <= 0 || reconfigure_state.framerate <= 0) {
+      return false;
+    }
+
+    auto enc_config = reconfigure_state.enc_config;
+    enc_config.rcParams.averageBitRate = static_cast<std::uint32_t>(bitrate_kbps) * 1000U;
+    if (reconfigure_state.custom_vbv) {
+      auto vbv = enc_config.rcParams.averageBitRate / static_cast<std::uint32_t>(reconfigure_state.framerate);
+      if (reconfigure_state.vbv_percentage_increase > 0) {
+        vbv += vbv * static_cast<std::uint32_t>(reconfigure_state.vbv_percentage_increase) / 100U;
+      }
+      enc_config.rcParams.vbvBufferSize = vbv;
+    }
+
+    NV_ENC_RECONFIGURE_PARAMS reconfigure_params = {.version = NV_ENC_RECONFIGURE_PARAMS_VER};
+    reconfigure_params.reInitEncodeParams = reconfigure_state.init_params;
+    reconfigure_params.reInitEncodeParams.encodeConfig = &enc_config;
+    reconfigure_params.resetEncoder = 0;
+    reconfigure_params.forceIDR = 0;
+    if (nvenc_failed(nvenc->nvEncReconfigureEncoder(encoder, &reconfigure_params))) {
+      BOOST_LOG(warning) << "NvEnc: NvEncReconfigureEncoder() failed: " << last_nvenc_error_string;
+      return false;
+    }
+
+    reconfigure_state.enc_config = enc_config;
+    BOOST_LOG(debug) << "NvEnc: bitrate changed to " << bitrate_kbps << " kbps";
+    return true;
+  }
+
+  ::nvenc::nvenc_capabilities nvenc_base::capabilities() const {
+    if (!encoder) {
+      return {};
+    }
+    return {
+      .rfi_supported = encoder_params.rfi_supported,
+      .rfi_active = encoder_params.rfi,
+      .intra_refresh_supported = encoder_params.intra_refresh_supported,
+      .intra_refresh_active = encoder_params.intra_refresh,
+      .ref_frames_in_dpb = encoder_params.ref_frames_in_dpb,
+    };
   }
 
   bool nvenc_base::nvenc_failed(NVENCSTATUS status) {

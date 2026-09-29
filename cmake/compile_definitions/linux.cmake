@@ -75,6 +75,7 @@ if(CUDA_FOUND)
             "${CMAKE_SOURCE_DIR}/src/platform/linux/cuda.h"
             "${CMAKE_SOURCE_DIR}/src/platform/linux/cuda.cu"
             "${CMAKE_SOURCE_DIR}/src/platform/linux/cuda.cpp"
+            "${CMAKE_SOURCE_DIR}/src/platform/linux/cuda_nvenc.cpp"
             "${CMAKE_SOURCE_DIR}/third-party/nvfbc/NvFBC.h")
 
     add_compile_definitions(SUNSHINE_BUILD_CUDA)

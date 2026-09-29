@@ -134,6 +134,36 @@ namespace cuda {
     tex_t tex;  ///< CUDA texture object used as the conversion source.
   };
 
+  cudaTextureObject_t img_texture(platf::img_t &img, bool linear) {
+    const auto &tex = static_cast<img_t &>(img).tex;
+    return linear ? tex.texture.linear : tex.texture.point;
+  }
+
+  std::shared_ptr<platf::img_t> make_img_from_ram(int width, int height, const std::uint8_t *bgra) {
+    auto img = std::make_shared<img_t>();
+    img->width = width;
+    img->height = height;
+    img->pixel_pitch = 4;
+    img->row_pitch = width * 4;
+    auto tex = tex_t::make(height, img->row_pitch);
+    if (!tex) {
+      return nullptr;
+    }
+    img->tex = std::move(*tex);
+
+    platf::img_t source;
+    source.width = width;
+    source.height = height;
+    source.pixel_pitch = 4;
+    source.row_pitch = width * 4;
+    source.data = const_cast<std::uint8_t *>(bgra);
+    sws_t sws;
+    if (sws.load_ram(source, img->tex.array)) {
+      return nullptr;
+    }
+    return img;
+  }
+
   /**
    * @brief Map CUDA graphics resources for use as an image.
    *
@@ -1218,6 +1248,16 @@ namespace cuda {
        */
       std::unique_ptr<platf::avcodec_encode_device_t> make_avcodec_encode_device(platf::pix_fmt_e pix_fmt) override {
         return ::cuda::make_avcodec_encode_device(width, height, true);
+      }
+
+      /**
+       * @brief Create a native NVENC encode device that reads the captured CUDA textures.
+       *
+       * @param pix_fmt Sunshine pixel format to convert or allocate for.
+       * @return Constructed NVENC encode device object, or nullptr when native NVENC isn't available.
+       */
+      std::unique_ptr<platf::nvenc_encode_device_t> make_nvenc_encode_device(platf::pix_fmt_e pix_fmt) override {
+        return ::cuda::make_nvenc_encode_device(width, height, pix_fmt);
       }
 
       /**

@@ -30,6 +30,10 @@
 // Include common platform and integer declarations outside the SDK namespace.
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
   #include <Windows.h>

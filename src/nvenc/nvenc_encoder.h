@@ -23,6 +23,17 @@ namespace video {
 namespace nvenc {
 
   /**
+   * @brief Loss-recovery features of a created encoder, as reported by the NVENC caps API.
+   */
+  struct nvenc_capabilities {
+    bool rfi_supported = false;  ///< `NV_ENC_CAPS_SUPPORT_REF_PIC_INVALIDATION` for the selected codec.
+    bool rfi_active = false;  ///< Reference frame invalidation is usable (caps and DPB allow it).
+    bool intra_refresh_supported = false;  ///< `NV_ENC_CAPS_SUPPORT_INTRA_REFRESH` for the selected codec.
+    bool intra_refresh_active = false;  ///< Intra-refresh is enabled in the created encoder.
+    unsigned ref_frames_in_dpb = 0;  ///< Reference frames kept in the DPB, which bounds the RFI range.
+  };
+
+  /**
    * @brief SDK-neutral standalone NVENC encoder interface.
    */
   class nvenc_encoder {
@@ -70,6 +81,25 @@ namespace nvenc {
      * @return `true` on success, `false` on error.
      */
     virtual bool invalidate_ref_frames(std::uint64_t first_frame, std::uint64_t last_frame) = 0;
+
+    /**
+     * @brief Change the target bitrate of a running encoder without an IDR.
+     *
+     * @param bitrate_kbps New bitrate in kilobits per second.
+     * @return `true` when the encoder accepted the new bitrate.
+     */
+    virtual bool set_bitrate(int bitrate_kbps) {
+      return false;
+    }
+
+    /**
+     * @brief Report the loss-recovery features of the created encoder.
+     *
+     * @return Capabilities of the current encoder, all false before creation.
+     */
+    virtual nvenc_capabilities capabilities() const {
+      return {};
+    }
   };
 
 }  // namespace nvenc

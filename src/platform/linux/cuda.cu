@@ -128,6 +128,14 @@ namespace cuda {
     return stream_t {stream};
   }
 
+  int current_device() {
+    int device;
+    if (cudaGetDevice(&device) != cudaSuccess) {
+      return -1;
+    }
+    return device;
+  }
+
   inline __device__ float3 bgra_to_rgb(uchar4 vec) {
     return make_float3((float) vec.z, (float) vec.y, (float) vec.x);
   }

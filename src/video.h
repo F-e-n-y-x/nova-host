@@ -761,6 +761,36 @@ namespace video {
    */
   encoder_summary_t get_encoder_summary();
 
+#if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
+  /**
+   * @brief Per-frame results of an offline NVENC encode (tests and benchmarks only).
+   */
+  struct offline_encode_result_t {
+    std::vector<double> frame_ms;  ///< Wall time of convert + encode until the bitstream is out, per frame.
+    std::vector<std::size_t> bytes;  ///< Encoded size per frame.
+    std::vector<bool> idr;  ///< Whether each frame is an IDR.
+    std::vector<bool> after_rfi;  ///< Whether each frame is marked as following reference frame invalidation.
+  };
+
+  /**
+   * @brief Encode already captured images offline through Nova's own NVENC session code.
+   *
+   * Uses the same encode device, session and options a stream uses, without capture or network.
+   * Frame `invalidate_at` (if >= 2) is preceded by an invalidation request for the two frames before
+   * it, exactly as a client loss report is handled.
+   *
+   * @param disp Display that creates the encode devices (a CUDA display).
+   * @param native Use the native CUDA encoder instead of FFmpeg NVENC.
+   * @param config Stream configuration.
+   * @param images Captured images, used round-robin.
+   * @param frames Number of frames to encode.
+   * @param invalidate_at Frame number preceded by an invalidation request, or -1.
+   * @param bitstream When not null, receives the encoded elementary stream.
+   * @return Results, or empty when the session couldn't be created or encoding failed.
+   */
+  std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, int invalidate_at = -1, std::vector<std::uint8_t> *bitstream = nullptr);
+#endif
+
   /**
    * @brief Whether the last probe rejected an encoder only for want of a display.
    *

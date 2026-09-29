@@ -123,7 +123,13 @@ if(EXTERNAL_PROJECT_LIBEVDEV_USED AND TARGET libvirtualhid)
 endif()
 
 set(NVENC_PUBLIC_SOURCES
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_backend.cpp"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_backend.h"
         "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_config.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_cuda_factory.cpp"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_cuda_factory.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_cuda_factory_versions.h"
+        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_cuda_interface.h"
         "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11_interface.h"
         "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory.cpp"
         "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory.h"
@@ -144,6 +150,17 @@ if(WIN32)
             "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory_impl.cpp"
             "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_utils.cpp"
     )
+elseif(CUDA_FOUND AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Native NVENC on CUDA input (NvFBC zero-copy), with reference frame invalidation.
+    set(NVENC_IMPLEMENTATION_SOURCES
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_base.cpp"
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_cuda.cpp"
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_cuda_factory_impl.cpp"
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_utils.cpp"
+    )
+endif()
+
+if(NVENC_IMPLEMENTATION_SOURCES)
 
     # Add a version-isolated NVENC implementation object library.
     # add_nvenc_sdk_implementation: args = `target_name`, `sdk_version`, `sdk_include_dir`
@@ -156,6 +173,8 @@ if(WIN32)
                 NVENC_SDK_VERSION=${sdk_version}
         )
         target_compile_options(${target_name} PRIVATE ${SUNSHINE_COMPILE_OPTIONS})
+        # Boost's header-only CPM layout exposes per-library include paths only through its targets.
+        target_link_libraries(${target_name} PRIVATE ${Boost_LIBRARIES})
     endfunction()
 
     add_nvenc_sdk_implementation(nvenc_sdk_1100 1100 "${NV_CODEC_HEADERS_11_INCLUDE_DIR}")

@@ -366,6 +366,7 @@ export const OPTIONS = {
   min_threads: { type: 'number', min: 1, integer: true },
 
   // NVIDIA NVENC
+  nvenc_backend: { type: 'choice', platforms: ['linux'], choices: named('nvenc_backend', ['auto', 'native', 'ffmpeg']) },
   nvenc_preset: {
     type: 'choice',
     choices: [1, 2, 3, 4, 5, 6, 7].map((n) => ({
@@ -389,6 +390,7 @@ export const OPTIONS = {
   nvenc_latency_over_power: { type: 'bool', platforms: ['windows'] },
   nvenc_opengl_vulkan_on_dxgi: { type: 'bool', platforms: ['windows'] },
   nvenc_h264_cavlc: { type: 'bool' },
+  nvenc_intra_refresh: { type: 'bool' },
 
   // Intel QuickSync
   qsv_preset: { type: 'choice', descKeys: [], choices: named('qsv_preset', ['veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'slowest']) },
