@@ -85,13 +85,14 @@ namespace app_lifecycle {
     int connected_clients = 0;  ///< Stream sessions right now.
     int idle_quit_hours = 0;  ///< app_idle_quit_hours (0 = never).
     std::optional<std::int64_t> idle_quit_at;  ///< Unix time the app will be idle-quit, when a timeout is counting.
+    bool tracked = true;  ///< False when Nova can't see the app's processes (it detached): it runs until quit.
   };
 
   /**
    * @brief Body of GET /nova/v1/running.
    *
    * @param state The running app.
-   * @return `{running, app: {id, index, appid, name} | null, since, display, connected_clients, idle_quit_hours, idle_quit_at}`.
+   * @return `{running, app: {id, index, appid, name} | null, since, display, connected_clients, idle_quit_hours, idle_quit_at, tracked}`.
    */
   nlohmann::json running_json(const running_t &state);
 

@@ -3253,6 +3253,29 @@ a message naming the file instead of streaming a desktop while the game silently
             own profile (`~/.config/nova-host/virtual-display-browser`), since Chrome hands a window
             to the instance already running on `:0`. Missing tools are skipped (no panel without
             tint2, no icons without nemo-desktop, a plain background without ImageMagick).
+            <br><br>
+            Library apps launched on the virtual display get the same treatment, so they open there
+            and not on `:0` where a copy may already run:
+            <ul>
+              <li>Chromium-family browsers (`google-chrome*`, `chromium*`, `brave*`,
+                `microsoft-edge*`, `vivaldi*`, `opera*`) and Electron apps (`code`, `discord`,
+                `slack` and others, also recognised by their `resources.pak` and `resources/app.asar`)
+                get `--user-data-dir`: Google Chrome the session browser's
+                `~/.config/nova-host/virtual-display-browser` (sign in once for both), the others
+                `~/.config/nova-host/virtual-display-profiles/<name>`.</li>
+              <li>Firefox gets `--no-remote --profile ~/.config/nova-host/virtual-display-profiles/firefox`
+                (the session's browser uses the same one).</li>
+              <li>Flatpak apps (`flatpak run <id>`) keep that profile inside their own data folder,
+                `~/.var/app/<id>/nova-virtual-display`.</li>
+              <li>Apps join the session's private D-Bus and dconf copy (published in
+                `session/app-env.json` of the display's state folder), so gnome-terminal, nemo,
+                Lutris and other single-instance D-Bus apps open on the virtual display. Games started
+                through nova-proton-run, umu-run, Wine or Steam keep the user's bus (GameMode).</li>
+            </ul>
+            A command that already picks a profile (`--user-data-dir`, `-P`, `--profile`,
+            `--no-remote`, `--new-instance`) is left as it is, and the log says what was changed. To
+            keep the desktop's profile and bus for one app (it then opens in the copy already
+            running on `:0`), set `"nova-vd-share-profile": true` on it in apps.json.
             @note{Applies to Linux only.}
         </td>
     </tr>
@@ -3321,6 +3344,15 @@ a message naming the file instead of streaming a desktop while the game silently
             The app ends when it is quit (the client's Quit, "Close app" in the web UI), when it
             exits by itself, or, with this set, after that many hours with no device connected.
             `0` never quits it.
+            <br><br>
+            "Exits by itself" follows the app's processes, not only the command Nova started: its
+            process group (also processes whose parent exited) and every process started under it.
+            A Proton game counts as ended once only Wine and Proton helpers are left (wineserver,
+            services.exe, explorer.exe, umu-run, pressure-vessel...) for 3 seconds; they are then
+            ended too. A game's own launcher (for example the Rockstar Games Launcher) is part of
+            the game and keeps it running. A command that exits within 5 seconds of launch while
+            nothing of it is left (auto-detach) can't be followed: it counts as running until it is
+            quit, and `GET /nova/v1/running` reports `"tracked": false` for it.
         </td>
     </tr>
     <tr>

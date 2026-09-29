@@ -648,7 +648,14 @@ namespace platf {
   }
 
   bool process_group_running(std::uintptr_t native_handle) {
-    return waitpid(-((pid_t) native_handle), nullptr, WNOHANG) >= 0;
+    const auto pgid = (pid_t) native_handle;
+    if (waitpid(-pgid, nullptr, WNOHANG) >= 0) {
+      return true;
+    }
+    // waitpid() only sees our own children. A process of the group whose parent exited was
+    // reparented (to the user's systemd or init) and still belongs to the app: ask the kernel
+    // whether anything is left in the group at all.
+    return pgid > 0 && (kill(-pgid, 0) == 0 || errno == EPERM);
   }
 
   /**

@@ -1830,7 +1830,7 @@ namespace confighttp {
    * @param request The HTTP request object.
    * Same body as the device API's GET /nova/v1/running: `running`, `app` ({id, index, appid, name}
    * or null), `since` (Unix seconds), `display` ("virtual" or "mirror"), `connected_clients`,
-   * `idle_quit_hours` and `idle_quit_at` (Unix seconds, or null).
+   * `idle_quit_hours`, `idle_quit_at` (Unix seconds, or null) and `tracked` (false when the app detached).
    *
    * @api_examples{/api/apps/running|:| GET|:| null}
    */

@@ -106,8 +106,22 @@ TEST(AppLifecycle, RunningJsonForAKeptApp) {
     "display": "virtual",
     "connected_clients": 0,
     "idle_quit_hours": 4,
-    "idle_quit_at": 1790014400
+    "idle_quit_at": 1790014400,
+    "tracked": true
   })"));
+}
+
+TEST(AppLifecycle, RunningJsonForADetachedApp) {
+  // The command exited at once (a launcher that handed off): Nova can't see when it closes.
+  app_lifecycle::running_t state;
+  state.running = true;
+  state.appid = "7";
+  state.name = "Steam game";
+  state.display = "virtual";
+  state.tracked = false;
+  const auto json = app_lifecycle::running_json(state);
+  EXPECT_EQ(json["running"], true);
+  EXPECT_EQ(json["tracked"], false);
 }
 
 TEST(AppLifecycle, RunningJsonWhenNothingRuns) {
@@ -116,7 +130,7 @@ TEST(AppLifecycle, RunningJsonWhenNothingRuns) {
   const auto json = app_lifecycle::running_json(state);
   EXPECT_EQ(json, nlohmann::json::parse(R"({
     "running": false, "app": null, "since": null, "display": null,
-    "connected_clients": 0, "idle_quit_hours": 0, "idle_quit_at": null
+    "connected_clients": 0, "idle_quit_hours": 0, "idle_quit_at": null, "tracked": true
   })"));
 }
 

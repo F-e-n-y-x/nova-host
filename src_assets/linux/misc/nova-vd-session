@@ -17,7 +17,9 @@ The session is kept away from the desktop on :0:
   GTK settings, so anything it writes stays in that copy.
 - GIO_USE_VFS=local and no portals, so no second gvfs/metadata daemon writes the user's files.
 - Chrome gets its own profile directory; with the normal profile Chrome hands the window to the
-  instance already running on :0.
+  instance already running on :0. Firefox likewise runs with --no-remote and its own profile.
+- app-env.json in the state directory publishes the private bus and the dconf copy, so the Library
+  apps Nova launches on this display join them too.
 
 Subcommands (Nova runs them with DISPLAY, XAUTHORITY and NOVA_VD_DIR set):
   (none) | start   run the session (blocks; Nova stops it by signalling the process group)
@@ -231,15 +233,44 @@ def nemo_env(cfg):
     return {"XDG_CONFIG_HOME": cfg, "GDK_DPI_SCALE": "1"}
 
 
+def browser_profile(name):
+    """The profile a browser uses on the virtual display; Nova gives a Library app of the same
+    browser the same one (src/vd_app_launch.cpp), so signing in once covers both."""
+    nova = os.path.join(user_config_home(), "nova-host")
+    if name.startswith("google-chrome"):
+        return os.path.join(nova, "virtual-display-browser")
+    if name.startswith("chromium"):
+        return os.path.join(nova, "virtual-display-profiles", "chromium")
+    return os.path.join(nova, "virtual-display-profiles", name)
+
+
 def browser_command():
     for name in ("google-chrome-stable", "google-chrome", "chromium", "chromium-browser"):
         if shutil.which(name):
-            profile = os.path.join(user_config_home(), "nova-host", "virtual-display-browser")
-            return [name, f"--user-data-dir={profile}", "--no-first-run"]
+            return [name, f"--user-data-dir={browser_profile(name)}", "--no-first-run"]
     for name in ("firefox-esr", "firefox"):
         if shutil.which(name):
-            return [name, "--new-instance", "-P", "nova-virtual-display"]
+            profile = browser_profile(name)
+            os.makedirs(profile, mode=0o700, exist_ok=True)
+            return [name, "--no-remote", "--profile", profile]
     return []
+
+
+APP_ENV_KEYS = ("DBUS_SESSION_BUS_ADDRESS", "DCONF_PROFILE", "GIO_USE_VFS", "GIO_USE_VOLUME_MONITOR", "GTK_USE_PORTAL", "NO_AT_BRIDGE")
+
+
+def write_app_env(d):
+    """Publish the private bus (and the dconf copy) for Nova: a Library app it launches on this
+    display joins them, so gnome-terminal, nemo and other single-instance D-Bus apps open here."""
+    path = os.path.join(d, "app-env.json")
+    if os.environ.get("NOVA_VD_PRIVATE_BUS") != "1" or not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+        return
+    env = {k: os.environ[k] for k in APP_ENV_KEYS if os.environ.get(k)}
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(env, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
 
 
 def launchers():
@@ -529,6 +560,7 @@ class Session:
     def run(self):
         os.makedirs(self.d, mode=0o700, exist_ok=True)
         os.environ["DCONF_PROFILE"] = isolate_dconf(self.d)
+        write_app_env(self.d)
         with open(os.path.join(self.d, "pid"), "w", encoding="utf-8") as f:
             f.write(str(os.getpid()))
         if not os.path.exists(os.path.join(self.d, "scale")):
@@ -579,6 +611,10 @@ class Session:
                 pass
         for name in list(self.children):
             self.stop_child(name)
+        try:
+            os.remove(os.path.join(self.d, "app-env.json"))
+        except OSError:
+            pass
 
 
 def private_env():

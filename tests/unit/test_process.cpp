@@ -6,12 +6,20 @@
 #include "../tests_common.h"
 
 // standard includes
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
+#include <thread>
 #include <vector>
 
+#ifdef __linux__
+  #include <unistd.h>
+#endif
+
 // local includes
+#include <src/app_processes.h>
 #include <src/process.h>
 #include <src/utility.h>
 
@@ -324,3 +332,148 @@ TEST(ProcessTest, ReplacingTheAppListKeepsTheRunningApp) {
   EXPECT_EQ(p.running(), 0);
   EXPECT_EQ(p.started_at(), 0);
 }
+
+#ifdef __linux__
+namespace {
+  proc::proc_t make_proc(proc::ctx_t app) {
+    app.id = "1";
+    std::vector<proc::ctx_t> apps {std::move(app)};
+    return proc::proc_t {boost::this_process::environment(), std::move(apps)};
+  }
+
+  proc::ctx_t command_app(const std::string &name, const std::string &cmd) {
+    proc::ctx_t app {};
+    app.name = name;
+    app.cmd = cmd;
+    app.auto_detach = true;
+    app.wait_all = true;
+    app.exit_timeout = std::chrono::seconds {1};
+    return app;
+  }
+
+  /**
+   * @brief Call running() until it says `want` or the time is up.
+   * @return How long it took, or nullopt.
+   */
+  std::optional<std::chrono::milliseconds> wait_running(proc::proc_t &p, int want, std::chrono::milliseconds limit) {
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < limit) {
+      if (p.running() == want) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds {100});
+    }
+    return std::nullopt;
+  }
+
+  struct temp_dir_t {
+    fs::path path;
+
+    temp_dir_t() {
+      path = fs::temp_directory_path() / ("nova-proc-" + std::to_string(::getpid()) + "-" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+      fs::remove_all(path);
+      fs::create_directories(path);
+    }
+
+    ~temp_dir_t() {
+      std::error_code ec;
+      fs::remove_all(path, ec);
+    }
+  };
+}  // namespace
+
+TEST(ProcessTest, AGameLeftInTheGroupKeepsTheAppRunningAfterItsWrapperExits) {
+  // A launcher that starts the game and exits: the game keeps Nova's process group but is no
+  // longer Nova's child. It used to count as ended (and, with auto-detach, as "detached").
+  auto p = make_proc(command_app("Wrapper", "/bin/sh -c \"sleep 6 & exit 0\""));
+  auto stop = util::fail_guard([&p]() {
+    p.terminate();
+  });
+  auto session = std::make_shared<rtsp_stream::launch_session_t>();
+  ASSERT_EQ(p.execute(1, session), 0);
+  std::this_thread::sleep_for(std::chrono::milliseconds {700});  // the wrapper is gone
+  for (int i = 0; i < 5; ++i) {
+    EXPECT_EQ(p.running(), 1) << "sleep still runs in the app's group";
+    std::this_thread::sleep_for(std::chrono::milliseconds {100});
+  }
+  EXPECT_TRUE(p.tracked());
+  EXPECT_TRUE(wait_running(p, 0, std::chrono::seconds {9})) << "ends once the game does (after the auto-detach window)";
+}
+
+TEST(ProcessTest, ACommandThatExitsAtOnceIsDetachedAndNotTracked) {
+  // Like Chrome handing its window to the copy already running on the desktop.
+  auto p = make_proc(command_app("Hand-off", "/bin/true"));
+  auto stop = util::fail_guard([&p]() {
+    p.terminate();
+  });
+  auto session = std::make_shared<rtsp_stream::launch_session_t>();
+  ASSERT_EQ(p.execute(1, session), 0);
+  std::this_thread::sleep_for(std::chrono::milliseconds {500});
+  for (int i = 0; i < 5; ++i) {
+    EXPECT_EQ(p.running(), 1);
+  }
+  EXPECT_FALSE(p.tracked()) << "Nova can't see when it closes";
+  p.terminate();
+  EXPECT_EQ(p.running(), 0);
+  EXPECT_TRUE(p.tracked());
+}
+
+TEST(ProcessTest, EndingCountsAsNotRunningWhileTheAppIsStillClosing) {
+  // /cancel waits up to exit-timeout for the app; meanwhile /nova/v1/running must not say it runs.
+  auto app = command_app("Stubborn", "/bin/sh -c \"trap '' TERM; sleep 30\"");
+  app.exit_timeout = std::chrono::seconds {2};
+  auto p = make_proc(app);
+  auto session = std::make_shared<rtsp_stream::launch_session_t>();
+  ASSERT_EQ(p.execute(1, session), 0);
+  std::this_thread::sleep_for(std::chrono::milliseconds {300});
+  EXPECT_EQ(p.running(), 1);
+  EXPECT_FALSE(p.ending());
+  std::thread closer {[&p]() {
+    p.terminate();
+  }};
+  std::this_thread::sleep_for(std::chrono::milliseconds {500});
+  EXPECT_TRUE(p.ending()) << "SIGTERM is ignored, so terminate() is still waiting";
+  closer.join();
+  EXPECT_FALSE(p.ending());
+  EXPECT_EQ(p.running(), 0);
+}
+
+TEST(ProcessTest, AGameWhoseWineHelpersLingerEndsWithinSeconds) {
+  // A Proton game quits but wineserver stays: umu-run keeps waiting for it, so the app's own
+  // process never exits. Nova ends the app once only helpers remain.
+  temp_dir_t tmp;
+  fs::create_symlink("/bin/sleep", tmp.path / "wineserver");
+  fs::create_symlink("/bin/sleep", tmp.path / "GTA5.exe");
+  const auto launcher = tmp.path / "umu-run";
+  {
+    std::ofstream out {launcher};
+    out << "#!/bin/sh\n"
+        << '"' << (tmp.path / "wineserver").string() << "\" 60 &\n"
+        << '"' << (tmp.path / "GTA5.exe").string() << "\" 2\n"
+        << "wait\n";
+  }
+  fs::permissions(launcher, fs::perms::owner_all);
+  auto p = make_proc(command_app("Grand Theft Auto V", launcher.string()));
+  auto stop = util::fail_guard([&p]() {
+    p.terminate();
+  });
+  auto session = std::make_shared<rtsp_stream::launch_session_t>();
+  ASSERT_EQ(p.execute(1, session), 0);
+  const auto start = std::chrono::steady_clock::now();
+  std::this_thread::sleep_for(std::chrono::milliseconds {1200});
+  EXPECT_EQ(p.running(), 1) << "the game runs";
+  const auto ended = wait_running(p, 0, std::chrono::seconds {12});
+  ASSERT_TRUE(ended) << "wineserver kept the app alive";
+  const auto after = std::chrono::steady_clock::now() - start;
+  EXPECT_GE(after, std::chrono::seconds {2} + app_processes::linger_t::grace) << "not before the game exited and the grace period passed";
+  EXPECT_LE(after, std::chrono::seconds {9});
+  // The lingering helper was ended with the app.
+  std::this_thread::sleep_for(std::chrono::milliseconds {300});
+  for (const auto &proc : app_processes::snapshot()) {
+    if (proc.state == 'Z' || proc.argv.empty()) {
+      continue;
+    }
+    EXPECT_EQ(proc.argv.front().find(tmp.path.string()), std::string::npos) << "left running: " << proc.argv.front();
+  }
+}
+#endif

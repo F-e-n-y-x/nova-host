@@ -713,6 +713,10 @@ namespace virtual_display {
       return std::nullopt;
     }
     target_ = target_t {display, xauth.string(), mode.width, mode.height, mode.fps};
+    if (const auto first_word = wm_.substr(0, wm_.find(' ')); fs::path(first_word).filename() == "nova-vd-session") {
+      // The session publishes its private D-Bus address there (see vd_app_launch::session_env()).
+      target_->session_dir = (dir / "session").string();
+    }
     write_marker();
     BOOST_LOG(info) << "Virtual display: "sv << display << " is up at "sv << mode.width << 'x' << mode.height << " in "sv
                     << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count() << " ms"sv;
@@ -883,6 +887,13 @@ namespace virtual_display {
       "QT_SCALE_FACTOR",
       "QT_AUTO_SCREEN_SCALE_FACTOR",
       "ELM_SCALE",
+      // the desktop session's private D-Bus and dconf (vd_app_launch::session_env())
+      "DBUS_SESSION_BUS_ADDRESS",
+      "DCONF_PROFILE",
+      "GIO_USE_VFS",
+      "GIO_USE_VOLUME_MONITOR",
+      "GTK_USE_PORTAL",
+      "NO_AT_BRIDGE",
     };
     return keys;
   }

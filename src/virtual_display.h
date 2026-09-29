@@ -31,6 +31,7 @@ namespace virtual_display {
     int height = 0;  ///< Current screen height in pixels.
     int fps = 0;  ///< Frame rate the display was created for (the client's).
     int scale = 100;  ///< Display scale in percent (100, 125, 150, 175 or 200).
+    std::string session_dir;  ///< Nova: state directory of the desktop session (nova-vd-session) on this display, empty without one.
   };
 
   /**

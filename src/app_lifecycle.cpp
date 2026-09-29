@@ -68,6 +68,7 @@ namespace app_lifecycle {
       {"connected_clients", state.connected_clients},
       {"idle_quit_hours", state.idle_quit_hours},
       {"idle_quit_at", state.running && state.idle_quit_at ? nlohmann::json(*state.idle_quit_at) : nlohmann::json(nullptr)},
+      {"tracked", !state.running || state.tracked},
     };
   }
 
@@ -170,11 +171,15 @@ namespace app_lifecycle {
     running_t state;
     state.connected_clients = rtsp_stream::session_count();
     state.idle_quit_hours = config::nova.app_idle_quit_hours;
+    if (proc::proc.ending()) {
+      return state;  // /cancel or "Close app" is ending it: it no longer counts, even before it is gone
+    }
     const auto running_id = proc::proc.running();
-    if (running_id <= 0) {
+    if (running_id <= 0 || proc::proc.ending()) {
       return state;
     }
     state.running = true;
+    state.tracked = proc::proc.tracked();
     state.appid = std::to_string(running_id);
     state.name = proc::proc.get_last_run_app_name();
     state.since = proc::proc.started_at();

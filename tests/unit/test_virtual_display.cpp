@@ -222,6 +222,7 @@ TEST_F(VirtualDisplayTest, StartsARootlessSeatedServerAndTheWindowManager) {
   EXPECT_EQ(fs::status(target->xauthority).permissions() & fs::perms::all, fs::perms::owner_read | fs::perms::owner_write);
 
   EXPECT_EQ(join(sys.wm_argv), "/bin/sh -c exec openbox");
+  EXPECT_TRUE(target->session_dir.empty()) << "a bare window manager has no private D-Bus to share";
   EXPECT_EQ(env_value(sys.wm_env, "DISPLAY"), ":21");
   EXPECT_EQ(env_value(sys.wm_env, "XAUTHORITY"), target->xauthority);
 
@@ -451,6 +452,8 @@ TEST_F(VirtualDisplayTest, DesktopSessionGetsItsStateDirAndEnvironment) {
   EXPECT_EQ(env_value(sys.wm_env, "NOVA_VD_DIR"), (dir / "X20").string());
   EXPECT_EQ(env_value(sys.wm_env, "NOVA_VD_SCALE"), "150");
   EXPECT_EQ(env_value(sys.wm_env, "WAYLAND_DISPLAY"), "");
+  // Library apps read the session's private D-Bus address from there.
+  EXPECT_EQ(target->session_dir, (dir / "X20" / "session").string());
   // A helper run against the display (refresh after a resize, a scale change) sees the same.
   EXPECT_EQ(server.run_on_display({"/usr/lib/nova-host/nova-vd-session", "refresh"}), 0);
   EXPECT_EQ(sys.runs.back(), "/usr/lib/nova-host/nova-vd-session refresh");

@@ -21,6 +21,7 @@
 #include <unordered_map>
 
 // local includes
+#include "app_processes.h"
 #include "config.h"
 #include "nova_compat.h"
 #include "platform/common.h"
@@ -87,6 +88,7 @@ namespace proc {
     std::string nova_exe;  ///< Game executable checked before launch ("nova-exe"), or empty.
     std::uint32_t steam_appid = 0;  ///< Matched Steam app id ("nova-steam-appid"), or 0.
     nova_compat::options_t compat;  ///< Windows compatibility options ("nova-compat").
+    bool vd_share_profile = false;  ///< Nova: on a virtual display, keep the desktop's browser profile and D-Bus ("nova-vd-share-profile").
   };
 
   /**
@@ -222,6 +224,22 @@ namespace proc {
      */
     bool executing() const;
 
+    /**
+     * @brief Nova: the app is being ended (terminate() runs); it no longer counts as running.
+     * @return True while terminate() runs.
+     */
+    bool ending() const;
+
+    /**
+     * @brief Nova: whether Nova can see the running app's processes.
+     *
+     * False when the command exited at once and the app is treated as detached (auto-detach), so
+     * Nova can't tell when it closes; it counts as running until it is quit.
+     *
+     * @return True for a tracked app (and for the Desktop entries).
+     */
+    bool tracked() const;
+
   private:
     int _app_id;
     std::string _last_error;
@@ -233,6 +251,27 @@ namespace proc {
     std::chrono::steady_clock::time_point _app_launch_time;
     movable_atomic_t<std::int64_t> _app_started_at {0};  ///< Nova: Unix time the running app was started, 0 when none.
     movable_atomic_t<bool> _executing {false};  ///< Nova: execute() is running.
+
+    movable_atomic_t<bool> _ending {false};  ///< Nova: terminate() is running.
+    movable_atomic_t<bool> _detached {false};  ///< Nova: the command exited at once and the app is treated as detached.
+    app_processes::linger_t _linger;  ///< Nova: notices a game that exited while Wine/Proton helpers linger.
+    std::chrono::steady_clock::time_point _linger_checked {};  ///< Nova: last look at the app's processes.
+
+    /**
+     * @brief Nova: whether the app's game has ended although helpers still keep its process alive.
+     *
+     * Looks at /proc at most once a second.
+     *
+     * @return True when only Wine/Proton helpers have remained for a few seconds.
+     */
+    bool game_lingered();
+
+    /**
+     * @brief Nova: make the app open on the virtual display it is launched on (see vd_app_launch.h):
+     * its own browser/Electron profile and the desktop session's private D-Bus, unless the app
+     * sets "nova-vd-share-profile".
+     */
+    void adapt_for_virtual_display();
 
     // If no command associated with _app_id, yet it's still running
     bool placebo {};

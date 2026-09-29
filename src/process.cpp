@@ -6,6 +6,7 @@
 
 // standard includes
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -33,6 +34,7 @@
 #include "process.h"
 #include "system_tray.h"
 #include "utility.h"
+#include "vd_app_launch.h"
 #include "virtual_display.h"
 
 #ifdef _WIN32
@@ -258,6 +260,7 @@ namespace proc {
       }
       if (!vd_env.empty()) {
         BOOST_LOG(info) << "Launching ["sv << _app.name << "] on virtual display "sv << _env["DISPLAY"].to_string();
+        adapt_for_virtual_display();
       }
     }
 
@@ -365,6 +368,54 @@ namespace proc {
     return 0;
   }
 
+  void proc_t::adapt_for_virtual_display() {
+    const auto display = _env["DISPLAY"].to_string();
+    if (_app.vd_share_profile) {
+      BOOST_LOG(info) << "Virtual display: ["sv << _app.name << "] keeps the desktop's profile and D-Bus (nova-vd-share-profile); "
+                                                               "if it already runs on the desktop, it may open there instead of "sv
+                      << display;
+      return;
+    }
+    const auto target = display_follow::virtual_target();
+    if (target && vd_app_launch::uses_session_bus(_app.cmd)) {
+      const auto bus_env = vd_app_launch::session_env(target->session_dir, 3s);
+      for (const auto &[key, value] : bus_env) {
+        _env[key] = value;
+      }
+      if (!bus_env.empty()) {
+        BOOST_LOG(info) << "Virtual display: ["sv << _app.name << "] runs on the virtual desktop's own D-Bus, so single-instance apps "
+                                                               "(terminal, file manager) open on "sv
+                        << display << " instead of joining the desktop's"sv;
+      } else if (!target->session_dir.empty()) {
+        BOOST_LOG(warning) << "Virtual display: the desktop session on "sv << display << " didn't publish its D-Bus address; ["sv << _app.name
+                           << "] uses the desktop's bus, so a single-instance app may open on the desktop"sv;
+      }
+    }
+    const auto home_it = _env.find("HOME");
+    const std::filesystem::path home = home_it != _env.end() ? std::filesystem::path {home_it->to_string()} : std::filesystem::path {};
+    const auto adapt_one = [&](std::string &cmd) {
+      const auto adapted = vd_app_launch::adapt(cmd, platf::appdata(), home, vd_app_launch::looks_electron);
+      if (adapted.changed()) {
+        std::error_code ec;
+        std::filesystem::create_directories(adapted.profile, ec);
+        std::filesystem::permissions(adapted.profile, std::filesystem::perms::owner_all, ec);
+        const auto *what = adapted.kind == vd_app_launch::kind_e::firefox ? "Firefox" :
+                           adapted.kind == vd_app_launch::kind_e::electron ? "an Electron app" :
+                                                                            "a Chromium browser";
+        BOOST_LOG(info) << "Virtual display: ["sv << _app.name << "] is "sv << what << ", which hands a second start to the copy already running "
+                        << "on the desktop; giving it its own profile so it opens on "sv << display << ": ["sv << adapted.cmd
+                        << "] (set \"nova-vd-share-profile\": true on the app to keep the desktop's profile)"sv;
+        cmd = adapted.cmd;
+      } else if (!adapted.note.empty()) {
+        BOOST_LOG(info) << "Virtual display: left ["sv << cmd << "] as it is: "sv << adapted.note;
+      }
+    };
+    adapt_one(_app.cmd);
+    for (auto &cmd : _app.detached) {
+      adapt_one(cmd);
+    }
+  }
+
   const std::string &proc_t::last_error() const {
     return _last_error;
   }
@@ -380,18 +431,25 @@ namespace proc {
     });
 #endif
 
+    // Nova: the launched process is asked first. Boost only learns its exit code when it reaps it
+    // itself; the group check below would reap it too and leave auto-detach without an exit code.
     if (placebo) {
-      return _app_id;
-    } else if (_app.wait_all && _process_group && platf::process_group_running((std::uintptr_t) _process_group.native_handle())) {
-      // The app is still running if any process in the group is still running
       return _app_id;
     } else if (_process.running()) {
       // The app is still running only if the initial process launched is still running
-      return _app_id;
+      if (!game_lingered()) {
+        return _app_id;
+      }
+    } else if (_app.wait_all && _process_group && platf::process_group_running((std::uintptr_t) _process_group.native_handle())) {
+      // The app is still running if any process in the group is still running
+      if (!game_lingered()) {
+        return _app_id;
+      }
     } else if (_app.auto_detach && _process.native_exit_code() == 0 && std::chrono::steady_clock::now() - _app_launch_time < 5s) {
       BOOST_LOG(info) << "App exited gracefully within 5 seconds of launch. Treating the app as a detached command."sv;
       BOOST_LOG(info) << "Adjust this behavior in the Applications tab or apps.json if this is not what you want."sv;
       placebo = true;
+      _detached = true;
       return _app_id;
     }
 
@@ -404,10 +462,49 @@ namespace proc {
     return 0;
   }
 
+  bool proc_t::game_lingered() {
+    app_processes::members_t seen;
+    {
+      // running() is called from the stream, HTTP and watcher threads; one look at a time is enough.
+      static std::mutex linger_mutex;
+      std::unique_lock lock {linger_mutex, std::try_to_lock};
+      const auto now = std::chrono::steady_clock::now();
+      if (!lock.owns_lock() || now - _linger_checked < 1s) {
+        return false;
+      }
+      _linger_checked = now;
+      const int root = _process.valid() ? static_cast<int>(_process.id()) : 0;
+      const int pgid = _process_group.valid() ? static_cast<int>(_process_group.native_handle()) : 0;
+      seen = app_processes::members(app_processes::snapshot(), root, pgid);
+      if (!_linger.update(seen, now)) {
+        return false;
+      }
+    }
+    BOOST_LOG(info) << "App ["sv << _app.name << "]: the game exited; only Wine/Proton helpers remain ("sv << seen.helper_names()
+                    << "), ending the app"sv;
+    terminate();
+    return true;
+  }
+
+  bool proc_t::ending() const {
+    return _ending;
+  }
+
+  bool proc_t::tracked() const {
+    return !_detached;
+  }
+
   void proc_t::terminate() {
+    _ending = true;
+    auto ending_guard = util::fail_guard([this]() {
+      _ending = false;
+    });
     input::terminate_gamepads();
     std::error_code ec;
     placebo = false;
+    _detached = false;
+    _linger.reset();
+    _linger_checked = {};
     terminate_process_group(_process, _process_group, _app.exit_timeout);
     _process = boost::process::v1::child();
     _process_group = boost::process::v1::group();
@@ -890,6 +987,7 @@ namespace proc {
           ctx.nova_exe = parse_env_val(this_env, *nova_exe);
         }
         ctx.steam_appid = steam_appid.value_or(0);
+        ctx.vd_share_profile = app_node.get<bool>("nova-vd-share-profile"s, false);
         if (auto compat = app_node.get_child_optional("nova-compat"s)) {
           ctx.compat.prefix = compat->get<std::string>("prefix"s, "");
           ctx.compat.fsr = compat->get<int>("fsr"s, 0);
