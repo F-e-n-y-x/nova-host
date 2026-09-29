@@ -1,12 +1,13 @@
 <script setup>
 /**
  * Library card (Final_Dashboard): the first few applications with their icon art, what kind they
- * are, a "Running" line for the running one and a ⋯ menu (Edit, and Close for the running app).
+ * are, a "Running" line for the running one and a ⋯ menu (Edit, Play in browser, and Close for
+ * the running app).
  *
  * Props: data ({ apps, runningIndex, runningName } or null), loading, error.
  * Emits: close (running app), retry.
  */
-import { computed } from 'vue'
+import { computed, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { Gamepad2 } from '@lucide/vue'
@@ -17,6 +18,7 @@ import NvButton from '../../components/NvButton.vue'
 import NvAlert from '../../components/NvAlert.vue'
 import NvEmptyState from '../../components/NvEmptyState.vue'
 import NvSkeleton from '../../components/NvSkeleton.vue'
+import PlayInBrowserDialog from '../library/PlayInBrowserDialog.vue'
 import { appKind } from './format'
 
 const PREVIEW = 7
@@ -66,9 +68,19 @@ const rows = computed(() => {
 })
 
 function menu(row) {
-  const items = [{ id: 'edit', label: t('nova.overview.edit'), onSelect: () => router.push({ path: '/library', query: { edit: String(row.index) } }) }]
+  const items = [
+    { id: 'edit', label: t('nova.overview.edit'), onSelect: () => router.push({ path: '/library', query: { edit: String(row.index) } }) },
+    { id: 'browser', label: t('nova.overview.play_browser'), onSelect: () => playInBrowser(row.app) },
+  ]
   if (row.running) items.push({ id: 'close', label: t('nova.overview.close_app'), danger: true, onSelect: () => emitClose(row) })
   return items
+}
+
+const browserPlay = reactive({ open: false, app: null })
+
+function playInBrowser(app) {
+  browserPlay.app = app
+  browserPlay.open = true
 }
 
 function emitClose(row) {
@@ -112,6 +124,7 @@ function emitClose(row) {
     <p v-if="total > rows.length" class="nv-lib__more">
       <RouterLink to="/library">{{ t('nova.overview.more_apps', { n: total - rows.length }) }}</RouterLink>
     </p>
+    <PlayInBrowserDialog v-model:open="browserPlay.open" :app="browserPlay.app" />
   </NvCard>
 </template>
 

@@ -302,6 +302,8 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/abr.h"
         "${CMAKE_SOURCE_DIR}/src/network_probe.cpp"
         "${CMAKE_SOURCE_DIR}/src/network_probe.h"
+        "${CMAKE_SOURCE_DIR}/src/web_client.cpp"
+        "${CMAKE_SOURCE_DIR}/src/web_client.h"
         "${CMAKE_SOURCE_DIR}/src/video.cpp"
         "${CMAKE_SOURCE_DIR}/src/video.h"
         "${CMAKE_SOURCE_DIR}/src/video_colorspace.cpp"

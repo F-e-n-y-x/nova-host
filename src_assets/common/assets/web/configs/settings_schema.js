@@ -210,6 +210,7 @@ export const OPTIONS = {
   abr_enabled: { type: 'bool' },
   abr_min_bitrate: { type: 'number', unit: 'Kbps', min: 0, max: 800000, integer: true, when: (c) => on(c.abr_enabled ?? 'enabled') },
   network_probe_enabled: { type: 'bool' },
+  web_client: { type: 'bool' },
   minimum_fps_target: { type: 'number', unit: 'fps', min: 0, max: 1000, integer: true },
   max_fps_target: { type: 'number', unit: 'fps', min: 0, max: 1000, integer: true },
   dd_configuration_option: {
@@ -489,7 +490,7 @@ export const SECTIONS = [
   {
     id: 'network',
     options: ['upnp', 'address_family', 'bind_address', 'port', 'origin_web_ui_allowed', 'csrf_allowed_origins', 'external_ip',
-      'lan_encryption_mode', 'wan_encryption_mode', 'ping_timeout', 'packetsize', 'network_probe_enabled'],
+      'lan_encryption_mode', 'wan_encryption_mode', 'ping_timeout', 'packetsize', 'network_probe_enabled', 'web_client'],
   },
   { id: 'files', options: ['file_apps', 'credentials_file', 'log_path', 'pkey', 'cert', 'file_state'] },
   { id: 'advanced', options: ['fec_percentage', 'qp', 'min_threads'] },

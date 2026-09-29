@@ -10,7 +10,7 @@
 import { computed, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Activity, CircleHelp, Gamepad2, KeyRound, LayoutDashboard, Link2, LogOut, Menu, Search, SlidersHorizontal, Smartphone, X } from '@lucide/vue'
+import { Activity, CircleHelp, Gamepad2, Globe, KeyRound, LayoutDashboard, Link2, LogOut, Menu, Search, SlidersHorizontal, Smartphone, X } from '@lucide/vue'
 import NovaLogo from './components/NovaLogo.vue'
 import NvActionMenu from './components/NvActionMenu.vue'
 import NvCommandPalette from './components/NvCommandPalette.vue'
@@ -43,6 +43,7 @@ const hostNav = computed(() => [
   { key: 'overview', to: '/', label: t('nova.nav.overview'), icon: LayoutDashboard, exact: true },
   { key: 'library', to: '/library', label: t('nova.nav.library'), icon: Gamepad2, count: counts.library },
   { key: 'devices', to: '/devices', label: t('nova.nav.devices'), icon: Smartphone, count: counts.devices },
+  { key: 'browser', to: '/browser', label: t('nova.nav.browser'), icon: Globe },
 ])
 const systemNav = computed(() => [
   { key: 'pair', to: '/pair', label: t('nova.nav.pair'), icon: Link2 },

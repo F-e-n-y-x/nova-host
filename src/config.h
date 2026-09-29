@@ -292,6 +292,8 @@ namespace config {
     std::string external_ip;  ///< External address advertised to clients when configured.
 
     bool network_probe_enabled;  ///< Nova: serve the paired-client network probe (`/api/network/capabilities`, `/api/network/probe`).
+
+    bool web_client;  ///< Nova: run the browser client sidecar (web_client.h). Off by default.
   };
 
   /**

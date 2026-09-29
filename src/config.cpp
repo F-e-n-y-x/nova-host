@@ -867,6 +867,8 @@ namespace config {
     {},  // external_ip
 
     true,  // network_probe_enabled (Nova)
+
+    false,  // web_client (Nova): the browser client sidecar is off until switched on
   };
 
   /**
@@ -1825,6 +1827,7 @@ namespace config {
 
     string_f(vars, "external_ip", nvhttp.external_ip);
     bool_f(vars, "network_probe_enabled", nvhttp.network_probe_enabled);
+    bool_f(vars, "web_client", nvhttp.web_client);
     list_prep_cmd_f(vars, "global_prep_cmd", config::sunshine.prep_cmds);
     string_f(vars, "host_commands", config::sunshine.host_commands);
     bool_f(vars, "pcsleep_enabled", config::sunshine.pcsleep_enabled);

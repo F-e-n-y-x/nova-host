@@ -41,6 +41,41 @@ install(PROGRAMS "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/nova-allow-suspend"
 install(PROGRAMS "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/nova-proton-run"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/nova-host")
 
+# Browser client sidecar (src/web_client.h): a pinned, patched moonlight-web-stream (GPL-3.0) and
+# the gateway Nova runs in front of it. The Rust/Node build is separate (tools/nova-web-client/build.sh);
+# pass its output directory as NOVA_WEB_CLIENT_DIST (-D or environment) to ship it in the package.
+# Without it the package still works; the web UI says the browser client isn't included.
+if(NOT NOVA_WEB_CLIENT_DIST AND DEFINED ENV{NOVA_WEB_CLIENT_DIST})
+    set(NOVA_WEB_CLIENT_DIST "$ENV{NOVA_WEB_CLIENT_DIST}")
+endif()
+if(NOVA_WEB_CLIENT_DIST)
+    foreach(_wc_file web-server streamer static VERSION LICENSE.moonlight-web-stream)
+        if(NOT EXISTS "${NOVA_WEB_CLIENT_DIST}/${_wc_file}")
+            message(FATAL_ERROR "NOVA_WEB_CLIENT_DIST=${NOVA_WEB_CLIENT_DIST} has no ${_wc_file}; run tools/nova-web-client/build.sh")
+        endif()
+    endforeach()
+    set(_wc_dir "${CMAKE_INSTALL_LIBDIR}/nova-host/web-client")
+    set(_wc_doc "${CMAKE_INSTALL_DATADIR}/doc/nova-host/moonlight-web-stream")
+    install(PROGRAMS "${NOVA_WEB_CLIENT_DIST}/web-server" "${NOVA_WEB_CLIENT_DIST}/streamer"
+            DESTINATION "${_wc_dir}")
+    install(DIRECTORY "${NOVA_WEB_CLIENT_DIST}/static" DESTINATION "${_wc_dir}")
+    install(FILES "${NOVA_WEB_CLIENT_DIST}/VERSION" DESTINATION "${_wc_dir}")
+    install(FILES "${CMAKE_SOURCE_DIR}/tools/nova-web-client/gateway/nova_web_gateway.py"
+            DESTINATION "${_wc_dir}/gateway")
+    # Licence, exact upstream version and Nova's patches (the corresponding source is upstream's
+    # tag plus these patches; see README.md there).
+    file(GLOB _wc_patches "${CMAKE_SOURCE_DIR}/tools/nova-web-client/patches/*.patch")
+    install(FILES "${NOVA_WEB_CLIENT_DIST}/LICENSE.moonlight-web-stream" "${NOVA_WEB_CLIENT_DIST}/VERSION"
+            "${CMAKE_SOURCE_DIR}/tools/nova-web-client/README.md" ${_wc_patches}
+            DESTINATION "${_wc_doc}")
+    if(EXISTS "${NOVA_WEB_CLIENT_DIST}/THIRD-PARTY.txt")
+        install(FILES "${NOVA_WEB_CLIENT_DIST}/THIRD-PARTY.txt" DESTINATION "${_wc_doc}")
+    endif()
+    message(STATUS "Browser client sidecar: ${NOVA_WEB_CLIENT_DIST}")
+else()
+    message(STATUS "Browser client sidecar: not included (set NOVA_WEB_CLIENT_DIST)")
+endif()
+
 # copy assets (excluding shaders) to build directory, for running without install
 file(COPY "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/assets/"
         DESTINATION "${CMAKE_BINARY_DIR}/assets"

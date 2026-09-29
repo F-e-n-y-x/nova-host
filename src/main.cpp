@@ -47,6 +47,7 @@
 #include "system_tray.h"
 #include "upnp.h"
 #include "video.h"
+#include "web_client.h"
 
 using namespace std::literals;
 
@@ -535,7 +536,12 @@ int main(int argc, char *argv[]) {
 #endif
   }
 
+  // Nova: the browser client sidecar, when switched on (off by default).
+  web_client::start();
+
   mainThreadLoop(shutdown_event);
+
+  web_client::shutdown();
 
   httpThread.join();
   configThread.join();

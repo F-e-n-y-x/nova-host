@@ -1,0 +1,153 @@
+diff --git a/common/src/api_bindings.rs b/common/src/api_bindings.rs
+index 749c25a..5a497da 100644
+--- a/common/src/api_bindings.rs
++++ b/common/src/api_bindings.rs
+@@ -467,6 +467,11 @@ pub enum StreamClientMessage {
+         app_id: u32,
+         video_frame_queue_size: usize,
+         audio_sample_queue_size: usize,
++        /// Nova: which display the host should stream ("virtual" or "mirror").
++        /// Sent to Nova as the `nova_display` launch parameter. Any other value is ignored.
++        #[serde(default)]
++        #[ts(optional)]
++        nova_display: Option<String>,
+     },
+     WebRtc(StreamSignalingMessage),
+     SetTransport(TransportType),
+diff --git a/common/src/ipc.rs b/common/src/ipc.rs
+index 520946f..9097f24 100644
+--- a/common/src/ipc.rs
++++ b/common/src/ipc.rs
+@@ -40,6 +40,9 @@ pub enum ServerIpcMessage {
+         video_frame_queue_size: usize,
+         audio_sample_queue_size: usize,
+         permissions: StreamPermissions,
++        /// Nova: validated `nova_display` launch parameter ("virtual" or "mirror").
++        #[serde(default)]
++        nova_display: Option<String>,
+     },
+     WebSocket(StreamClientMessage),
+     WebSocketTransport(Bytes),
+diff --git a/src/api/stream.rs b/src/api/stream.rs
+index 6693356..3a6b109 100644
+--- a/src/api/stream.rs
++++ b/src/api/stream.rs
+@@ -74,6 +74,7 @@ pub async fn start_host(
+             app_id,
+             video_frame_queue_size,
+             audio_sample_queue_size,
++            nova_display,
+         } = message
+         else {
+             let _ = session.close(None).await;
+@@ -84,6 +85,9 @@ pub async fn start_host(
+ 
+         let host_id = HostId(host_id);
+         let app_id = AppId(app_id);
++        // Nova: only these two values are forwarded; anything else would let the page
++        // inject arbitrary parameters into the host's /launch request.
++        let nova_display = nova_display.filter(|mode| mode == "virtual" || mode == "mirror");
+ 
+         // -- Collect host data
+         let mut host = match user.host(host_id).await {
+@@ -333,6 +337,7 @@ pub async fn start_host(
+                 video_frame_queue_size,
+                 audio_sample_queue_size,
+                 permissions,
++                nova_display,
+             })
+             .await;
+ 
+diff --git a/streamer/src/main.rs b/streamer/src/main.rs
+index 3e6ac5c..0a84cc7 100644
+--- a/streamer/src/main.rs
++++ b/streamer/src/main.rs
+@@ -114,6 +114,7 @@ async fn main() {
+         video_frame_queue_size,
+         audio_sample_queue_size,
+         permissions,
++        nova_display,
+     ) = loop {
+         match ipc_receiver.recv().await {
+             Some(ServerIpcMessage::Init {
+@@ -128,6 +129,7 @@ async fn main() {
+                 video_frame_queue_size,
+                 audio_sample_queue_size,
+                 permissions,
++                nova_display,
+             }) => {
+                 break (
+                     config,
+@@ -141,6 +143,7 @@ async fn main() {
+                     video_frame_queue_size,
+                     audio_sample_queue_size,
+                     permissions,
++                    nova_display,
+                 );
+             }
+             _ => continue,
+@@ -213,7 +216,11 @@ async fn main() {
+ 
+     let connection = StreamConnection::new(
+         moonlight,
+-        StreamInfo { host, app_id },
++        StreamInfo {
++            host,
++            app_id,
++            nova_display,
++        },
+         ipc_sender.clone(),
+         ipc_receiver,
+         config,
+@@ -245,6 +252,8 @@ async fn main() {
+ struct StreamInfo {
+     host: MoonlightHost<RequestClient>,
+     app_id: u32,
++    /// Nova: validated display mode, sent as `nova_display` on /launch.
++    nova_display: Option<String>,
+ }
+ 
+ struct StreamSetup {
+@@ -779,6 +788,13 @@ impl StreamConnection {
+             Err(err) => return Err(err.into()),
+         }
+ 
++        // Nova: append the display choice to moonlight-common-c's launch parameters.
++        let mut launch_query_parameters = self.moonlight.launch_query_parameters().to_string();
++        if let Some(mode) = &self.info.nova_display {
++            launch_query_parameters.push_str("&nova_display=");
++            launch_query_parameters.push_str(mode);
++        }
++
+         let aes_key = AesKey::new_random(&OpenSSLCryptoBackend)?;
+         let aes_iv = AesIv::new_random(&OpenSSLCryptoBackend)?;
+ 
+@@ -788,7 +804,7 @@ impl StreamConnection {
+                 &settings,
+                 aes_key,
+                 aes_iv,
+-                self.moonlight.launch_query_parameters(),
++                &launch_query_parameters,
+             )
+             .await
+         {
+diff --git a/web/stream/index.ts b/web/stream/index.ts
+index 6231fb2..ad65882 100644
+--- a/web/stream/index.ts
++++ b/web/stream/index.ts
+@@ -348,12 +348,15 @@ export class Stream implements Component {
+         return ws
+     }
+     private sendInitMessage() {
++        // Nova: "Play in browser" opens stream.html?...&novaDisplay=virtual|mirror
++        const novaDisplay = new URLSearchParams(location.search).get("novaDisplay")
+         this.sendWsMessage({
+             Init: {
+                 host_id: this.hostId,
+                 app_id: this.appId,
+                 video_frame_queue_size: this.settings.videoFrameQueueSize,
+                 audio_sample_queue_size: this.settings.audioSampleQueueSize,
++                nova_display: novaDisplay == "virtual" || novaDisplay == "mirror" ? novaDisplay : undefined,
+             }
+         })
+     }

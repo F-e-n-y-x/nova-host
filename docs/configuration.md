@@ -2853,6 +2853,37 @@ value from apps.json `env` for that game only.
     </tr>
 </table>
 
+### web_client
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Run Nova's browser client (Linux), so games can be played in a web browser without an app. It is
+            [moonlight-web-stream](https://github.com/MrCreativ3001/moonlight-web-stream) (GPL-3.0), run by Nova
+            as a separate program. It serves HTTPS with Nova's certificate on `port + 6` and streams over WebRTC
+            on UDP `port + 1011` to `port + 1030`. People sign in with the web UI account and session. It
+            accepts the addresses [origin_web_ui_allowed](#origin_web_ui_allowed) allows, but never more than
+            LAN: `pc` means this computer only, and `lan` or `wan` both mean LAN, link-local and Tailscale.
+            It pairs with Nova the first time it is used and then appears in Devices as "Browser client".
+            The setting takes effect straight away, without a restart. It is only available when the package
+            includes the browser client (`tools/nova-web-client`).
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            web_client = enabled
+            @endcode</td>
+    </tr>
+</table>
+
 ## Config Files
 
 ### file_apps

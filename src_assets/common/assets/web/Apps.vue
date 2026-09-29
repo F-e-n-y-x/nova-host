@@ -22,6 +22,7 @@ import NvActionMenu from './nova/components/NvActionMenu.vue'
 import NvConfirmDialog from './nova/components/NvConfirmDialog.vue'
 import AppEditor from './nova/pages/apps/AppEditor.vue'
 import AddGamesSheet from './nova/pages/library/AddGamesSheet.vue'
+import PlayInBrowserDialog from './nova/pages/library/PlayInBrowserDialog.vue'
 import { useApps } from './nova/pages/apps/useApps'
 import { parseEdit, useAppsRoute } from './nova/pages/apps/useAppsRoute'
 import { visibleApps } from './nova/pages/apps/appForm'
@@ -44,6 +45,7 @@ const libraryApi = shallowRef(false)
 const addOpen = shallowRef(false)
 const removing = reactive({ open: false, index: -1, name: '', busy: false, error: '' })
 const closing = reactive({ open: false, busy: false, error: '' })
+const browserPlay = reactive({ open: false, app: null })
 
 onMounted(async () => {
   libraryApi.value = await probeLibraryApi()
@@ -142,9 +144,15 @@ function rowMenu(row) {
   return [
     { id: 'edit', label: t('nova.library.menu_edit'), onSelect: () => openEditor(row.index) },
     { id: 'art', label: t('nova.library.menu_artwork'), onSelect: () => editArtwork(row.index) },
+    { id: 'browser', label: t('nova.library.menu_play_browser'), onSelect: () => playInBrowser(row.app) },
     { divider: true, id: 'd' },
     { id: 'delete', label: t('nova.library.menu_delete'), danger: true, onSelect: () => askRemove(row) },
   ]
+}
+
+function playInBrowser(app) {
+  browserPlay.app = app
+  browserPlay.open = true
 }
 
 async function editArtwork(index) {
@@ -347,6 +355,7 @@ function openAdd() {
                :library-api="libraryApi" :cover-version="coverVersion" @saved="onSaved" @close="onEditorClose" @artwork-applied="onArtworkApplied"
                @delete="askRemove({ index: editIndex, name: editingApp?.name || t('nova.apps.unnamed') })" />
     <AddGamesSheet v-if="libraryApi" v-model:open="addOpen" @imported="onImported" />
+    <PlayInBrowserDialog v-model:open="browserPlay.open" :app="browserPlay.app" />
     <NvConfirmDialog v-model:open="removing.open" :title="t('nova.apps.delete_title', { name: removing.name })"
                      :description="t('nova.apps.delete_desc', { name: removing.name })" :confirm-label="t('nova.apps.delete')"
                      :loading="removing.busy" :error="removing.error" @confirm="confirmRemove" />

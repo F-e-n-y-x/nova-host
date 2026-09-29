@@ -75,6 +75,7 @@
 #include "system_tray.h"
 #include "utility.h"
 #include "uuid.h"
+#include "web_client.h"
 #include "web_session.h"
 
 using namespace std::literals;
@@ -2401,6 +2402,18 @@ namespace confighttp {
         config_stream << k << " = " << value << std::endl;
       }
       file_handler::write_file(config::sunshine.config_file.c_str(), config_stream.str());
+      // Nova: the browser client follows its setting at once (a missing key means the default, off).
+      {
+        bool web_client_on = false;
+        if (const auto it = input_tree.find("web_client"); it != input_tree.end()) {
+          const auto v = it->is_string() ? it->get<std::string>() : it->dump();
+          web_client_on = v == "enabled" || v == "true" || v == "on" || v == "yes" || v == "1";
+        }
+        if (web_client_on != config::nvhttp.web_client) {
+          config::nvhttp.web_client = web_client_on;
+          web_client::apply(web_client_on);
+        }
+      }
       output_tree["status"] = true;
       send_response(response, output_tree);
     } catch (std::exception &e) {
@@ -3410,6 +3423,74 @@ namespace confighttp {
   }
 
 
+  /**
+   * @brief The browser client sidecar's status, as JSON.
+   */
+  nlohmann::json web_client_json() {
+    const auto s = web_client::status();
+    return {
+      {"status", true},
+      {"installed", s.installed},
+      {"enabled", s.enabled},
+      {"state", s.state},
+      {"port", s.port},
+      {"udp_min", s.udp_min},
+      {"udp_max", s.udp_max},
+      {"allowed", s.allowed},
+      {"version", s.version},
+      {"restarts", s.restarts},
+      {"last_error", s.last_error},
+    };
+  }
+
+  /**
+   * @brief Browser client status: installed, on/off, running, its port and who may reach it.
+   *
+   * @api_examples{/api/web-client|:| GET|:| null}
+   */
+  void getWebClient(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    send_response(response, web_client_json());
+  }
+
+  /**
+   * @brief Switch the browser client on or off now and save the `web_client` setting.
+   *
+   * @api_examples{/api/web-client|:| POST|:| {"enabled": true}}
+   */
+  void postWebClient(const resp_https_t &response, const req_https_t &request) {
+    if (!check_content_type(response, request, "application/json") || !authenticate(response, request) || !validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    print_req(request);
+    bool enabled = false;
+    try {
+      const auto input = nlohmann::json::parse(request->content.string());
+      if (!input.contains("enabled") || !input.at("enabled").is_boolean()) {
+        bad_request(response, request, "Expected {\"enabled\": true|false}");
+        return;
+      }
+      enabled = input.at("enabled").get<bool>();
+    } catch (const std::exception &) {
+      bad_request(response, request, "Expected {\"enabled\": true|false}");
+      return;
+    }
+    if (enabled && !web_client::status().installed) {
+      bad_request(response, request, "The browser client is not included in this build");
+      return;
+    }
+    if (!web_client::set_enabled(enabled)) {
+      bad_request(response, request, "Couldn't save the setting");
+      return;
+    }
+    const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
+    BOOST_LOG(info) << "Web UI: ["sv << address << "] -- browser client switched "sv << (enabled ? "on"sv : "off"sv);
+    send_response(response, web_client_json());
+  }
+
   // ---------------------------------------------------------------------------
   // Nova game library: scan folders and launchers, match titles, import with artwork.
   // ---------------------------------------------------------------------------
@@ -4262,6 +4343,8 @@ namespace confighttp {
     server.resource["^/api/audio/sinks$"]["GET"] = getAudioSinks;
     server.resource["^/api/preview$"]["GET"] = getPreview;
     server.resource["^/api/health$"]["GET"] = getHealth;
+    server.resource["^/api/web-client$"]["GET"] = getWebClient;
+    server.resource["^/api/web-client$"]["POST"] = postWebClient;
     server.resource["^/api/host-commands$"]["GET"] = getHostCommands;
     server.resource["^/api/host-commands/runs$"]["GET"] = getHostCommandRuns;
     server.resource["^/api/host-commands/run$"]["POST"] = postHostCommandRun;

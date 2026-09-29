@@ -12,6 +12,7 @@ const routes = [
   { path: '/', component: () => import('./nova/pages/Dashboard.vue') },
   { path: '/library', component: () => import('./Apps.vue') },
   { path: '/devices/:uuid?', component: () => import('./nova/pages/Devices.vue') },
+  { path: '/browser', component: () => import('./nova/pages/BrowserPlay.vue') },
   { path: '/settings', component: () => import('./Config.vue') },
   { path: '/logs', component: () => import('./nova/pages/Logs.vue') },
   { path: '/pair', component: () => import('./Pin.vue') },

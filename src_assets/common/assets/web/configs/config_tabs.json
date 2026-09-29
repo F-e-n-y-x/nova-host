@@ -121,7 +121,8 @@
       "wan_encryption_mode": 1,
       "ping_timeout": 10000,
       "packetsize": 0,
-      "network_probe_enabled": "enabled"
+      "network_probe_enabled": "enabled",
+      "web_client": "disabled"
     }
   },
   {
