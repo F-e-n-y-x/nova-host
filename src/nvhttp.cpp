@@ -30,6 +30,7 @@
 #include <Simple-Web-Server/server_http.hpp>
 
 // local includes
+#include "abr.h"
 #include "app_lifecycle.h"
 #include "client_permissions.h"
 #include "clipboard.h"
@@ -45,6 +46,7 @@
 #include "library/library.h"
 #include "logging.h"
 #include "network.h"
+#include "network_probe.h"
 #include "library/metadata.h"
 #include "nova_client_api.h"
 #include "nvhttp.h"
@@ -52,6 +54,7 @@
 #include "process.h"
 #include "rtsp.h"
 #include "secure_files.h"
+#include "stream_stats.h"
 #include "system_tray.h"
 #include "utility.h"
 #include "uuid.h"
@@ -2390,6 +2393,8 @@ namespace nvhttp {
       .motion = (platf::get_capabilities() & platf::platform_caps::controller_touch) != 0,
       .pcsleep = config::sunshine.pcsleep_enabled,
       .commands = any_host_command(),
+      .abr = config::video.abr_enabled,
+      .network_probe = config::nvhttp.network_probe_enabled,
     };
   }
 
@@ -2662,10 +2667,395 @@ namespace nvhttp {
       return;
     }
     const int sessions = rtsp_stream::request_bitrate_by_cert(peer.cert, *kbps);
+    if (sessions > 0) {
+      abr::note_bitrate(peer.cert, *kbps);
+    }
     BOOST_LOG(info) << "Nova: "sv << peer.name << " asked for "sv << *kbps << " kbps ("sv << sessions << " session(s))"sv;
     tree.put("root.bitrate", sessions > 0 ? 1 : 0);
     tree.put("root.applied_kbps", *kbps);
     tree.put("root.<xmlattr>.status_code", 200);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Adaptive bitrate (/api/abr/*) and network probe (/api/network/*), Foundation-compatible.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * @brief Host-side view of a device's running stream, fused into ABR feedback.
+   *
+   * @param cert Device certificate.
+   * @param feedback Report to extend with host loss and RTT.
+   */
+  void add_host_view(const std::string &cert, abr::feedback_t &feedback) {
+    for (const auto &snap : stream_stats::active_sessions(false)) {
+      if (snap.info.client_cert == cert) {
+        feedback.host_loss_pct = snap.loss_pct;
+        if (snap.rtt_ms) {
+          feedback.host_rtt_ms = static_cast<double>(*snap.rtt_ms);
+        }
+        return;
+      }
+    }
+  }
+
+  /**
+   * @brief GET /api/abr/capabilities: whether this host runs adaptive bitrate.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void abr_capabilities(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    nova_json(response, SimpleWeb::StatusCode::success_ok, abr::capabilities_json(config::video.abr_enabled, config::video.max_bitrate));
+  }
+
+  /**
+   * @brief POST /api/abr: turn adaptive bitrate on or off for the caller's running stream.
+   *
+   * Body `{"enabled", "mode": "quality"|"balanced"|"lowLatency", "minBitrate", "maxBitrate"}` (kbps,
+   * 0 = the mode preset). Replies with the resolved range, like Foundation.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void abr_configure(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    const auto peer = nova_require_device(response, request);
+    if (!peer) {
+      return;
+    }
+    if (!config::video.abr_enabled) {
+      nova_json(response, SimpleWeb::StatusCode::server_error_service_unavailable, {{"success", false}, {"error", "Adaptive bitrate is disabled on this host"}});
+      return;
+    }
+    const auto current = rtsp_stream::client_bitrate_by_cert(peer->cert);
+    if (!current) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"success", false}, {"error", "No active streaming session for this client"}});
+      return;
+    }
+    std::string error;
+    const auto req = abr::parse_config_request(request->content.string(), error);
+    if (!req) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"success", false}, {"error", error}});
+      return;
+    }
+    if (!req->enabled) {
+      abr::disable(peer->cert);
+      BOOST_LOG(info) << "ABR: off for "sv << peer->name;
+      nova_json(response, SimpleWeb::StatusCode::success_ok, {{"success", true}, {"enabled", false}});
+      return;
+    }
+
+    const auto range = abr::resolve_range(req->mode, *current, req->min_kbps, req->max_kbps, config::video.abr_min_bitrate, config::video.max_bitrate);
+    const int initial = std::clamp(*current, range.min_kbps, range.max_kbps);
+    // Only the native NVENC encoder retargets in place; FFmpeg NVENC (and other encoders) start a
+    // keyframe on each change, so ABR changes less often there.
+    const bool costly = video::get_encoder_summary().implementation != "native";
+    abr::enable(peer->cert, req->mode, range, initial, costly);
+    bool applied = true;
+    if (initial != *current) {
+      applied = rtsp_stream::request_bitrate_by_cert(peer->cert, initial) > 0;
+    }
+    BOOST_LOG(info) << "ABR: on for "sv << peer->name << ", mode "sv << abr::mode_name(req->mode) << ", "sv << initial << " kbps in ["sv
+                    << range.min_kbps << ", "sv << range.max_kbps << ']' << (costly ? " (encoder keyframes on change: fewer, larger steps)"sv : ""sv);
+
+    const int host_max = std::max(config::video.max_bitrate, 0);
+    nlohmann::json body {
+      {"success", true},
+      {"enabled", true},
+      {"mode", req->mode_text},
+      {"minBitrate", range.min_kbps},
+      {"maxBitrate", range.max_kbps},
+      {"initialBitrate", initial},
+      {"requestedMaxBitrate", req->max_kbps},
+      {"hostMaxBitrate", host_max},
+      {"maxBitrateCapped", host_max > 0 && req->max_kbps > 0 && range.max_kbps < req->max_kbps},
+      {"maxBitrateInheritedFromHost", host_max > 0 && req->max_kbps <= 0},
+      {"bitrateApplied", applied},
+    };
+    if (!applied) {
+      body["bitrateApplyError"] = "ABR configured, but failed to apply bitrate to the active session";
+    }
+    nova_json(response, SimpleWeb::StatusCode::success_ok, body);
+  }
+
+  /**
+   * @brief POST /api/abr/feedback: one network report; replies with a new bitrate when one is due.
+   *
+   * Body `{"packetLoss","rttMs","decodeFps","droppedFrames","currentBitrate"}`. The host applies the new
+   * bitrate itself and returns `{"newBitrate"?, "bitrateApplied", "reason"}`.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void abr_feedback(resp_https_t response, req_https_t request) {
+    const auto peer = nova_require_device(response, request);
+    if (!peer) {
+      return;
+    }
+    if (!rtsp_stream::client_bitrate_by_cert(peer->cert)) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"error", "No active streaming session for this client"}});
+      return;
+    }
+    if (!config::video.abr_enabled || !abr::is_enabled(peer->cert)) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"error", "ABR not enabled for this client"}});
+      return;
+    }
+    const auto json = nlohmann::json::parse(request->content.string(), nullptr, false);
+    if (json.is_discarded() || !json.is_object()) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"error", "Invalid JSON body"}});
+      return;
+    }
+    auto report = abr::parse_feedback(json);
+    add_host_view(peer->cert, report);
+    const auto decision = abr::feedback(peer->cert, report);
+    if (!decision) {
+      nova_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"error", "ABR not enabled for this client"}});
+      return;
+    }
+
+    nlohmann::json body {{"reason", decision->reason}};
+    bool applied = true;
+    if (decision->new_bitrate_kbps > 0) {
+      applied = rtsp_stream::request_bitrate_by_cert(peer->cert, decision->new_bitrate_kbps) > 0;
+      BOOST_LOG(info) << "ABR: "sv << peer->name << " -> "sv << decision->new_bitrate_kbps << " kbps ("sv << decision->reason << ')';
+      if (applied) {
+        body["newBitrate"] = decision->new_bitrate_kbps;
+      }
+    }
+    body["bitrateApplied"] = applied;
+    if (!applied) {
+      body["bitrateApplyError"] = "Failed to apply ABR bitrate update to the active session";
+    }
+    nova_json(response, SimpleWeb::StatusCode::success_ok, body);
+  }
+
+  /**
+   * @brief Rate limiter and results shared by every probe connection.
+   * @return The limiter.
+   */
+  network_probe::limiter_t &probe_limiter() {
+    static network_probe::limiter_t limiter;
+    return limiter;
+  }
+
+  /**
+   * @brief Write a probe error reply (`{"error","retryAfterMs"?}` plus `Retry-After`).
+   *
+   * @param response HTTPS response.
+   * @param code HTTP status.
+   * @param error Machine-readable reason.
+   * @param retry_after_ms Retry hint, 0 for none.
+   */
+  void probe_error(const resp_https_t &response, SimpleWeb::StatusCode code, std::string_view error, std::uint32_t retry_after_ms = 0) {
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Content-Type", "application/json");
+    headers.emplace("Cache-Control", "no-store");
+    if (retry_after_ms > 0) {
+      headers.emplace("Retry-After", std::to_string((retry_after_ms + 999) / 1000));
+    }
+    response->write(code, network_probe::error_json(error, retry_after_ms).dump(), headers);
+  }
+
+  /**
+   * @brief The paired device on a probe connection, or a 403 `not_paired` reply.
+   *
+   * @param response HTTPS response (written on failure).
+   * @param request HTTPS request.
+   * @return The device, or nullopt after replying.
+   */
+  std::optional<verified_peer_t> probe_device(const resp_https_t &response, const req_https_t &request) {
+    auto peer = verified_peer_for(request);
+    if (peer.cert.empty()) {
+      probe_error(response, SimpleWeb::StatusCode::client_error_forbidden, "not_paired");
+      return std::nullopt;
+    }
+    if (!config::nvhttp.network_probe_enabled) {
+      probe_error(response, SimpleWeb::StatusCode::server_error_service_unavailable, "disabled");
+      return std::nullopt;
+    }
+    return peer;
+  }
+
+  /**
+   * @brief GET /api/network/capabilities: probe limits. Clients also time this call for RTT and jitter.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void network_capabilities(resp_https_t response, req_https_t request) {
+    if (!probe_device(response, request)) {
+      return;
+    }
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Content-Type", "application/json");
+    headers.emplace("Cache-Control", "no-store");
+    response->write(SimpleWeb::StatusCode::success_ok, network_probe::capabilities_json().dump(), headers);
+  }
+
+  /**
+   * @brief One burst being sent: writes 64 KiB at a time until done, cut off, or the client leaves.
+   */
+  struct probe_burst_t: std::enable_shared_from_this<probe_burst_t> {
+    resp_https_t response;  ///< Connection to write to.
+    std::string client;  ///< Device certificate.
+    std::string client_name;  ///< Device name, for the log.
+    std::uint64_t admission = 0;  ///< Limiter admission id.
+    network_probe::result_t result;  ///< Filled while sending.
+    boost::asio::ip::tcp::endpoint local;  ///< Host end of the connection.
+    boost::asio::ip::tcp::endpoint remote;  ///< Client end of the connection.
+    std::optional<network_probe::tcp_sample_t> tcp_before;  ///< Connection counters before the burst.
+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();  ///< First write.
+    bool finished = false;  ///< Whether `finish()` ran.
+
+    /**
+     * @brief Record the outcome once and release the admission.
+     * @param outcome "completed", "timeout" or "cancelled".
+     */
+    void finish(std::string_view outcome) {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      result.outcome = outcome;
+      result.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+      if (tcp_before) {
+        if (const auto after = network_probe::sample_tcp(local, remote)) {
+          result.tcp = network_probe::delta(*tcp_before, *after);
+        }
+      }
+      BOOST_LOG(info) << "Network probe: "sv << client_name << ", "sv << result.sent_bytes << '/' << result.requested_bytes << " bytes in "sv
+                      << result.duration_ms << " ms, "sv << outcome
+                      << (result.tcp ? std::format(", {:.2f}% retransmitted", network_probe::loss_pct(*result.tcp)) : std::string {});
+      probe_limiter().complete(client, admission, result);
+    }
+
+    /**
+     * @brief Queue the next chunk, or finish.
+     */
+    void send_next() {
+      const auto remaining = result.requested_bytes - result.sent_bytes;
+      if (remaining == 0) {
+        finish("completed");
+        return;
+      }
+      if (std::chrono::steady_clock::now() - started >= network_probe::MAX_TRANSFER) {
+        finish("timeout");
+        response->close_connection_after_response = true;
+        return;
+      }
+      const auto &chunk = network_probe::payload_chunk();
+      const auto count = std::min(remaining, chunk.size());
+      response->write(chunk.data(), static_cast<std::streamsize>(count));
+      response->send([self = shared_from_this(), count](const SimpleWeb::error_code &ec) {
+        if (ec) {
+          self->finish("cancelled");
+          return;
+        }
+        self->result.sent_bytes += count;
+        self->send_next();
+      });
+    }
+
+    /**
+     * @brief Release the admission if the connection went away without a callback.
+     */
+    ~probe_burst_t() {
+      finish("cancelled");
+    }
+  };
+
+  /**
+   * @brief GET /api/network/probe?bytes=&nonce=: send @p bytes of random data for a throughput sample.
+   *
+   * Refused (409 `stream_active`) while any stream runs, and rate-limited per device (429).
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void network_probe_burst(resp_https_t response, req_https_t request) {
+    const auto peer = probe_device(response, request);
+    if (!peer) {
+      return;
+    }
+    if (request->header.find("Range") != request->header.end()) {
+      probe_error(response, SimpleWeb::StatusCode::client_error_bad_request, "range_not_supported");
+      return;
+    }
+    const auto args = request->parse_query_string();
+    const auto bytes_it = args.find("bytes");
+    const auto nonce_it = args.find("nonce");
+    const auto bytes = bytes_it == args.end() ? std::nullopt : network_probe::parse_bytes(bytes_it->second);
+    if (!bytes || nonce_it == args.end() || !network_probe::valid_nonce(nonce_it->second)) {
+      probe_error(response, SimpleWeb::StatusCode::client_error_bad_request, "invalid_request");
+      return;
+    }
+    if (rtsp_stream::session_count() > 0) {
+      probe_error(response, SimpleWeb::StatusCode::client_error_conflict, "stream_active");
+      return;
+    }
+    const auto admission = probe_limiter().admit(peer->cert, nonce_it->second, *bytes);
+    if (!admission) {
+      probe_error(response, SimpleWeb::StatusCode::client_error_too_many_requests, admission.error, admission.retry_after_ms);
+      return;
+    }
+
+    auto burst = std::make_shared<probe_burst_t>();
+    burst->response = response;
+    burst->client = peer->cert;
+    burst->client_name = peer->name;
+    burst->admission = admission.id;
+    burst->result.nonce = nonce_it->second;
+    burst->result.requested_bytes = *bytes;
+    burst->local = request->local_endpoint();
+    burst->remote = request->remote_endpoint();
+    burst->tcp_before = network_probe::sample_tcp(burst->local, burst->remote);
+
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Content-Type", "application/octet-stream");
+    headers.emplace("Content-Length", std::to_string(*bytes));
+    headers.emplace("Cache-Control", "no-store, no-transform");
+    headers.emplace("X-Bandwidth-Probe-Version", "1");
+    headers.emplace("X-Bandwidth-Probe-Nonce", nonce_it->second);
+    response->write(SimpleWeb::StatusCode::success_ok, headers);
+    burst->started = std::chrono::steady_clock::now();
+    burst->send_next();
+  }
+
+  /**
+   * @brief GET /api/network/probe/result?nonce=: host-side result of a finished burst (Nova extension).
+   *
+   * 404 `unknown_nonce` when the burst is unknown, 409 `running` (with `retryAfterMs`) while it still sends.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void network_probe_result(resp_https_t response, req_https_t request) {
+    const auto peer = probe_device(response, request);
+    if (!peer) {
+      return;
+    }
+    const auto args = request->parse_query_string();
+    const auto nonce_it = args.find("nonce");
+    if (nonce_it == args.end() || !network_probe::valid_nonce(nonce_it->second)) {
+      probe_error(response, SimpleWeb::StatusCode::client_error_bad_request, "invalid_request");
+      return;
+    }
+    if (const auto result = probe_limiter().result(peer->cert, nonce_it->second)) {
+      SimpleWeb::CaseInsensitiveMultimap headers;
+      headers.emplace("Content-Type", "application/json");
+      headers.emplace("Cache-Control", "no-store");
+      response->write(SimpleWeb::StatusCode::success_ok, network_probe::result_json(*result).dump(), headers);
+      return;
+    }
+    if (probe_limiter().running(peer->cert, nonce_it->second)) {
+      probe_error(response, SimpleWeb::StatusCode::client_error_conflict, "running", 200);
+      return;
+    }
+    probe_error(response, SimpleWeb::StatusCode::client_error_not_found, "unknown_nonce");
   }
 
   /**
@@ -2958,6 +3348,12 @@ namespace nvhttp {
     https_server.resource["^/nova/v1/capabilities$"]["GET"] = nova_capabilities;
     https_server.resource["^/nova/v1/running$"]["GET"] = nova_running;
     https_server.resource["^/nova/v1/commands$"]["GET"] = nova_commands;
+    https_server.resource["^/api/abr/capabilities$"]["GET"] = abr_capabilities;
+    https_server.resource["^/api/abr$"]["POST"] = abr_configure;
+    https_server.resource["^/api/abr/feedback$"]["POST"] = abr_feedback;
+    https_server.resource["^/api/network/capabilities$"]["GET"] = network_capabilities;
+    https_server.resource["^/api/network/probe$"]["GET"] = network_probe_burst;
+    https_server.resource["^/api/network/probe/result$"]["GET"] = network_probe_result;
     https_server.resource["^/nova/v1/apps$"]["GET"] = nova_apps;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/art/(poster|hero|logo|icon|background)$"]["GET"] = nova_app_art;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/details$"]["GET"] = nova_app_details;

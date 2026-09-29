@@ -54,6 +54,8 @@ const cells = computed(() => {
       { key: 'loss', label: t('nova.overview.packet_loss'), value: Number.isFinite(s.loss_pct) ? `${s.loss_pct.toFixed(1)} %` : '—',
         hint: Number.isFinite(s.loss_pct) ? '' : t('nova.overview.no_loss_report') },
       { key: 'repeated', label: t('nova.overview.repeated_frames'), value: Number.isFinite(s.frames?.duplicated) ? String(s.frames.duplicated) : '—' },
+      ...(s.abr ? [{ key: 'abr', label: t('nova.overview.adaptive_bitrate'), value: formatMbps(s.abr.current_kbps),
+        hint: s.abr.last_reason || t('nova.overview.abr_range', { min: formatMbps(s.abr.min_kbps), max: formatMbps(s.abr.max_kbps) }) }] : []),
     ]
   }
   if (last.value) {
@@ -110,7 +112,7 @@ const recent = computed(() => {
         <span v-else class="nv-sh__hint">{{ t('nova.overview.split_while_live') }}</span>
       </div>
 
-      <div v-if="cells.length" class="nv-sh__cells">
+      <div v-if="cells.length" class="nv-sh__cells" :style="{ '--nv-sh-cells': cells.length }">
         <div v-for="c in cells" :key="c.key" class="nv-sh__cell">
           <span class="nv-sh__label">{{ c.label }}</span>
           <span class="nv-mono nv-sh__value">{{ c.value }}</span>
@@ -214,7 +216,7 @@ const recent = computed(() => {
 
   .nv-sh__cells {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--nv-sh-cells, 2), minmax(0, 1fr));
     border-bottom: 1px solid var(--nv-divider);
   }
 

@@ -14,6 +14,7 @@ extern "C" {
 #include <array>
 #include <cctype>
 #include <format>
+#include <limits>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -23,6 +24,7 @@ extern "C" {
 #include <boost/bind.hpp>
 
 // local includes
+#include "abr.h"
 #include "clipboard.h"
 #include "config.h"
 #include "globals.h"
@@ -771,6 +773,25 @@ namespace rtsp_stream {
     }
 
     /**
+     * @brief Client-facing bitrate of a certificate's running stream.
+     *
+     * @param cert Client certificate PEM.
+     * @return Bitrate of the first running session, or nullopt when the device isn't streaming.
+     */
+    std::optional<int> client_bitrate_by_cert(std::string_view cert) {
+      if (cert.empty()) {
+        return std::nullopt;
+      }
+      auto lg = _session_slots.lock();
+      for (const auto &slot : *_session_slots) {
+        if (stream::session::client_cert(*slot) == cert && stream::session::state(*slot) == stream::session::state_e::RUNNING) {
+          return stream::session::client_bitrate(*slot);
+        }
+      }
+      return std::nullopt;
+    }
+
+    /**
      * @brief Removes the provided session from the set of sessions.
      * @param session The session to remove.
      */
@@ -880,6 +901,10 @@ namespace rtsp_stream {
 
   void update_permissions_by_cert(std::string_view cert, client_permissions::mask_t permissions) {
     server.set_permissions_by_cert(cert, permissions);
+  }
+
+  std::optional<int> client_bitrate_by_cert(std::string_view cert) {
+    return server.client_bitrate_by_cert(cert);
   }
 
   int request_bitrate_by_cert(std::string_view cert, int bitrate_kbps) {
@@ -1407,23 +1432,16 @@ namespace rtsp_stream {
     if (configuredBitrateKbps) {
       BOOST_LOG(debug) << "Client configured bitrate is "sv << configuredBitrateKbps << " Kbps"sv;
 
-      // If the FEC percentage isn't too high, adjust the configured bitrate to ensure video
-      // traffic doesn't exceed the user's selected bitrate when the FEC shards are included.
-      if (config::stream.fec_percentage <= 80) {
-        configuredBitrateKbps /= 100.f / (100 - config::stream.fec_percentage);
-      }
+      // Leave room for FEC shards (when the FEC percentage isn't too high), audio (256 Kbps per
+      // channel in high quality mode, 96 Kbps otherwise, capped at a 20% reduction) and A/V packet
+      // overhead plus control traffic (500 Kbps, capped at 10%). Live bitrate changes use the same
+      // rule (abr::encoder_kbps), so the encoder rate matches for the same slider value.
+      const auto clientKbps = static_cast<int>(std::clamp<std::int64_t>(configuredBitrateKbps, 1, std::numeric_limits<int>::max()));
+      const int audioKbps = (config.audio.flags[audio::config_t::HIGH_QUALITY] ? 256 : 96) * config.audio.channels;
+      config.configuredBitrateKbps = clientKbps;
+      config.monitor.bitrate = abr::encoder_kbps(clientKbps, config::stream.fec_percentage, audioKbps);
 
-      // Adjust the bitrate to account for audio traffic bandwidth usage (capped at 20% reduction).
-      // The bitrate per channel is 256 Kbps for high quality mode and 96 Kbps for normal quality.
-      auto audioBitrateAdjustment = (config.audio.flags[audio::config_t::HIGH_QUALITY] ? 256 : 96) * config.audio.channels;
-      configuredBitrateKbps -= std::min((std::int64_t) audioBitrateAdjustment, configuredBitrateKbps / 5);
-
-      // Reduce it by another 500Kbps to account for A/V packet overhead and control data
-      // traffic (capped at 10% reduction).
-      configuredBitrateKbps -= std::min((std::int64_t) 500, configuredBitrateKbps / 10);
-
-      BOOST_LOG(debug) << "Final adjusted video encoding bitrate is "sv << configuredBitrateKbps << " Kbps"sv;
-      config.monitor.bitrate = (int) configuredBitrateKbps;
+      BOOST_LOG(debug) << "Final adjusted video encoding bitrate is "sv << config.monitor.bitrate << " Kbps"sv;
     }
 
     if (config.monitor.videoFormat == 1 && video::active_hevc_mode == 1) {

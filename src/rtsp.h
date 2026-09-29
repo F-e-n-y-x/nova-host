@@ -6,6 +6,8 @@
 
 // standard includes
 #include <atomic>
+#include <optional>
+#include <string_view>
 
 // local includes
 #include "client_permissions.h"
@@ -127,6 +129,14 @@ namespace rtsp_stream {
    * @return Number of running sessions that were asked (0 when the client isn't streaming).
    */
   int request_bitrate_by_cert(std::string_view cert, int bitrate_kbps);
+
+  /**
+   * @brief Client-facing bitrate of a client's running stream.
+   *
+   * @param cert PEM certificate of the paired client.
+   * @return Kilobits per second, or nullopt when the client isn't streaming.
+   */
+  std::optional<int> client_bitrate_by_cert(std::string_view cert);
 
   /**
    * @brief Runs the RTSP server loop.

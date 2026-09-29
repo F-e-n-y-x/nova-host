@@ -207,6 +207,9 @@ export const OPTIONS = {
     help: 'output_name',
   },
   max_bitrate: { type: 'number', unit: 'Kbps', min: 0, integer: true },
+  abr_enabled: { type: 'bool' },
+  abr_min_bitrate: { type: 'number', unit: 'Kbps', min: 0, max: 800000, integer: true, when: (c) => on(c.abr_enabled ?? 'enabled') },
+  network_probe_enabled: { type: 'bool' },
   minimum_fps_target: { type: 'number', unit: 'fps', min: 0, max: 1000, integer: true },
   max_fps_target: { type: 'number', unit: 'fps', min: 0, max: 1000, integer: true },
   dd_configuration_option: {
@@ -466,7 +469,7 @@ export const SECTIONS = [
   {
     id: 'display',
     options: ['capture', 'capture_pacing', 'display_follow', 'display_follow_cmd', 'virtual_display', 'virtual_display_wm',
-      'virtual_display_session', 'virtual_display_linger', 'app_idle_quit_hours', 'virtual_display_fps_cap', 'adapter_name', 'output_name', 'max_bitrate', 'minimum_fps_target', 'max_fps_target',
+      'virtual_display_session', 'virtual_display_linger', 'app_idle_quit_hours', 'virtual_display_fps_cap', 'adapter_name', 'output_name', 'max_bitrate', 'abr_enabled', 'abr_min_bitrate', 'minimum_fps_target', 'max_fps_target',
       'dd_configuration_option', 'dd_resolution_option', 'dd_manual_resolution', 'dd_refresh_rate_option', 'dd_manual_refresh_rate',
       'dd_hdr_option', 'dd_wa_hdr_toggle_delay', 'dd_config_revert_delay', 'dd_config_revert_on_disconnect', 'dd_mode_remapping'],
   },
@@ -484,7 +487,7 @@ export const SECTIONS = [
   {
     id: 'network',
     options: ['upnp', 'address_family', 'bind_address', 'port', 'origin_web_ui_allowed', 'csrf_allowed_origins', 'external_ip',
-      'lan_encryption_mode', 'wan_encryption_mode', 'ping_timeout', 'packetsize'],
+      'lan_encryption_mode', 'wan_encryption_mode', 'ping_timeout', 'packetsize', 'network_probe_enabled'],
   },
   { id: 'files', options: ['file_apps', 'credentials_file', 'log_path', 'pkey', 'cert', 'file_state'] },
   { id: 'advanced', options: ['fec_percentage', 'qp', 'min_threads'] },

@@ -228,6 +228,8 @@ namespace config {
     int max_bitrate;  ///< Maximum bitrate ceiling in kbps for bitrate requested from the client.
     double minimum_fps_target;  ///< Lowest framerate that will be used when streaming. Range 0-1000, 0 = half of client's requested framerate.
     double max_fps_target;  ///< Nova: highest framerate that will be streamed. Range 0-1000, 0 = no cap, honour the client's request.
+    bool abr_enabled;  ///< Nova: serve Foundation-compatible adaptive bitrate (`/api/abr`, `/api/abr/capabilities`, `/api/abr/feedback`) to paired clients.
+    int abr_min_bitrate;  ///< Nova: lowest bitrate in kbps adaptive bitrate may choose (0 = the mode's own floor).
   };
 
   /**
@@ -288,6 +290,8 @@ namespace config {
     std::string file_state;  ///< Path to the persisted Sunshine state file.
 
     std::string external_ip;  ///< External address advertised to clients when configured.
+
+    bool network_probe_enabled;  ///< Nova: serve the paired-client network probe (`/api/network/capabilities`, `/api/network/probe`).
   };
 
   /**

@@ -773,6 +773,7 @@ namespace video {
     std::vector<bool> idr;  ///< Whether each frame is an IDR.
     std::vector<bool> after_rfi;  ///< Whether each frame is marked as following reference frame invalidation.
     std::vector<std::size_t> offsets;  ///< Byte offset of each frame in the returned bitstream (0 without one).
+    int bitrate_changes_applied = 0;  ///< Live bitrate changes the encoder accepted (`bitrate_at`).
   };
 
   /**
@@ -808,9 +809,11 @@ namespace video {
    * @param recover_at Frame numbers that follow a loss.
    * @param loss_span Number of lost frames before each entry of `recover_at`.
    * @param bitstream When not null, receives the encoded elementary stream.
+   * @param bitrate_at Live bitrate changes as (frame number, kbps): applied before that frame exactly as a
+   *        stream applies a `/bitrate` or adaptive bitrate request (`apply_bitrate_change()`).
    * @return Results, or empty when the session couldn't be created or encoding failed.
    */
-  std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, const std::vector<int> &recover_at, int loss_span, std::vector<std::uint8_t> *bitstream = nullptr);
+  std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, const std::vector<int> &recover_at, int loss_span, std::vector<std::uint8_t> *bitstream = nullptr, const std::vector<std::pair<int, int>> &bitrate_at = {});
 #endif
 
   /**

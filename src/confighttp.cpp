@@ -39,6 +39,7 @@
 #endif
 
 // local includes
+#include "abr.h"
 #include "app_lifecycle.h"
 #include "client_permissions.h"
 #include "clipboard.h"
@@ -1971,7 +1972,8 @@ namespace confighttp {
    * Add `?samples=1` to include the last 120 one-second samples per session (for sparklines).
    * Latencies are host-side milliseconds: `capture` is capture timestamp to encoder pickup, `encode` is
    * colour conversion plus encoding, `send` is packetizing, FEC, encryption and pacing until the last
-   * packet leaves the socket. `loss_pct` is null until the client reports loss.
+   * packet leaves the socket. `loss_pct` is null until the client reports loss. `abr` is present while the
+   * device runs adaptive bitrate: `{"mode","min_kbps","max_kbps","current_kbps","last_reason","changes"}`.
    *
    * @api_examples{/api/sessions|:| GET|:| null}
    */
@@ -1988,7 +1990,11 @@ namespace confighttp {
 
     nlohmann::json sessions = nlohmann::json::array();
     for (const auto &snap : stream_stats::active_sessions(with_samples)) {
-      sessions.push_back(stream_stats::snapshot_to_api_json(snap, session_client_identity(snap.info.client_cert), with_samples));
+      auto entry = stream_stats::snapshot_to_api_json(snap, session_client_identity(snap.info.client_cert), with_samples);
+      if (const auto abr_state = abr::status(snap.info.client_cert)) {
+        entry["abr"] = abr::status_json(*abr_state);
+      }
+      sessions.push_back(std::move(entry));
     }
 
     nlohmann::json output_tree;

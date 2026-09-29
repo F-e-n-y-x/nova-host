@@ -24,6 +24,7 @@ extern "C" {
 }
 
 // local includes
+#include "abr.h"
 #include "clipboard.h"
 #include "config.h"
 #include "display_device.h"
@@ -566,6 +567,7 @@ namespace stream {
     std::string client_cert;  ///< PEM certificate for the paired client owning the stream.
     std::string input_session_id;  ///< Stable client identity used to retain input devices across resume.
     std::atomic<client_permissions::mask_t> permissions {client_permissions::full};  ///< What the client may do; updated live from the web UI.
+    std::atomic<int> client_bitrate_kbps {0};  ///< Client-facing bitrate in use (launch value, then live changes).
 
     stream_stats::session_info_t stats_info;  ///< Facts reported by /api/sessions, fixed when the session is allocated.
     std::shared_ptr<stream_stats::session_stats_t> stats;  ///< Live telemetry; set while the session is running.
@@ -2488,8 +2490,25 @@ namespace stream {
       }
     }
 
-    void request_bitrate(session_t &session, const int bitrate_kbps) {
-      session.mail->event<int>(mail::dynamic_bitrate)->raise(bitrate_kbps);
+    bool request_bitrate(session_t &session, const int bitrate_kbps) {
+      if (bitrate_kbps <= 0 || session.client_bitrate_kbps.exchange(bitrate_kbps, std::memory_order_relaxed) == bitrate_kbps) {
+        return false;
+      }
+      int encoder_kbps = bitrate_kbps;
+      if (session.config.configuredBitrateKbps > 0) {
+        const auto &audio = session.config.audio;
+        const int audio_kbps = (audio.flags[audio::config_t::HIGH_QUALITY] ? 256 : 96) * audio.channels;
+        encoder_kbps = abr::encoder_kbps(bitrate_kbps, config::stream.fec_percentage, audio_kbps);
+      }
+      if (config::video.max_bitrate > 0) {
+        encoder_kbps = std::min(encoder_kbps, config::video.max_bitrate);
+      }
+      session.mail->event<int>(mail::dynamic_bitrate)->raise(encoder_kbps);
+      return true;
+    }
+
+    int client_bitrate(session_t &session) {
+      return session.client_bitrate_kbps.load(std::memory_order_relaxed);
     }
 
     /**
@@ -2540,6 +2559,8 @@ namespace stream {
 
       // Keep `stats` alive with the session: the shared broadcast thread may still hold queued packets for it.
       stream_stats::end_session(session.stats);
+      // ABR state belongs to one stream; the next one enables it again.
+      abr::disable(session.client_cert);
 
       // If this is the last session, invoke the platform callbacks
       if (--running_sessions == 0) {
@@ -2634,6 +2655,7 @@ namespace stream {
       session->input_session_id = launch_session.client_cert.empty() ? launch_session.unique_id : launch_session.client_cert;
 
       session->config = config;
+      session->client_bitrate_kbps.store(config.configuredBitrateKbps > 0 ? config.configuredBitrateKbps : config.monitor.bitrate, std::memory_order_relaxed);
 
       session->stats_info.id = launch_session.id;
       session->stats_info.client_cert = launch_session.client_cert;

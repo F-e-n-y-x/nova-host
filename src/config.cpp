@@ -822,7 +822,9 @@ namespace config {
 
     0,  // max_bitrate
     0,  // minimum_fps_target (0 = framerate)
-    0  // max_fps_target (0 = no cap, honour the client's requested framerate)
+    0,  // max_fps_target (0 = no cap, honour the client's requested framerate)
+    true,  // abr_enabled (Nova)
+    0,  // abr_min_bitrate (Nova; 0 = mode floor)
   };
 
   /**
@@ -863,6 +865,8 @@ namespace config {
     platf::get_host_name(),  // sunshine_name,
     "sunshine_state.json"s,  // file_state
     {},  // external_ip
+
+    true,  // network_probe_enabled (Nova)
   };
 
   /**
@@ -1804,6 +1808,8 @@ namespace config {
     int_f(vars, "max_bitrate", video.max_bitrate);
     double_between_f(vars, "minimum_fps_target", video.minimum_fps_target, {0.0, 1000.0});
     double_between_f(vars, "max_fps_target", video.max_fps_target, {0.0, 1000.0});
+    bool_f(vars, "abr_enabled", video.abr_enabled);
+    int_between_f(vars, "abr_min_bitrate", video.abr_min_bitrate, {0, 800000});
 
     path_f(vars, "pkey", nvhttp.pkey);
     path_f(vars, "cert", nvhttp.cert);
@@ -1816,6 +1822,7 @@ namespace config {
     path_f(vars, "credentials_file", config::sunshine.credentials_file);
 
     string_f(vars, "external_ip", nvhttp.external_ip);
+    bool_f(vars, "network_probe_enabled", nvhttp.network_probe_enabled);
     list_prep_cmd_f(vars, "global_prep_cmd", config::sunshine.prep_cmds);
     string_f(vars, "host_commands", config::sunshine.host_commands);
     bool_f(vars, "pcsleep_enabled", config::sunshine.pcsleep_enabled);

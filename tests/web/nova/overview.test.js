@@ -112,6 +112,22 @@ describe('overview cards', () => {
     w.unmount()
   })
 
+  it('stream health shows adaptive bitrate while it runs', () => {
+    const abr = { mode: 'balanced', min_kbps: 9000, max_kbps: 60000, current_kbps: 21000, last_reason: 'loss 6.0% (emergency)', changes: 2 }
+    const w = mountNova(StreamHealthCard, { props: { session: { ...SESSION, abr }, history: [] } })
+    expect(w.text()).toContain('Adaptive bitrate')
+    expect(w.text()).toContain('21 Mbps')
+    expect(w.text()).toContain('loss 6.0% (emergency)')
+    expect(w.find('.nv-sh__cells').attributes('style')).toContain('--nv-sh-cells: 3')
+    w.unmount()
+    const quiet = mountNova(StreamHealthCard, { props: { session: { ...SESSION, abr: { ...abr, last_reason: '' } }, history: [] } })
+    expect(quiet.text()).toContain('Between 9.0 Mbps and 60 Mbps')
+    quiet.unmount()
+    const off = mountNova(StreamHealthCard, { props: { session: SESSION, history: [] } })
+    expect(off.text()).not.toContain('Adaptive bitrate')
+    off.unmount()
+  })
+
   it('stream health idle uses the last session averages', () => {
     const w = mountNova(StreamHealthCard, { props: { session: null, history: [
       { id: 9, client_name: 'Deck', app_name: 'Far Cry 5', started_at: 900, duration_s: 60, avg_latency_ms: 6.1, avg_fps: 59.9, avg_bitrate_kbps: 30000 }] } })

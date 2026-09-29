@@ -272,6 +272,8 @@ namespace nova_api {
     bool motion = false;  ///< The virtual gamepad has motion sensors and touchpad (featureFlags 0x02).
     bool pcsleep = false;  ///< /pcsleep enabled in the config.
     bool commands = false;  ///< At least one host command is defined.
+    bool abr = false;  ///< Adaptive bitrate (`/api/abr`) enabled (`abr_enabled`).
+    bool network_probe = false;  ///< Network probe (`/api/network/probe`) enabled (`network_probe_enabled`).
   };
 
   /**

@@ -1027,6 +1027,12 @@ namespace nova_api {
     if (features.motion) {
       list.push_back("motion");
     }
+    if (features.abr) {
+      list.push_back("abr");
+    }
+    if (features.network_probe) {
+      list.push_back("network_probe");
+    }
     nlohmann::json granted = nlohmann::json::array();
     for (const auto &[name, flag] : client_permissions::flag_names) {
       if (client_permissions::has(permissions, flag)) {

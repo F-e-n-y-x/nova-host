@@ -2571,7 +2571,7 @@ namespace video {
     return encode_offline_nvenc(disp, native, config, images, frames, losses, 2, bitstream);
   }
 
-  std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, const std::vector<int> &recover_at, int loss_span, std::vector<std::uint8_t> *bitstream) {
+  std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, const std::vector<int> &recover_at, int loss_span, std::vector<std::uint8_t> *bitstream, const std::vector<std::pair<int, int>> &bitrate_at) {
     encoder_t &encoder = native ? nvenc_native : nvenc;
     // No probe ran offline, so mark the codec as validated for the length of this encode.
     auto &codec = const_cast<encoder_t::codec_t &>(encoder.codec_from_config(config));
@@ -2596,6 +2596,12 @@ namespace video {
       if (loss_span > 0 && frame_nr > loss_span && std::ranges::find(recover_at, frame_nr) != recover_at.end()) {
         // What a client sends when frames [frame_nr - loss_span, frame_nr - 1] never arrived.
         session->invalidate_ref_frames(frame_nr - loss_span, frame_nr - 1);
+      }
+      for (const auto &[at, kbps] : bitrate_at) {
+        if (at == frame_nr && session->set_bitrate(kbps)) {
+          // The stream loop logs through apply_bitrate_change(); count it here instead.
+          ++result.bitrate_changes_applied;
+        }
       }
       const auto start = std::chrono::steady_clock::now();
       if (session->convert(*images[(frame_nr - 1) % images.size()])) {

@@ -2305,6 +2305,64 @@ a message naming the file instead of streaming a desktop while the game silently
     </tr>
 </table>
 
+### abr_enabled
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Adaptive bitrate for clients that ask for it (Nova; the `/api/abr` protocol of
+            Sunshine-Foundation, used by Nebula and Moonlight V+). While a device streams, it reports packet
+            loss and latency about once a second and Nova lowers or raises the stream bitrate below the bitrate
+            the device streams at (its slider, a per-game bitrate, or a later manual change), which is the cap;
+            never above `max_bitrate`. Decisions are rule-based: heavy loss drops at once,
+            sustained loss or a rising round-trip time drops in small steps, and the bitrate climbs back only
+            after the link has stayed clean for a while, more slowly near the bitrate that last caused loss.
+            The live bitrate change keeps the encoder running (no new keyframe with NVENC).
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            abr_enabled = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### abr_min_bitrate
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            The lowest bitrate in Kbps adaptive bitrate may choose (Nova). A device's own minimum is raised to
+            this value. 0 uses the floor of the device's mode (2000-5000 Kbps).
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            0
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Range</td>
+        <td colspan="2">0-800000</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            abr_min_bitrate = 8000
+            @endcode</td>
+    </tr>
+</table>
+
 ## Network
 
 ### upnp
@@ -2675,6 +2733,33 @@ a message naming the file instead of streaming a desktop while the game silently
         <td>Example</td>
         <td colspan="2">@code{}
             packetsize = 1346
+            @endcode</td>
+    </tr>
+</table>
+
+### network_probe_enabled
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Let paired devices test the connection before streaming (Nova; `/api/network/probe`, compatible
+            with Sunshine-Foundation). The device times a few small requests for round-trip time and jitter,
+            then downloads up to 4 MB of random data for throughput; Nova also reports the TCP retransmissions
+            it saw as packet loss. Refused while a stream is running, and limited to one test per device every
+            5 seconds.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            network_probe_enabled = disabled
             @endcode</td>
     </tr>
 </table>

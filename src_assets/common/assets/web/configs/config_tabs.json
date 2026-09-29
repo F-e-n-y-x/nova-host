@@ -99,7 +99,9 @@
       "power_mode": "disabled",
       "power_mode_gpu": "enabled",
       "power_mode_cpu": "enabled",
-      "power_mode_inhibit": "enabled"
+      "power_mode_inhibit": "enabled",
+      "abr_enabled": "enabled",
+      "abr_min_bitrate": 0
     }
   },
   {
@@ -116,7 +118,8 @@
       "lan_encryption_mode": 0,
       "wan_encryption_mode": 1,
       "ping_timeout": 10000,
-      "packetsize": 0
+      "packetsize": 0,
+      "network_probe_enabled": "enabled"
     }
   },
   {

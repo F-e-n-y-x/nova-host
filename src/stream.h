@@ -41,6 +41,8 @@ namespace stream {
     uint32_t encryptionFlagsEnabled;  ///< Bitmask of GameStream encryption features enabled for the session.
 
     std::optional<int> gcmap;  ///< Optional game-controller mapping override from the launch request.
+
+    int configuredBitrateKbps = 0;  ///< Bitrate the client's slider asked for (`x-ml-video.configuredBitrateKbps`); 0 when it sent none and `monitor.bitrate` is used as is.
   };
 
   namespace session {
@@ -120,9 +122,21 @@ namespace stream {
     /**
      * @brief Ask the session's encoder to change bitrate; applied on the next encoded frame.
      *
+     * @p bitrate_kbps is the client-facing value (what the client's slider shows). When the client
+     * set its bitrate that way at launch, the encoder gets the same FEC, audio and overhead
+     * allowance the stream started with. Asking for the current value again does nothing.
+     *
      * @param session Active streaming session.
      * @param bitrate_kbps New bitrate in kilobits per second.
+     * @return True when the encoder was asked to change, false when the value was already in use.
      */
-    void request_bitrate(session_t &session, int bitrate_kbps);
+    bool request_bitrate(session_t &session, int bitrate_kbps);
+    /**
+     * @brief Client-facing bitrate the session currently runs at.
+     *
+     * @param session Active streaming session.
+     * @return Kilobits per second: the launch value, or the last value given to `request_bitrate()`.
+     */
+    int client_bitrate(session_t &session);
   }  // namespace session
 }  // namespace stream
