@@ -296,3 +296,10 @@ TEST(RunProgram, CapturesOutputAndExitCode) {
   EXPECT_EQ(run_program::run({"nova-no-such-program-xyz"}, std::chrono::seconds(5)).exit_code, 127);
   EXPECT_EQ(run_program::run({"sleep", "5"}, std::chrono::milliseconds(200)).exit_code, -1);
 }
+
+TEST(PowerModeWanted, AGameOverrideBeatsTheHostSetting) {
+  EXPECT_FALSE(power_mode::wanted(false, std::nullopt));
+  EXPECT_TRUE(power_mode::wanted(true, std::nullopt));
+  EXPECT_TRUE(power_mode::wanted(false, true));
+  EXPECT_FALSE(power_mode::wanted(true, false));
+}

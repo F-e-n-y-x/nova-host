@@ -132,3 +132,13 @@ TEST(ClientPermissionsTest, HostControlFlagsArePresetsAndDefaultOff) {
   EXPECT_TRUE(perm::default_when_missing(perm::clipboard));
   EXPECT_EQ(perm::preset_name(perm::standard | perm::power), "custom");
 }
+
+TEST(ClientPermissionsTest, AppProfilesFollowLaunchAppsWhenMissing) {
+  EXPECT_TRUE(perm::default_when_missing(perm::app_profiles, true));
+  EXPECT_FALSE(perm::default_when_missing(perm::app_profiles, false));
+  EXPECT_TRUE(perm::default_when_missing(perm::clipboard, false));
+  EXPECT_FALSE(perm::default_when_missing(perm::power, true));
+  EXPECT_TRUE(perm::has(perm::standard, perm::app_profiles));
+  EXPECT_TRUE(perm::has(perm::play, perm::app_profiles));
+  EXPECT_FALSE(perm::has(perm::view_only, perm::app_profiles));
+}

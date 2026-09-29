@@ -12,7 +12,7 @@ import {
 } from '../../../src_assets/common/assets/web/nova/devices/format.js'
 import { mountNova } from './helpers.js'
 
-const FULL = { input_keyboard: true, input_mouse: true, input_controller: true, input_touch_pen: true, clipboard: true, launch_apps: true, power: false, host_commands: false, preset: 'standard' }
+const FULL = { input_keyboard: true, input_mouse: true, input_controller: true, input_touch_pen: true, clipboard: true, launch_apps: true, app_profiles: true, power: false, host_commands: false, preset: 'standard' }
 
 function device(overrides = {}) {
   return { name: 'Pixel 9 Pro', uuid: 'AAAAAAAA-1111-2222-3333-BBBBBBBBBBBB', enabled: true, permissions: FULL, paired_at: 1790000000, last_connected_at: null, connected: false, ...overrides }
@@ -108,7 +108,7 @@ describe('PermissionEditor', () => {
     await buttons()[1].trigger('click')
     await flushPromises()
     const switches = wrapper.findAll('[role="switch"]')
-    expect(switches).toHaveLength(8)
+    expect(switches).toHaveLength(9)
     await switches[4].trigger('click') // clipboard off → matches "play"
     await flushPromises()
     expect(flags.clipboard).toBe(false)
@@ -138,6 +138,14 @@ describe('PermissionEditor', () => {
     expect(permissionFlags({ input_mouse: false })).toMatchObject({ input_mouse: false, input_keyboard: true, clipboard: true, power: false, host_commands: false })
     expect(permissionFlags({ power: true }).power).toBe(true)
     expect(presetForFlags(permissionFlags({ preset: 'standard' }))).toBe('standard')
+  })
+
+  it('lets a missing "change game settings" flag follow "start apps"', () => {
+    expect(permissionFlags({ launch_apps: true }).app_profiles).toBe(true)
+    expect(permissionFlags({ launch_apps: false }).app_profiles).toBe(false)
+    expect(permissionFlags({ launch_apps: true, app_profiles: false }).app_profiles).toBe(false)
+    // A device saved by 0.2 with the old "play" flags still matches the preset.
+    expect(presetForFlags(permissionFlags({ input_keyboard: true, input_mouse: true, input_controller: true, input_touch_pen: true, clipboard: false, launch_apps: true }))).toBe('play')
   })
 })
 

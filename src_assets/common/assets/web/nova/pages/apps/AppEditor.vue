@@ -7,6 +7,8 @@
  *
  * Layout (Library design): hero banner with the poster overlapping it, name + source line and
  * "Change artwork", then Name / Command / Working folder, before-and-after commands, and an
+ * "Performance" (the game's host settings: frame rate limit, FSR, sharpening, overlay, stream bitrate
+ * limit and power mode, stored as `nova-perf`), then an
  * "Advanced" disclosure (detached commands, behaviour, exit timeout, output log, variables).
  * Saved games in a host with the library API also get "Artwork" (every kind: upload, URL, search, reset)
  * and "Metadata" tabs (see AppArtworkPanel, AppMetadataPanel).
@@ -43,7 +45,7 @@ import EnvVarsReference from './EnvVarsReference.vue'
 import FileBrowserDialog from './FileBrowserDialog.vue'
 import CoverFinderDialog from './CoverFinderDialog.vue'
 import { fetchJson, postJson } from '../../api'
-import { buildPayload, formFromApp, formsDiffer, newAppForm, validateForm } from './appForm'
+import { PERF_LIMITS, buildPayload, formFromApp, formsDiffer, newAppForm, perfLauncher, validateForm } from './appForm'
 import { applyArtwork, appRunner, appSource, artUrl, candidateUrl, pollJob, searchArtwork } from '../library/libraryApi'
 import { imageToPngBase64, uploadCoverData } from '../library/artworkUpload'
 
@@ -59,7 +61,9 @@ const emit = defineEmits(['saved', 'close', 'delete', 'artwork-applied'])
 const { t } = useI18n()
 
 /** Field ids, in form order, for focusing the first error. */
-const FIELD_IDS = { name: 'nv-app-name', exitTimeout: 'nv-app-exit-timeout', menuCmd: 'nv-editor-hostcmd' }
+const FIELD_IDS = {
+  name: 'nv-app-name', perfFps: 'nv-app-perf-fps', perfBitrate: 'nv-app-perf-bitrate', exitTimeout: 'nv-app-exit-timeout', menuCmd: 'nv-editor-hostcmd',
+}
 
 const form = ref(newAppForm())
 const initial = shallowRef('')
@@ -80,6 +84,14 @@ const fsrOptions = computed(() => [
   { value: '0', label: t('nova.apps.compat_fsr_off') },
   ...[1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: t('nova.apps.compat_fsr_level', { n }) })),
 ])
+/** Streaming power mode choices for this game. */
+const powerOptions = computed(() => [
+  { value: 'default', label: t('nova.apps.perf_power_default') },
+  { value: 'performance', label: t('nova.apps.perf_power_performance') },
+  { value: 'balanced', label: t('nova.apps.perf_power_balanced') },
+])
+/** Launch variables (frame limit, FSR, sharpening, overlay) can't reach games Steam or nothing starts. */
+const perfEnvApplies = computed(() => !['steam', 'none'].includes(perfLauncher(form.value)))
 const isNew = computed(() => props.index === -1)
 const showTabs = computed(() => !isNew.value && props.libraryApi)
 const tabs = computed(() => [
@@ -406,20 +418,39 @@ defineExpose({ isDirty, askDiscard, openArtwork })
         <p class="nv-editor__desc">{{ t('nova.apps.compat_desc') }}</p>
         <PathField v-model="form['nova-compat'].prefix" :label="t('nova.apps.compat_prefix')" :hint="t('nova.apps.compat_prefix_hint')"
                    @browse="browseCompatPrefix" />
-        <NvSelect v-model="form['nova-compat'].fsr" :label="t('nova.apps.compat_fsr')" :hint="t('nova.apps.compat_fsr_hint')" :options="fsrOptions" />
-        <NvNumberField v-model="form['nova-compat'].fps_cap" :label="t('nova.apps.compat_fps_cap')" :unit="t('nova.apps.compat_fps')"
-                       :min="0" :hint="t('nova.apps.compat_fps_cap_hint')" />
-        <div class="nv-editor__group">
-          <NvSettingRow :label="t('nova.apps.compat_mangohud')" :description="t('nova.apps.compat_mangohud_hint')">
-            <template #default="{ labelId, descriptionId }">
-              <NvSwitch v-model="form['nova-compat'].mangohud" :labelledby="labelId" :describedby="descriptionId" show-state />
-            </template>
-          </NvSettingRow>
-        </div>
         <NvTextField v-model="form['nova-compat'].proton_version" :label="t('nova.apps.compat_proton')" :hint="t('nova.apps.compat_proton_hint')"
                      placeholder="latest" mono />
         <NvTextField v-model="form['nova-compat'].extra_env" :label="t('nova.apps.compat_env')" :hint="t('nova.apps.compat_env_hint')"
                      placeholder="DXVK_HUD=fps" mono multiline />
+      </section>
+
+      <section v-if="platform === 'linux' && form['nova-perf']" class="nv-editor__section" aria-labelledby="nv-editor-perf">
+        <h3 id="nv-editor-perf" class="nv-editor__heading">{{ t('nova.apps.section_perf') }}</h3>
+        <p class="nv-editor__desc">{{ t('nova.apps.perf_desc') }}</p>
+        <NvAlert v-if="!perfEnvApplies" variant="info">{{ t('nova.apps.perf_steam_note') }}</NvAlert>
+        <NvNumberField v-model="form['nova-perf'].fps_cap" :label="t('nova.apps.compat_fps_cap')" :unit="t('nova.apps.compat_fps')"
+                       :min="0" :max="PERF_LIMITS.fpsCap" :hint="t('nova.apps.perf_fps_cap_hint')" :id="FIELD_IDS.perfFps"
+                       :error="errors.perfFps ? t(errors.perfFps) : ''" :disabled="!perfEnvApplies" />
+        <NvSelect v-model="form['nova-perf'].fsr" :label="t('nova.apps.compat_fsr')" :hint="t('nova.apps.compat_fsr_hint')" :options="fsrOptions"
+                  :disabled="!perfEnvApplies" />
+        <div class="nv-editor__group">
+          <NvSettingRow :label="t('nova.apps.perf_vkbasalt')" :description="t('nova.apps.perf_vkbasalt_hint')">
+            <template #default="{ labelId, descriptionId }">
+              <NvSwitch v-model="form['nova-perf'].vkbasalt" :labelledby="labelId" :describedby="descriptionId" show-state :disabled="!perfEnvApplies" />
+            </template>
+          </NvSettingRow>
+          <NvSettingRow :label="t('nova.apps.compat_mangohud')" :description="t('nova.apps.compat_mangohud_hint')">
+            <template #default="{ labelId, descriptionId }">
+              <NvSwitch v-model="form['nova-perf'].mangohud" :labelledby="labelId" :describedby="descriptionId" show-state :disabled="!perfEnvApplies" />
+            </template>
+          </NvSettingRow>
+        </div>
+        <NvNumberField v-if="form['nova-perf'].vkbasalt" v-model="form['nova-perf'].vkbasalt_cas" :label="t('nova.apps.perf_vkbasalt_cas')" unit="%"
+                       :min="0" :max="100" :step="5" :hint="t('nova.apps.perf_vkbasalt_cas_hint')" :disabled="!perfEnvApplies" />
+        <NvNumberField v-model="form['nova-perf'].bitrate_mbps" :label="t('nova.apps.perf_bitrate')" unit="Mbps"
+                       :min="0" :max="PERF_LIMITS.maxBitrateMbps" :step="0.5" :hint="t('nova.apps.perf_bitrate_hint')" :id="FIELD_IDS.perfBitrate"
+                       :error="errors.perfBitrate ? t(errors.perfBitrate) : ''" />
+        <NvSelect v-model="form['nova-perf'].power" :label="t('nova.apps.perf_power')" :hint="t('nova.apps.perf_power_hint')" :options="powerOptions" />
       </section>
 
       <details class="nv-editor__advanced">

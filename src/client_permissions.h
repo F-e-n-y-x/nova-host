@@ -37,11 +37,12 @@ namespace client_permissions {
   constexpr mask_t launch_apps = 1u << 5;  ///< See every app and start one; without it only the running app can be resumed.
   constexpr mask_t power = 1u << 6;  ///< Put the host to sleep (/pcsleep).
   constexpr mask_t host_commands = 1u << 7;  ///< Run admin-defined host commands (/supercmd).
+  constexpr mask_t app_profiles = 1u << 8;  ///< Change a game's host performance profile (frame cap, FSR, bitrate cap, power).
 
   constexpr mask_t input_all = input_keyboard | input_mouse | input_controller | input_touch_pen;  ///< Every input kind.
-  constexpr mask_t full = input_all | clipboard | launch_apps | power | host_commands;  ///< Preset: everything, including sleep and host commands.
-  constexpr mask_t standard = input_all | clipboard | launch_apps;  ///< Preset: stream, launch and clipboard; no host control (the default for new devices).
-  constexpr mask_t play = input_all | launch_apps;  ///< Preset: launch apps and use all input, no clipboard.
+  constexpr mask_t full = input_all | clipboard | launch_apps | app_profiles | power | host_commands;  ///< Preset: everything, including sleep and host commands.
+  constexpr mask_t standard = input_all | clipboard | launch_apps | app_profiles;  ///< Preset: stream, launch, tune games and clipboard; no host control (the default for new devices).
+  constexpr mask_t play = input_all | launch_apps | app_profiles;  ///< Preset: launch and tune apps and use all input, no clipboard.
   constexpr mask_t view_only = 0;  ///< Preset: watch the running app; no input, no launching, no clipboard.
   constexpr mask_t paired_default = standard;  ///< What a newly paired device gets.
 
@@ -56,13 +57,14 @@ namespace client_permissions {
   /**
    * @brief JSON key for each flag, in display order.
    */
-  constexpr std::array<std::pair<std::string_view, mask_t>, 8> flag_names {{
+  constexpr std::array<std::pair<std::string_view, mask_t>, 9> flag_names {{
     {"input_keyboard", input_keyboard},
     {"input_mouse", input_mouse},
     {"input_controller", input_controller},
     {"input_touch_pen", input_touch_pen},
     {"clipboard", clipboard},
     {"launch_apps", launch_apps},
+    {"app_profiles", app_profiles},
     {"power", power},
     {"host_commands", host_commands},
   }};
@@ -75,6 +77,20 @@ namespace client_permissions {
    */
   constexpr bool default_when_missing(const mask_t flag) {
     return (flag & host_control) == 0;
+  }
+
+  /**
+   * @brief Value to assume for a missing flag, given what the stored object says about launching.
+   *
+   * "app_profiles" came after "launch_apps" and follows it, so a device that may not launch games
+   * doesn't gain the right to tune them, and a stored preset keeps matching after an upgrade.
+   *
+   * @param flag Flag.
+   * @param launch_apps Stored value of "launch_apps" (true when that is missing too).
+   * @return The value to assume.
+   */
+  constexpr bool default_when_missing(const mask_t flag, const bool launch_apps) {
+    return flag == app_profiles ? launch_apps : default_when_missing(flag);
   }
 
   /**

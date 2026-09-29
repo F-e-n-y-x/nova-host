@@ -24,6 +24,7 @@
 #include "app_processes.h"
 #include "config.h"
 #include "nova_compat.h"
+#include "nova_perf.h"
 #include "platform/common.h"
 #include "rtsp.h"
 #include "src/boost_process_compat.h"
@@ -89,6 +90,8 @@ namespace proc {
     std::uint32_t steam_appid = 0;  ///< Matched Steam app id ("nova-steam-appid"), or 0.
     nova_compat::options_t compat;  ///< Windows compatibility options ("nova-compat").
     bool vd_share_profile = false;  ///< Nova: on a virtual display, keep the desktop's browser profile and D-Bus ("nova-vd-share-profile").
+    nova_perf::profile_t perf;  ///< Performance profile ("nova-perf", or the legacy "nova-compat" fields).
+    nova_perf::launcher_e launcher = nova_perf::launcher_e::command;  ///< How the app starts.
   };
 
   /**
@@ -201,6 +204,13 @@ namespace proc {
     void terminate();
 
     /**
+     * @brief The running game's stream bitrate cap from its performance profile (Nova).
+     *
+     * @return Cap in kbps, or 0 when nothing runs or the game has no cap.
+     */
+    int running_bitrate_cap() const;
+
+    /**
      * @brief When the running app was started (Nova).
      *
      * @return Unix time in seconds, or 0 when nothing was launched.
@@ -241,11 +251,23 @@ namespace proc {
     bool tracked() const;
 
   private:
+    /**
+     * @brief Put back the variables the previous launch's performance profile replaced.
+     */
+    void undo_perf_env();
+
+    /**
+     * @brief Set the running app's performance-profile variables, undoing the previous launch's first.
+     */
+    void apply_perf_env();
+
     int _app_id;
     std::string _last_error;
 
     boost::process::v1::environment _env;
     std::map<std::string, std::optional<std::string>> _vd_base_env;  ///< Desktop values of the variables a virtual-display launch overrides.
+    /// Performance variables the last launch overrode, with their earlier values (nullopt = unset).
+    std::vector<std::pair<std::string, std::optional<std::string>>> _perf_saved;
     std::vector<ctx_t> _apps;
     ctx_t _app;
     std::chrono::steady_clock::time_point _app_launch_time;

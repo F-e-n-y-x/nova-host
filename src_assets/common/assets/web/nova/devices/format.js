@@ -3,7 +3,7 @@
  */
 
 /** Permission flags in display order, matching the host's JSON keys. */
-export const PERMISSION_FLAGS = ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'clipboard', 'launch_apps', 'power', 'host_commands']
+export const PERMISSION_FLAGS = ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'clipboard', 'launch_apps', 'app_profiles', 'power', 'host_commands']
 
 /** Flags that control the host itself; off unless granted, even for devices saved before they existed. */
 export const HOST_CONTROL_FLAGS = ['power', 'host_commands']
@@ -14,21 +14,26 @@ export const PERMISSION_PRESETS = ['full', 'standard', 'play', 'view_only']
 /** Flags each preset turns on; the rest are off. */
 export const PRESET_FLAGS = {
   full: PERMISSION_FLAGS,
-  standard: ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'clipboard', 'launch_apps'],
-  play: ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'launch_apps'],
+  standard: ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'clipboard', 'launch_apps', 'app_profiles'],
+  play: ['input_keyboard', 'input_mouse', 'input_controller', 'input_touch_pen', 'launch_apps', 'app_profiles'],
   view_only: [],
 }
 
 /**
  * Permission flags as booleans. A missing flag counts as allowed, like the host does, except the
- * host-control flags, which count as denied.
+ * host-control flags, which count as denied, and "app_profiles", which follows "launch_apps".
  *
  * @param {object|undefined} permissions Permission object from the host.
  * @returns {Record<string, boolean>} Flag name → allowed.
  */
 export function permissionFlags(permissions) {
   const source = permissions || {}
-  return Object.fromEntries(PERMISSION_FLAGS.map((flag) => [flag, HOST_CONTROL_FLAGS.includes(flag) ? source[flag] === true : source[flag] !== false]))
+  const allowed = (flag) => {
+    if (HOST_CONTROL_FLAGS.includes(flag)) return source[flag] === true
+    if (flag === 'app_profiles' && source[flag] === undefined) return source.launch_apps !== false
+    return source[flag] !== false
+  }
+  return Object.fromEntries(PERMISSION_FLAGS.map((flag) => [flag, allowed(flag)]))
 }
 
 /**

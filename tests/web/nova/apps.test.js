@@ -41,9 +41,11 @@ const STORED = {
 }
 
 describe('appForm', () => {
-  it('new form carries every field the previous editor sent, plus working-dir and host commands', () => {
+  it('new form carries every field the previous editor sent, plus working-dir, host commands and the performance profile', () => {
     const form = newAppForm()
-    expect(Object.keys(form).sort()).toEqual([...Object.keys(OLD_NEW_APP), 'working-dir', 'menu-cmd'].sort())
+    expect(Object.keys(form).sort()).toEqual([...Object.keys(OLD_NEW_APP), 'working-dir', 'menu-cmd', 'nova-perf'].sort())
+    // An untouched profile is not saved, so the payload keeps the old shape.
+    expect(buildPayload(form)).not.toHaveProperty('nova-perf')
     expect(form['menu-cmd']).toEqual([])
     for (const [k, v] of Object.entries(OLD_NEW_APP)) expect(form[k]).toEqual(v)
   })

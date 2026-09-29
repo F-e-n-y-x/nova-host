@@ -503,7 +503,8 @@ namespace power_mode {
           ul.unlock();
           if (target) {
             settings_t s;
-            s.enabled = config::nova.power_mode;
+            // want(true) is only asked for when the setting or the running game's override wants it.
+            s.enabled = true;
             s.gpu = config::nova.power_mode_gpu;
             s.cpu = config::nova.power_mode_cpu;
             s.inhibit = config::nova.power_mode_inhibit;
@@ -529,18 +530,66 @@ namespace power_mode {
     }
   }  // namespace
 
-  void first_session_started(const std::string &client_name) {
-    if (!config::nova.power_mode && !instance().status().active) {
-      return;
+  namespace {
+    /**
+     * @brief Stream and per-game state the hooks decide from.
+     */
+    struct hook_state_t {
+      std::mutex mutex;
+      bool streaming = false;  ///< Between the first session start and the last session end.
+      std::optional<bool> app_override;  ///< The running game's override.
+      std::string client;  ///< Device of the first session, for the inhibit reason.
+      bool asked = false;  ///< Whether want(true) was the last request.
+    };
+
+    hook_state_t &hook_state() {
+      static auto *state = new hook_state_t;  // leaked like the worker, which may outlive static destruction
+      return *state;
     }
-    worker().want(true, client_name);
+
+    /**
+     * @brief Ask the worker for the state the stream and the running game call for.
+     *
+     * @param state Hook state (locked by the caller).
+     */
+    void reconcile(hook_state_t &state) {
+      const bool target = state.streaming && wanted(config::nova.power_mode, state.app_override);
+      // Nothing to do when the last request already matches, unless the mode is still on from
+      // an earlier stream (for example the setting was turned off mid-stream).
+      if (target == state.asked && (target || !instance().status().active)) {
+        return;
+      }
+      state.asked = target;
+      worker().want(target, state.client);
+    }
+  }  // namespace
+
+  void first_session_started(const std::string &client_name) {
+    auto &state = hook_state();
+    std::lock_guard lg {state.mutex};
+    state.streaming = true;
+    state.client = client_name;
+    reconcile(state);
   }
 
   void last_session_ended() {
-    if (!config::nova.power_mode && !instance().status().active) {
+    auto &state = hook_state();
+    std::lock_guard lg {state.mutex};
+    state.streaming = false;
+    reconcile(state);
+  }
+
+  void set_app_override(std::optional<bool> app_override) {
+    auto &state = hook_state();
+    std::lock_guard lg {state.mutex};
+    if (state.app_override == app_override) {
       return;
     }
-    worker().want(false, {});
+    state.app_override = app_override;
+    if (app_override) {
+      BOOST_LOG(info) << "Power mode: this game asks for "sv << (*app_override ? "performance"sv : "no change"sv) << " while it streams"sv;
+    }
+    reconcile(state);
   }
 
   void recover_at_startup() {

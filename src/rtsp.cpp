@@ -14,6 +14,7 @@ extern "C" {
 #include <array>
 #include <cctype>
 #include <format>
+#include <limits>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -29,6 +30,8 @@ extern "C" {
 #include "input.h"
 #include "logging.h"
 #include "network.h"
+#include "nova_perf.h"
+#include "process.h"
 #include "rtsp.h"
 #include "stream.h"
 #include "sync.h"
@@ -1356,6 +1359,18 @@ namespace rtsp_stream {
       config.monitor.enableIntraRefresh = (int) util::from_view(args.at("x-ss-video[0].intraRefresh"sv));
 
       configuredBitrateKbps = util::from_view(args.at("x-ml-video.configuredBitrateKbps"sv));
+
+      // Nova: the running game's performance profile can cap the stream bitrate.
+      if (const int cap = proc::proc.running_bitrate_cap(); cap > 0) {
+        const auto requested = configuredBitrateKbps ? configuredBitrateKbps : config.monitor.bitrate;
+        if (requested > cap) {
+          BOOST_LOG(info) << "Capping requested bitrate for ["sv << proc::proc.get_last_run_app_name() << "]: "sv << requested << " -> "sv << cap << " kbps"sv;
+        }
+        config.monitor.bitrate = nova_perf::cap_bitrate(config.monitor.bitrate, cap);
+        if (configuredBitrateKbps) {
+          configuredBitrateKbps = nova_perf::cap_bitrate((int) std::min<std::int64_t>(configuredBitrateKbps, std::numeric_limits<int>::max()), cap);
+        }
+      }
     } catch (std::out_of_range &) {
       respond(sock, session, &option, 400, "BAD REQUEST", req->sequenceNumber, {});
       return;
