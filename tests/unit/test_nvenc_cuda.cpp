@@ -43,6 +43,8 @@ namespace {
     NV_ENC_CONFIG init_config = {};  ///< Configuration passed to nvEncInitializeEncoder().
     NV_ENC_CONFIG reconfig_config = {};  ///< Configuration passed to nvEncReconfigureEncoder().
     int reconfigure_calls = 0;  ///< Number of nvEncReconfigureEncoder() calls.
+    bool reject_multi_frame_dpb = false;  ///< nvEncInitializeEncoder() fails for an HEVC DPB above one frame.
+    int initialize_calls = 0;  ///< Number of nvEncInitializeEncoder() calls.
     std::vector<std::uint8_t> bitstream {0, 0, 0, 1, 0x40};  ///< Payload of every encoded frame.
   };
 
@@ -104,7 +106,11 @@ namespace {
   }
 
   NVENCSTATUS NVENCAPI initialize(void *, NV_ENC_INITIALIZE_PARAMS *params) {
+    ++fake.initialize_calls;
     fake.init_config = *params->encodeConfig;
+    if (fake.reject_multi_frame_dpb && params->encodeConfig->encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB > 1) {
+      return NV_ENC_ERR_INVALID_PARAM;
+    }
     return NV_ENC_SUCCESS;
   }
 
@@ -339,15 +345,54 @@ TEST_F(NvencBaseFakeDriverTest, WithoutRfiCapsEveryRequestNeedsAnIdr) {
   EXPECT_TRUE(fake.invalidated.empty());
 }
 
-TEST_F(NvencBaseFakeDriverTest, WithoutMultipleReferenceFramesRfiIsOff) {
+TEST_F(NvencBaseFakeDriverTest, WithoutMultipleReferenceFramesRfiKeepsItsDpb) {
+  // Pascal: no multiple-reference cap, but RFI is supported and works with a multi-frame DPB.
   fake.multiple_ref_frames = false;
   create_and_encode(1, 10);
 
   const auto caps = encoder.capabilities();
   EXPECT_TRUE(caps.rfi_supported);
+  EXPECT_TRUE(caps.rfi_active);
+  EXPECT_EQ(caps.ref_frames_in_dpb, 5U);
+  EXPECT_EQ(fake.init_config.encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB, 5U);
+  EXPECT_EQ(fake.init_config.encodeCodecConfig.hevcConfig.numRefL0, NV_ENC_NUM_REF_FRAMES_1);
+  EXPECT_TRUE(encoder.invalidate_ref_frames(9, 10));
+}
+
+TEST_F(NvencBaseFakeDriverTest, WithoutMultipleReferenceFramesOrRfiTheDpbIsOneFrame) {
+  fake.multiple_ref_frames = false;
+  fake.rfi = false;
+  create_and_encode(1, 10);
+
+  const auto caps = encoder.capabilities();
   EXPECT_FALSE(caps.rfi_active);
   EXPECT_EQ(caps.ref_frames_in_dpb, 1U);
   EXPECT_FALSE(encoder.invalidate_ref_frames(10, 10));
+}
+
+TEST_F(NvencBaseFakeDriverTest, RejectedUnadvertisedDpbRetriesWithOneReference) {
+  fake.multiple_ref_frames = false;
+  fake.reject_multi_frame_dpb = true;
+  create_and_encode(1, 10);
+
+  EXPECT_EQ(fake.initialize_calls, 2);
+  const auto caps = encoder.capabilities();
+  EXPECT_FALSE(caps.rfi_active);
+  EXPECT_EQ(caps.ref_frames_in_dpb, 1U);
+  EXPECT_FALSE(encoder.invalidate_ref_frames(10, 10));
+}
+
+TEST_F(NvencBaseFakeDriverTest, UnsupportedInvalidationSwitchesToIdrForGood) {
+  // Pascal with intra-refresh on: every NvEncInvalidateRefFrames() returns UNSUPPORTED_PARAM.
+  fake.invalidate_status = NV_ENC_ERR_UNSUPPORTED_PARAM;
+  create_and_encode(1, 10);
+  EXPECT_FALSE(encoder.invalidate_ref_frames(9, 10));
+  EXPECT_EQ(fake.invalidated.size(), 1U);
+  EXPECT_FALSE(encoder.capabilities().rfi_active);
+
+  encode(11, 20);
+  EXPECT_FALSE(encoder.invalidate_ref_frames(19, 20));
+  EXPECT_EQ(fake.invalidated.size(), 1U) << "no further driver calls once RFI is known not to work";
 }
 
 TEST_F(NvencBaseFakeDriverTest, NoRequestsBeforeTheEncoderExists) {

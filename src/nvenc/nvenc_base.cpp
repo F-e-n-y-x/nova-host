@@ -294,9 +294,17 @@ namespace NVENC_NAMESPACE {
     const GUID &encode_guid
   ) {
     ref_frames_option = requested_count > 0 ? static_cast<std::uint32_t>(requested_count) : default_count;
-    if (ref_frames_option > 0U && !get_encoder_cap(encode_guid, NV_ENC_CAPS_SUPPORT_MULTIPLE_REF_FRAMES)) {
-      ref_frames_option = 1;
-      encoder_params.rfi = false;
+    if (ref_frames_option > 1U && !get_encoder_cap(encode_guid, NV_ENC_CAPS_SUPPORT_MULTIPLE_REF_FRAMES)) {
+      if (!force_single_reference && get_encoder_cap(encode_guid, NV_ENC_CAPS_SUPPORT_REF_PIC_INVALIDATION)) {
+        // Pascal reports no multiple reference frames (several references per frame) but still keeps a
+        // multi-frame DPB, and invalidating frames in it works: measured on a GTX 1080 Ti, a stream with
+        // lost frames removed decodes cleanly after RFI. Each frame still predicts from one reference.
+        BOOST_LOG(debug) << "NvEnc: no multiple reference frames cap; keeping a " << ref_frames_option << "-frame DPB for RFI";
+        encoder_params.dpb_without_multiref_cap = true;
+      } else {
+        ref_frames_option = 1;
+        encoder_params.rfi = false;
+      }
     }
     encoder_params.ref_frames_in_dpb = ref_frames_option;
     // Limit each frame to one reference while keeping a larger DPB for RFI fallback.
@@ -672,6 +680,17 @@ namespace NVENC_NAMESPACE {
     configure_codec(enc_config, config, client_config, colorspace, buffer_format, init_params.encodeGUID);
     init_params.encodeConfig = &enc_config;
     if (!initialize_encoder_resources(init_params)) {
+      if (encoder_params.dpb_without_multiref_cap && !force_single_reference) {
+        // The driver refused the DPB it doesn't advertise: start over with one reference frame, without RFI.
+        BOOST_LOG(warning) << "NvEnc: encoder rejected a multi-frame DPB; retrying with one reference frame (no RFI)";
+        // The retry cleans up after itself on failure; this attempt's guard must not destroy its result.
+        fail_guard.disable();
+        nvenc_base::destroy_encoder();
+        force_single_reference = true;
+        const bool created = nvenc_base::create_encoder(config, client_config, sunshine_colorspace, sunshine_buffer_format);
+        force_single_reference = false;
+        return created;
+      }
       return false;
     }
 
@@ -836,8 +855,16 @@ namespace NVENC_NAMESPACE {
     }
 
     for (auto i = first_frame; i <= last_frame; i++) {
-      if (nvenc_failed(nvenc->nvEncInvalidateRefFrames(encoder, i))) {
-        BOOST_LOG(error) << "NvEnc: NvEncInvalidateRefFrames() " << i << " failed: " << last_nvenc_error_string;
+      const auto status = nvenc->nvEncInvalidateRefFrames(encoder, i);
+      if (nvenc_failed(status)) {
+        if (status == NV_ENC_ERR_UNSUPPORTED_PARAM) {
+          // Pascal rejects every invalidation while intra-refresh is on; stop asking and use IDR frames.
+          BOOST_LOG(warning) << "NvEnc: this encoder configuration can't invalidate reference frames"
+                             << (encoder_params.intra_refresh ? " with intra-refresh on" : "") << "; lost frames now get an IDR frame";
+          encoder_params.rfi = false;
+        } else {
+          BOOST_LOG(error) << "NvEnc: NvEncInvalidateRefFrames() " << i << " failed: " << last_nvenc_error_string;
+        }
         return false;
       }
     }

@@ -145,6 +145,7 @@ namespace NVENC_NAMESPACE {
       bool rfi_supported = false;
       bool intra_refresh_supported = false;
       bool intra_refresh = false;
+      bool dpb_without_multiref_cap = false;  ///< Multi-frame DPB kept although the multiple-reference cap is missing (Pascal).
     } encoder_params;  ///< Current encoder dimensions, pixel format, reference-frame and intra-refresh settings.
 
     std::string last_nvenc_error_string;  ///< Last NVENC error string.
@@ -348,6 +349,8 @@ namespace NVENC_NAMESPACE {
     ) const;
 
     NV_ENC_OUTPUT_PTR output_bitstream = nullptr;
+
+    bool force_single_reference = false;  ///< Retry after the driver rejected an unadvertised multi-frame DPB.
 
     struct {
       NV_ENC_INITIALIZE_PARAMS init_params = {};
