@@ -191,7 +191,12 @@ namespace display_follow {
     scheduler_.cancel();
   }
 
-  outcome_e controller_t::on_stream_request(const std::string &setting, const std::string &cmd, const request_t &request, bool legacy_prep, bool other_sessions, const std::string &virtual_setting) {
+  bool controller_t::app_running() const {
+    return hooks_.app_running && hooks_.app_running();
+  }
+
+  outcome_e controller_t::on_stream_request(const std::string &setting, const std::string &cmd, const request_t &request_in, bool legacy_prep, bool other_sessions, const std::string &virtual_setting) {
+    auto request = request_in;
     {
       std::lock_guard lg {mutex_};
       if (lingering_) {
@@ -199,6 +204,21 @@ namespace display_follow {
         BOOST_LOG(info) << "Display follow: "sv << request.client_name << " reconnected; keeping "sv
                         << (virtual_ ? virtual_->display : "the desktop"s) << " for ["sv << request.app_name << ']';
         cancel_linger_locked();
+      }
+      if (held_) {
+        BOOST_LOG(info) << "Display follow: "sv << request.client_name << " is back; resuming ["sv << request.app_name << "] on "sv
+                        << (virtual_ ? virtual_->display : "the desktop"s);
+        held_ = false;
+      }
+      // A running app can't move between displays: a resume streams the display it runs on.
+      if (request.resume && setting != "off" && app_running()) {
+        if (virtual_ && request.mode != "virtual") {
+          BOOST_LOG(info) << "Display follow: ["sv << request.app_name << "] runs on "sv << virtual_->display << "; resuming there instead of mirroring the desktop"sv;
+          request.mode = "virtual";
+        } else if (!virtual_ && request.mode == "virtual") {
+          BOOST_LOG(info) << "Display follow: ["sv << request.app_name << "] runs on the desktop; resuming it as Mirror"sv;
+          request.mode = "mirror";
+        }
       }
     }
     if (setting == "off") {
@@ -361,6 +381,7 @@ namespace display_follow {
 
   bool controller_t::teardown_locked(const std::string &cmd) {
     cancel_linger_locked();
+    held_ = false;
     bool done = false;
     if (virtual_) {
       stop_virtual_locked();
@@ -374,6 +395,16 @@ namespace display_follow {
 
   bool controller_t::on_last_session_end(const std::string &cmd, const std::chrono::milliseconds linger) {
     std::lock_guard lg {mutex_};
+    if (virtual_ && app_running()) {
+      // A disconnect never ends the app: its display, desktop session and input stay until it is
+      // quit or exits (display_follow::app_closed()), and a /resume reuses them.
+      cancel_linger_locked();
+      held_ = true;
+      BOOST_LOG(info) << "Display follow: last device disconnected; keeping "sv << virtual_->display
+                      << " and its app running until the app is quit or exits"sv;
+      return true;
+    }
+    held_ = false;
     if (linger.count() <= 0 || (!virtual_ && !active_)) {
       return teardown_locked(cmd);
     }
@@ -393,8 +424,14 @@ namespace display_follow {
     if (!lingering_ || generation != linger_generation_) {
       return;
     }
-    BOOST_LOG(info) << "Display follow: no device reconnected; restoring"sv;
     lingering_ = false;
+    if (virtual_ && app_running()) {
+      // An app started on the display meanwhile: keep it like any other running app.
+      held_ = true;
+      BOOST_LOG(info) << "Display follow: no device reconnected; keeping "sv << virtual_->display << " for the app running on it"sv;
+      return;
+    }
+    BOOST_LOG(info) << "Display follow: no device reconnected; restoring"sv;
     teardown_locked(cmd);
   }
 
@@ -406,6 +443,11 @@ namespace display_follow {
   bool controller_t::lingering() const {
     std::lock_guard lg {mutex_};
     return lingering_;
+  }
+
+  bool controller_t::held() const {
+    std::lock_guard lg {mutex_};
+    return held_;
   }
 
   scale_result_e controller_t::set_scale(const int percent) {
@@ -646,6 +688,9 @@ namespace display_follow {
         input::set_virtual_display_seat(input::seat_e::desktop);
         held_audio().reset();
       };
+      hooks.app_running = []() {
+        return proc::proc.running() > 0;
+      };
       return hooks;
     }
   }  // namespace
@@ -801,6 +846,14 @@ namespace display_follow {
     if (controller.virtual_target() || controller.lingering()) {
       controller.end_now(config::video.display_follow_cmd);
     }
+  }
+
+  bool held() {
+    return instance().held();
+  }
+
+  bool lingering() {
+    return instance().lingering();
   }
 
   std::optional<virtual_display::target_t> virtual_target() {

@@ -240,6 +240,8 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/nova_client_api.cpp"
         "${CMAKE_SOURCE_DIR}/src/nova_compat.cpp"
         "${CMAKE_SOURCE_DIR}/src/nova_compat.h"
+        "${CMAKE_SOURCE_DIR}/src/app_lifecycle.cpp"
+        "${CMAKE_SOURCE_DIR}/src/app_lifecycle.h"
         "${CMAKE_SOURCE_DIR}/src/display_follow.cpp"
         "${CMAKE_SOURCE_DIR}/src/display_follow.h"
         "${CMAKE_SOURCE_DIR}/src/display_modeset.cpp"

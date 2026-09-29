@@ -173,6 +173,11 @@ namespace proc {
   }
 
   int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t> launch_session) {
+    _executing = true;
+    auto executing_guard = util::fail_guard([this]() {
+      _executing = false;
+    });
+
     // Ensure starting from a clean slate
     terminate();
     _last_error.clear();
@@ -353,6 +358,7 @@ namespace proc {
     }
 
     _app_launch_time = std::chrono::steady_clock::now();
+    _app_started_at = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
     fg.disable();
 
@@ -447,6 +453,25 @@ namespace proc {
     }
 
     _app_id = -1;
+    _app_started_at = 0;
+  }
+
+  std::int64_t proc_t::started_at() const {
+    return _app_started_at;
+  }
+
+  void proc_t::replace_apps(proc_t &&parsed) {
+    _apps = std::move(parsed._apps);
+    if (_app_id <= 0 && !placebo && !_process.valid()) {
+      // Nothing runs: the environment (from the new config) can be replaced too. A running app
+      // keeps the one its undo commands expect.
+      _env = std::move(parsed._env);
+      _vd_base_env = std::move(parsed._vd_base_env);
+    }
+  }
+
+  bool proc_t::executing() const {
+    return _executing;
   }
 
   const std::vector<ctx_t> &proc_t::get_apps() const {
@@ -913,7 +938,7 @@ namespace proc {
     auto proc_opt = proc::parse(file_name);
 
     if (proc_opt) {
-      proc = std::move(*proc_opt);
+      proc.replace_apps(std::move(*proc_opt));
     }
   }
 }  // namespace proc

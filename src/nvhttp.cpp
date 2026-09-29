@@ -30,6 +30,7 @@
 #include <Simple-Web-Server/server_http.hpp>
 
 // local includes
+#include "app_lifecycle.h"
 #include "client_permissions.h"
 #include "clipboard.h"
 #include "config.h"
@@ -696,6 +697,7 @@ namespace nvhttp {
     request.device_key = display_follow::device_key(session.client_cert);
     request.mode = session.display_mode.empty() ? default_display_mode(appid) : session.display_mode;
     request.rotation = display_modeset::rotation_for_size(session.width, session.height);  // portrait Mirror turns the desktop
+    request.resume = !launching;  // a running app stays on the display it runs on
 
     bool legacy_prep = false;
     for (const auto &app : proc::proc.get_apps()) {
@@ -1797,6 +1799,7 @@ namespace nvhttp {
    */
   void launch(bool &host_audio, resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
+    const app_lifecycle::busy_guard_t busy;  // the app watcher leaves a display being set up alone
 
     pt::ptree tree;
     bool revert_display_configuration {false};
@@ -1980,6 +1983,7 @@ namespace nvhttp {
    */
   void resume(bool &host_audio, resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
+    const app_lifecycle::busy_guard_t busy;  // the app watcher leaves the kept display alone
 
     pt::ptree tree;
     auto g = util::fail_guard([&]() {
@@ -2086,6 +2090,7 @@ namespace nvhttp {
    */
   void cancel(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
+    const app_lifecycle::busy_guard_t busy;  // the app watcher waits while the app is ended
 
     pt::ptree tree;
     auto g = util::fail_guard([&]() {
@@ -2336,6 +2341,22 @@ namespace nvhttp {
       return;
     }
     nova_json(response, SimpleWeb::StatusCode::success_ok, nova_api::capabilities(PROJECT_VERSION, host_features(), permissions_for_request(request)));
+  }
+
+  /**
+   * @brief GET /nova/v1/running: what runs on the host, even with no device connected.
+   *
+   * A disconnect never ends the app, so a client can show "Resume" or "Quit" for it.
+   *
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   */
+  void nova_running(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+    if (!nova_require_device(response, request)) {
+      return;
+    }
+    nova_json(response, SimpleWeb::StatusCode::success_ok, app_lifecycle::running_json(app_lifecycle::current()));
   }
 
   /**
@@ -2935,6 +2956,7 @@ namespace nvhttp {
     https_server.resource["^/pcsleep$"]["GET"] = pcsleep;
     https_server.resource["^/supercmd$"]["GET"] = supercmd;
     https_server.resource["^/nova/v1/capabilities$"]["GET"] = nova_capabilities;
+    https_server.resource["^/nova/v1/running$"]["GET"] = nova_running;
     https_server.resource["^/nova/v1/commands$"]["GET"] = nova_commands;
     https_server.resource["^/nova/v1/apps$"]["GET"] = nova_apps;
     https_server.resource["^/nova/v1/apps/([0-9a-f]{16})/art/(poster|hero|logo|icon|background)$"]["GET"] = nova_app_art;

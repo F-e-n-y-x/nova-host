@@ -4,7 +4,7 @@
  * bar while streaming, desktop preview + stream health, then Library, Devices and Hardware.
  * Newer host APIs are optional; missing ones hide their widget or fall back to the log.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Cpu, Monitor, Radio, ShieldCheck, Smartphone, Plus } from '@lucide/vue'
 import NvPage from '../components/NvPage.vue'
@@ -21,6 +21,7 @@ import { useOverview } from './overview/useOverview'
 import { previewState } from './overview/usePreview'
 import { attentionFromHealth, captureLabel, encoderLabel, shortVersion } from './overview/format'
 import StreamBar from './overview/StreamBar.vue'
+import RunningAppCard from './overview/RunningAppCard.vue'
 import UpdateBanner from './overview/UpdateBanner.vue'
 import PreviewCard from './overview/PreviewCard.vue'
 import StreamHealthCard from './overview/StreamHealthCard.vue'
@@ -76,6 +77,20 @@ const captureCell = computed(() => {
   return { value: method ? captureLabel(method) : t('nova.overview.auto'), sub: bits.join(' · ') }
 })
 
+// The running app, polled so "Running for" and a game that exits (or is closed elsewhere) stay current.
+const running = computed(() => (o.running.data.value?.running ? o.running.data.value : null))
+const runningIcon = computed(() => {
+  const index = running.value?.app?.index
+  const app = Number.isInteger(index) ? o.apps.data.value?.apps?.[index] : null
+  if (!app) return ''
+  if (app['nova-icon']) return `./api/covers/${index}/icon`
+  return app['image-path'] ? `./api/covers/${index}` : ''
+})
+let runningPoll = null
+onMounted(() => { runningPoll = setInterval(() => o.running.reload(), 15000) })
+onBeforeUnmount(() => clearInterval(runningPoll))
+watch(streaming, () => o.running.reload())
+
 const cells = computed(() => {
   const devices = o.clients.data.value || []
   const enabled = devices.filter((d) => d.enabled !== false).length
@@ -83,7 +98,8 @@ const cells = computed(() => {
   return [
     { key: 'stream', label: t('nova.overview.stream'), icon: Radio, status: streaming.value ? 'success' : 'success',
       value: streaming.value ? t('nova.overview.streaming') : t('nova.overview.ready'),
-      sub: streaming.value ? t('nova.overview.devices_connected', { n: live.sessions.value.length }, live.sessions.value.length) : t('nova.overview.waiting'), loading },
+      sub: streaming.value ? t('nova.overview.devices_connected', { n: live.sessions.value.length }, live.sessions.value.length)
+        : (running.value ? t('nova.overview.app_kept', { name: running.value.app?.name || '' }) : t('nova.overview.waiting')), loading },
     { key: 'encoder', label: t('nova.overview.encoder'), icon: Cpu, ...encoderCell.value, to: '/settings#encoder',
       loading: o.hostInfo.loading.value || (o.needLogs.value && o.logs.loading.value) },
     { key: 'capture', label: t('nova.overview.capture'), icon: Monitor, ...captureCell.value, loading: o.hostInfo.loading.value },
@@ -134,6 +150,7 @@ async function closeApp() {
     toast.success(t('nova.overview.app_closed', { name: closeTarget.value.name }))
     closeTarget.value = null
     o.apps.reload()
+    o.running.reload()
   } catch {
     toast.danger(t('nova.overview.close_failed'))
   } finally {
@@ -165,6 +182,8 @@ function showDetails() {
                     :install-error="updates.installError.value" :install="updates.install" class="nv-ov__full" />
       <StreamBar v-if="streaming && session" :session="session" :thumbnail="previewState.url" :more="live.sessions.value.length - 1"
                  class="nv-ov__full" @end="(s) => (endTarget = s)" />
+      <RunningAppCard v-if="running" :running="running" :icon="runningIcon" class="nv-ov__full"
+                      @close="(a) => (closeTarget = a)" />
       <NvAttention v-if="issues.length" :issues="issues" class="nv-ov__full" />
 
       <PreviewCard v-if="o.displays.data.value !== null || previewState.available !== false" :live="streaming"

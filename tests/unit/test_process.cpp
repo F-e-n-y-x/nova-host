@@ -8,9 +8,12 @@
 // standard includes
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <vector>
 
 // local includes
 #include <src/process.h>
+#include <src/utility.h>
 
 namespace fs = std::filesystem;
 
@@ -287,4 +290,37 @@ TEST_F(ProcessPNGTest, ValidateAppImagePath_OldSteamDefault) {
   // Test the special case for old steam image path
   const std::string result = proc::validate_app_image_path("./assets/steam.png");
   EXPECT_EQ(result, SUNSHINE_ASSETS_DIR "/steam.png");
+}
+
+TEST(ProcessTest, ReplacingTheAppListKeepsTheRunningApp) {
+  // A library scan or a save in the web UI reloads apps.json while a game runs (Nova keeps it
+  // running after a disconnect, so this happens often): the running app must not be forgotten.
+  proc::ctx_t desktop {};
+  desktop.id = "1";
+  desktop.name = "Desktop";  // no command: runs until terminated
+  auto make = [](std::vector<proc::ctx_t> apps) {
+    return proc::proc_t {boost::process::v1::environment {}, std::move(apps)};
+  };
+  auto p = make({desktop});
+  EXPECT_EQ(p.started_at(), 0);
+  auto session = std::make_shared<rtsp_stream::launch_session_t>();
+  auto stop = util::fail_guard([&p]() {
+    p.terminate();  // ~proc_t asserts nothing runs
+  });
+  ASSERT_EQ(p.execute(1, session), 0);
+  EXPECT_FALSE(p.executing());
+  EXPECT_EQ(p.running(), 1);
+  EXPECT_GT(p.started_at(), 0);
+
+  auto other = desktop;
+  other.id = "2";
+  other.name = "Other";
+  p.replace_apps(make({desktop, other}));
+  EXPECT_EQ(p.get_apps().size(), 2u);
+  EXPECT_EQ(p.running(), 1) << "still running after the reload";
+  EXPECT_EQ(p.get_last_run_app_name(), "Desktop");
+
+  p.terminate();
+  EXPECT_EQ(p.running(), 0);
+  EXPECT_EQ(p.started_at(), 0);
 }

@@ -924,6 +924,7 @@ namespace config {
     .power_mode_inhibit = true,
     .update_check = true,
     .update_github_token = {},
+    .app_idle_quit_hours = 0,
   };
 
   sunshine_t sunshine {
@@ -1947,6 +1948,7 @@ namespace config {
     bool_f(vars, "power_mode_gpu", nova.power_mode_gpu);
     bool_f(vars, "power_mode_cpu", nova.power_mode_cpu);
     bool_f(vars, "power_mode_inhibit", nova.power_mode_inhibit);
+    int_between_f(vars, "app_idle_quit_hours", nova.app_idle_quit_hours, {0, 720});
     bool_f(vars, "system_tray", sunshine.system_tray);
 
     int port = sunshine.port;

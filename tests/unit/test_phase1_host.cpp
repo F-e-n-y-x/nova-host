@@ -329,7 +329,7 @@ TEST(Phase1Capabilities, FeaturesAndCallerPermissions) {
   const auto has = [](const nlohmann::json &list, const char *name) {
     return std::find(list.begin(), list.end(), nlohmann::json(name)) != list.end();
   };
-  for (const auto *name : {"apps", "bitrate", "pcsleep", "commands", "supercmd", "mic", "clipboard", "motion", "rumble", "trigger_rumble", "wol"}) {
+  for (const auto *name : {"apps", "bitrate", "pcsleep", "commands", "supercmd", "mic", "clipboard", "motion", "rumble", "trigger_rumble", "wol", "running"}) {
     EXPECT_TRUE(has(caps["features"], name)) << name;
   }
   EXPECT_TRUE(has(caps["permissions"], "clipboard"));

@@ -3285,11 +3285,12 @@ a message naming the file instead of streaming a desktop while the game silently
     <tr>
         <td>Description</td>
         <td colspan="2">
-            Seconds the virtual display, the app on it and a Mirror display mode outlive the last
-            disconnect (Nova). A device that reconnects within that time, for example after changing
-            the resolution during a stream (the client disconnects and resumes at the new size),
-            gets the same display back, resized to its new mode, and the desktop on `:0` is not
-            restored in between. Quitting the app ends everything at once. `0` tears down on
+            Seconds a virtual display with no app running and a Mirror display mode outlive the
+            last disconnect (Nova). A device that reconnects within that time, for example after
+            changing the resolution during a stream (the client disconnects and resumes at the new
+            size), gets the same display back, resized to its new mode, and the desktop on `:0` is
+            not restored in between. A virtual display with an app running on it is always kept
+            until the app is quit or exits (see `app_idle_quit_hours`). `0` tears down on
             disconnect.
             @note{Applies to Linux only.}
         </td>
@@ -3304,6 +3305,34 @@ a message naming the file instead of streaming a desktop while the game silently
         <td>Example</td>
         <td colspan="2">@code{}
             virtual_display_linger = 0
+            @endcode</td>
+    </tr>
+</table>
+
+### app_idle_quit_hours
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Disconnecting never ends the running app (Nova): on Mirror it keeps running on the
+            desktop (whose display mode is put back), and on a Virtual display the display, its
+            desktop session and input devices stay while the app runs. A device resumes it later.
+            The app ends when it is quit (the client's Quit, "Close app" in the web UI), when it
+            exits by itself, or, with this set, after that many hours with no device connected.
+            `0` never quits it.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            app_idle_quit_hours = 0
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            app_idle_quit_hours = 6
             @endcode</td>
     </tr>
 </table>

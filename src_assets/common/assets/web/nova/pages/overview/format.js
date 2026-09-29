@@ -170,3 +170,21 @@ export function attentionFromHealth(checks, t) {
       return issue
     })
 }
+
+/**
+ * How long an app has been running, in the style "1 h 20 m" ("< 1 m", "12 m", "3 h", "2 d 4 h").
+ *
+ * @param {number} since Unix seconds the app started.
+ * @param {number} [nowMs] Current time in ms.
+ * @returns {string} Empty without a start time.
+ */
+export function formatRunningFor(since, nowMs = Date.now()) {
+  if (!Number.isFinite(since) || since <= 0) return ''
+  const total = Math.max(0, Math.floor(nowMs / 1000 - since))
+  if (total < 60) return '< 1 m'
+  const minutes = Math.floor(total / 60)
+  if (minutes < 60) return `${minutes} m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return minutes % 60 ? `${hours} h ${minutes % 60} m` : `${hours} h`
+  return hours % 24 ? `${Math.floor(hours / 24)} d ${hours % 24} h` : `${Math.floor(hours / 24)} d`
+}

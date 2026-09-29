@@ -43,6 +43,8 @@ export function useOverview() {
       runningName: data.running_name || null }
   })
   const clients = useAsync(async () => (await fetchJson('./api/clients/list')).named_certs || [])
+  // What runs on the host, streamed or not (a disconnect never ends the app). Older hosts: null.
+  const running = useAsync(() => optionalJson('./api/apps/running'))
 
   // The log is only a fallback (it can be several MB): load it when the host has no /api/host/info
   // or /api/health to tell us about encoders and problems.
@@ -73,9 +75,10 @@ export function useOverview() {
     history.reload()
     apps.reload()
     clients.reload()
+    running.reload()
     if (logsRequested) logs.reload()
   }
 
-  return { config, hostInfo, displays, health, history, apps, clients, logs, needLogs, ensureLogs,
+  return { config, hostInfo, displays, health, history, apps, clients, running, logs, needLogs, ensureLogs,
     logEncoders, logHealth, reloadAll }
 }

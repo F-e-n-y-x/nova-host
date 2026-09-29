@@ -443,6 +443,7 @@ namespace config {
     bool power_mode_inhibit;  ///< Nova: inhibit system sleep and the screensaver while streaming.
     bool update_check;  ///< Nova: check the Nova GitHub releases for updates (host side).
     std::string update_github_token;  ///< Nova: optional read-only GitHub token for the private release repository; never returned in plain text by /api/config.
+    int app_idle_quit_hours;  ///< Nova: end the running app after this many hours with no device connected; 0 = never (a disconnect never ends it).
   };
 
   extern video_t video;

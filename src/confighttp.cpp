@@ -39,6 +39,7 @@
 #endif
 
 // local includes
+#include "app_lifecycle.h"
 #include "client_permissions.h"
 #include "clipboard.h"
 #include "config.h"
@@ -1824,6 +1825,26 @@ namespace confighttp {
   }
 
   /**
+   * @brief What runs on the host: the app, since when, on which display, and how many devices stream.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   * Same body as the device API's GET /nova/v1/running: `running`, `app` ({id, index, appid, name}
+   * or null), `since` (Unix seconds), `display` ("virtual" or "mirror"), `connected_clients`,
+   * `idle_quit_hours` and `idle_quit_at` (Unix seconds, or null).
+   *
+   * @api_examples{/api/apps/running|:| GET|:| null}
+   */
+  void getRunningApp(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    send_response(response, app_lifecycle::running_json(app_lifecycle::current()));
+  }
+
+  /**
    * @brief Close the currently running application.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
@@ -1842,6 +1863,7 @@ namespace confighttp {
 
     print_req(request);
 
+    const app_lifecycle::busy_guard_t busy;  // the app watcher waits while the app is ended
     proc::proc.terminate();
     if (rtsp_stream::session_count() == 0) {
       display_follow::app_closed();
@@ -2100,8 +2122,10 @@ namespace confighttp {
             rtsp_stream::terminate_sessions_by_cert(cert);
           }
 
+          const app_lifecycle::busy_guard_t busy;  // the app watcher waits while the app is ended
           if (rtsp_stream::session_count() == 0 && proc::proc.running() > 0) {
             proc::proc.terminate();
+            display_follow::app_closed();  // a virtual display kept for it goes too
           }
         }
       }
@@ -4170,6 +4194,7 @@ namespace confighttp {
     server.resource["^/api/clipboard/send-file$"]["POST"] = sendFileToClient;
     server.resource["^/api/apps/([0-9]+)$"]["DELETE"] = deleteApp;
     server.resource["^/api/apps/close$"]["POST"] = closeApp;
+    server.resource["^/api/apps/running$"]["GET"] = getRunningApp;
     server.resource["^/api/clients/list$"]["GET"] = getClients;
     server.resource["^/api/clients/unpair$"]["POST"] = unpair;
     server.resource["^/api/clients/unpair-all$"]["POST"] = unpairAll;

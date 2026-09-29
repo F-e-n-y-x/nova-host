@@ -296,6 +296,9 @@ namespace {
       hooks.down = [this]() {
         backend->log.push_back("down");
       };
+      hooks.app_running = [this]() {
+        return app_alive;
+      };
       return display_follow::controller_t {
         [this](const std::string &cmd, const std::string &action, const display_follow::env_t &env) {
           call_t call {cmd, action, {}};
@@ -313,6 +316,7 @@ namespace {
     }
 
     std::shared_ptr<fake_backend_t> backend;  ///< Backend of the last make_virtual().
+    bool app_alive = false;  ///< What the app_running hook reports.
     std::function<void()> pending;  ///< Armed linger callback.
     std::chrono::milliseconds scheduled_delay {0};  ///< Delay of the last schedule.
     int schedules = 0;  ///< schedule() calls.
@@ -578,6 +582,124 @@ TEST_F(DisplayFollowVirtualTest, RealTimerFiresAfterTheDelay) {
   controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
   std::this_thread::sleep_for(150ms);
   EXPECT_TRUE(controller.virtual_target());
+}
+
+// ---- Keep the app running: a disconnect never ends it ----
+
+TEST_F(DisplayFollowVirtualTest, DisconnectKeepsTheDisplayWhileTheAppRuns) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  app_alive = true;
+  EXPECT_TRUE(controller.on_last_session_end(script, 30s));
+  EXPECT_TRUE(controller.held());
+  EXPECT_FALSE(controller.lingering()) << "no timer while the app runs";
+  EXPECT_EQ(schedules, 0);
+  EXPECT_FALSE(pending);
+  ASSERT_TRUE(controller.virtual_target());
+  EXPECT_EQ(backend->log, (std::vector<std::string> {"start 3120x1440", "up :20"})) << "the app is not ended and :20 stays";
+}
+
+TEST_F(DisplayFollowVirtualTest, ZeroLingerStillKeepsARunningApp) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  app_alive = true;
+  EXPECT_TRUE(controller.on_last_session_end(script, 0s));
+  EXPECT_TRUE(controller.held());
+  EXPECT_EQ(std::count(backend->log.begin(), backend->log.end(), "end app"), 0);
+}
+
+TEST_F(DisplayFollowVirtualTest, ResumeHoursLaterReusesTheSameDisplay) {
+  // Two hours pass: nothing is timed, so the held display is exactly as it was.
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  app_alive = true;
+  controller.on_last_session_end(script, 30s);
+  auto tablet = phone("virtual");
+  tablet.width = 2560;
+  tablet.height = 1600;
+  tablet.resume = true;
+  EXPECT_EQ(controller.on_stream_request("virtual", script, tablet, false, false, "headless_x"), display_follow::outcome_e::virtual_reused);
+  EXPECT_FALSE(controller.held());
+  EXPECT_EQ(controller.virtual_target()->display, ":20");
+  EXPECT_EQ(controller.virtual_target()->width, 2560);
+  EXPECT_EQ(backend->log, (std::vector<std::string> {"start 3120x1440", "up :20", "resize 2560x1600", "up :20"}));
+}
+
+TEST_F(DisplayFollowVirtualTest, ResumeAsMirrorStaysOnTheAppsVirtualDisplay) {
+  // Stock Moonlight (no mode) or a Mirror choice must not stop the display the game runs on.
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  app_alive = true;
+  controller.on_last_session_end(script, 30s);
+  auto moonlight = phone();
+  moonlight.resume = true;
+  EXPECT_EQ(controller.on_stream_request("virtual", script, moonlight, false, false, "headless_x"), display_follow::outcome_e::virtual_reused);
+  EXPECT_TRUE(calls.empty()) << "the desktop is not switched";
+  EXPECT_EQ(std::count(backend->log.begin(), backend->log.end(), "end app"), 0);
+}
+
+TEST_F(DisplayFollowVirtualTest, ResumeAsVirtualOfADesktopAppMirrors) {
+  // The app runs on the desktop: a new, empty virtual display would not show it.
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x");
+  app_alive = true;
+  controller.on_last_session_end(script, 30s);
+  fire();  // the linger puts the desktop back; the app keeps running on it
+  ASSERT_EQ(calls.size(), 2u);
+  EXPECT_EQ(calls[1].action, "restore");
+  auto resume = phone("virtual");
+  resume.resume = true;
+  EXPECT_EQ(controller.on_stream_request("virtual", script, resume, false, false, "headless_x"), display_follow::outcome_e::switched);
+  EXPECT_TRUE(backend->log.empty()) << "no virtual display for an app on the desktop";
+  ASSERT_EQ(calls.size(), 3u);
+  EXPECT_EQ(calls[2].action, "set") << "the client size is applied again";
+}
+
+TEST_F(DisplayFollowVirtualTest, MirrorDisconnectRestoresTheDesktopButNeverEndsTheApp) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("mirror"), false, false, "headless_x");
+  app_alive = true;
+  controller.on_last_session_end(script, 30s);
+  EXPECT_TRUE(controller.lingering());
+  EXPECT_FALSE(controller.held());
+  fire();
+  EXPECT_EQ(calls.back().action, "restore");
+  EXPECT_TRUE(backend->log.empty()) << "nothing ends the app";
+}
+
+TEST_F(DisplayFollowVirtualTest, QuitEndsAHeldDisplay) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  app_alive = true;
+  controller.on_last_session_end(script, 30s);
+  app_alive = false;  // /cancel or "Close app" ended it, then display_follow::app_closed()
+  EXPECT_TRUE(controller.end_now(script));
+  EXPECT_FALSE(controller.held());
+  EXPECT_FALSE(controller.virtual_target());
+  EXPECT_EQ(backend->log.back(), "down");
+}
+
+TEST_F(DisplayFollowVirtualTest, AppStartedDuringTheLingerKeepsItsDisplay) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  controller.on_last_session_end(script, 30s);  // nothing runs: normal linger
+  EXPECT_TRUE(controller.lingering());
+  app_alive = true;
+  fire();
+  EXPECT_TRUE(controller.held());
+  EXPECT_TRUE(controller.virtual_target());
+  EXPECT_EQ(std::count(backend->log.begin(), backend->log.end(), "stop"), 0);
+}
+
+TEST_F(DisplayFollowVirtualTest, NoAppRunningStillLingersThenStops) {
+  auto controller = make_virtual();
+  controller.on_stream_request("virtual", script, phone("virtual"), false, false, "headless_x");
+  app_alive = false;
+  controller.on_last_session_end(script, 30s);
+  EXPECT_TRUE(controller.lingering());
+  EXPECT_FALSE(controller.held());
+  fire();
+  EXPECT_FALSE(controller.virtual_target());
 }
 
 // ---- Display scale (/display-scale) ----

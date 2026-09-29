@@ -1010,7 +1010,7 @@ namespace nova_api {
   }
 
   nlohmann::json capabilities(const std::string &version, const host_features_t &features, const client_permissions::mask_t permissions) {
-    nlohmann::json list = {"apps", "art", "details", "display_mode", "bitrate", "sessions", "display_scale", "portrait", "rotate", "wol", "rumble", "trigger_rumble"};
+    nlohmann::json list = {"apps", "art", "details", "display_mode", "bitrate", "sessions", "display_scale", "portrait", "rotate", "wol", "rumble", "trigger_rumble", "running"};
     if (features.pcsleep) {
       list.push_back("pcsleep");
     }

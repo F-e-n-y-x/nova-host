@@ -4,13 +4,14 @@ import { flushPromises } from '@vue/test-utils'
 import { mountNova } from './helpers'
 import {
   appKind, attentionFromHealth, captureLabel, displayLabel, encoderLabel, formatClock, formatDuration,
-  formatMbps, formatMs, latencySplit, pickDisplay, shortVersion,
+  formatMbps, formatMs, formatRunningFor, latencySplit, pickDisplay, shortVersion,
 } from '../../../src_assets/common/assets/web/nova/pages/overview/format.js'
 import StreamHealthCard from '../../../src_assets/common/assets/web/nova/pages/overview/StreamHealthCard.vue'
 import StreamBar from '../../../src_assets/common/assets/web/nova/pages/overview/StreamBar.vue'
 import DevicesCard from '../../../src_assets/common/assets/web/nova/pages/overview/DevicesCard.vue'
 import LibraryCard from '../../../src_assets/common/assets/web/nova/pages/overview/LibraryCard.vue'
 import HardwareCard from '../../../src_assets/common/assets/web/nova/pages/overview/HardwareCard.vue'
+import RunningAppCard from '../../../src_assets/common/assets/web/nova/pages/overview/RunningAppCard.vue'
 import { optionalJson } from '../../../src_assets/common/assets/web/nova/pages/overview/useOverview.js'
 import { previewState, refreshPreview, resetPreviewForTests } from '../../../src_assets/common/assets/web/nova/pages/overview/usePreview.js'
 
@@ -176,5 +177,46 @@ describe('overview cards', () => {
     expect(f.text()).toContain('NVENC')
     f.unmount()
     return flushPromises()
+  })
+})
+
+describe('running app (kept after a disconnect)', () => {
+  it('formats how long the app has run', () => {
+    const now = 1_000_000 * 1000
+    expect(formatRunningFor(0, now)).toBe('')
+    expect(formatRunningFor(1_000_000 - 30, now)).toBe('< 1 m')
+    expect(formatRunningFor(1_000_000 - 12 * 60, now)).toBe('12 m')
+    expect(formatRunningFor(1_000_000 - (80 * 60), now)).toBe('1 h 20 m')
+    expect(formatRunningFor(1_000_000 - 3 * 3600, now)).toBe('3 h')
+    expect(formatRunningFor(1_000_000 - (52 * 3600), now)).toBe('2 d 4 h')
+  })
+
+  it('shows the app, where it runs, nobody connected, and emits close', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(1_790_004_800 * 1000))
+    const running = { running: true, app: { id: 'ab', index: 1, appid: '7', name: 'Cyberpunk 2077' }, since: 1_790_000_000,
+      display: 'virtual', connected_clients: 0, idle_quit_hours: 0, idle_quit_at: null }
+    const w = mountNova(RunningAppCard, { props: { running } })
+    expect(w.text()).toContain('Running for 1 h 20 m')
+    expect(w.text()).toContain('Cyberpunk 2077')
+    expect(w.text()).toContain('On a Virtual display')
+    expect(w.text()).toContain('No device connected')
+    expect(w.text()).not.toContain('Quits')
+    await w.findAll('button').find((b) => b.text() === 'Close app').trigger('click')
+    expect(w.emitted('close')[0][0]).toEqual({ name: 'Cyberpunk 2077' })
+    w.unmount()
+    vi.useRealTimers()
+  })
+
+  it('mentions the idle timeout only while nobody is connected', () => {
+    const base = { running: true, app: { name: 'Desktop' }, since: 1, display: 'mirror', idle_quit_hours: 4, idle_quit_at: 1_790_014_400 }
+    const idle = mountNova(RunningAppCard, { props: { running: { ...base, connected_clients: 0 } } })
+    expect(idle.text()).toContain('On the desktop')
+    expect(idle.text()).toContain('after 4 h idle')
+    idle.unmount()
+    const live = mountNova(RunningAppCard, { props: { running: { ...base, connected_clients: 2 } } })
+    expect(live.text()).toContain('2 devices streaming')
+    expect(live.text()).not.toContain('idle')
+    live.unmount()
   })
 })

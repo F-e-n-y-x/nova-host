@@ -32,6 +32,7 @@
 // local includes
 #include "confighttp.h"
 #include "display_device.h"
+#include "app_lifecycle.h"
 #include "display_follow.h"
 #include "power_mode.h"
 #include "entry_handler.h"
@@ -445,6 +446,8 @@ int main(int argc, char *argv[]) {
   display_follow::recover_at_startup();
   // Nova: likewise for the streaming power mode (PowerMizer and power profile).
   power_mode::recover_at_startup();
+  // Nova: the app outlives a disconnect; watch it while no device streams (exit, idle timeout).
+  app_lifecycle::start();
 
   // If any of the following fail, we log an error and continue event though sunshine will not function correctly.
   // This allows access to the UI to fix configuration problems or view the logs.
@@ -539,6 +542,7 @@ int main(int argc, char *argv[]) {
   rtspThread.join();
 
   // Nova: stop a virtual display (and the app on it) before the input task pool goes away.
+  app_lifecycle::stop();
   display_follow::shutdown();
 
   task_pool.stop();

@@ -74,6 +74,7 @@
       "virtual_display_wm": "openbox",
       "virtual_display_session": "desktop",
       "virtual_display_linger": 30,
+      "app_idle_quit_hours": 0,
       "virtual_display_fps_cap": 0,
       "install_steam_audio_drivers": "enabled",
       "adapter_name": "",

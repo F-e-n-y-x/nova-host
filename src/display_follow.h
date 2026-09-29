@@ -52,6 +52,7 @@ namespace display_follow {
     std::string device_key;  ///< Stable id of the device (see device_key()), for its saved display scale.
     int scale = 100;  ///< Display scale for a Virtual display, in percent.
     int rotation = 0;  ///< Mirror rotation: 90 for a portrait request (height > width), else 0. A Virtual display is simply made portrait.
+    bool resume = false;  ///< A /resume of the running app: it stays on the display it runs on, whatever mode is asked for.
   };
 
   /**
@@ -179,6 +180,7 @@ namespace display_follow {
     std::function<void(const virtual_display::target_t &)> up;  ///< The display is ready (capture, input and audio switch to it).
     std::function<void()> before_stop;  ///< The display is about to stop (the app running on it is ended first).
     std::function<void()> down;  ///< The display is gone (capture, input and audio go back to the desktop).
+    std::function<bool()> app_running;  ///< Whether an app runs now; a virtual display with an app on it outlives the last disconnect (unset = no app).
   };
 
   /**
@@ -219,11 +221,16 @@ namespace display_follow {
     /**
      * @brief The last stream ended: restore the display, now or after a grace period.
      *
-     * With a linger the virtual display, the app on it and a Mirror switch of the desktop are kept
+     * A virtual display with an app running on it is kept, with no timer, until the app ends
+     * (end_now() through display_follow::app_closed()): a disconnect never ends the app. A later
+     * /resume reuses it, resized to the new client.
+     *
+     * Otherwise, with a linger the virtual display and a Mirror switch of the desktop are kept
      * for that long, so a client that reconnects at once (Nebula's live resolution change
      * disconnects and sends /resume with the new size) finds them; on_stream_request() within the
      * window cancels the teardown. Without one (or when it expires) the virtual display is stopped
-     * (after before_stop, which ends the app on it) and the desktop restored.
+     * (after before_stop, which ends an app still on it) and the desktop restored. A Mirror switch
+     * never ends the app: the desktop is put back and the app keeps running on it.
      *
      * @param cmd Value of display_follow_cmd.
      * @param linger Grace period; zero tears down at once.
@@ -245,6 +252,13 @@ namespace display_follow {
      * @return True during the grace period.
      */
     bool lingering() const;
+
+    /**
+     * @brief Whether the virtual display is kept for a running app with no device connected.
+     *
+     * @return True from the last disconnect until a device resumes or the app ends.
+     */
+    bool held() const;
 
     /**
      * @brief Change the running virtual display's scale.
@@ -304,6 +318,7 @@ namespace display_follow {
     bool teardown_locked(const std::string &cmd);
     void cancel_linger_locked();
     void linger_expired(std::uint64_t generation, const std::string &cmd);
+    bool app_running() const;
 
     runner_t runner_;
     std::filesystem::path marker_;
@@ -313,6 +328,7 @@ namespace display_follow {
     bool active_ = false;
     std::optional<virtual_display::target_t> virtual_;
     bool lingering_ = false;
+    bool held_ = false;  ///< The virtual display is kept for its app after the last disconnect (no timer).
     std::uint64_t linger_generation_ = 0;
     scheduler_t scheduler_;
     std::shared_ptr<mirror_backend_t> native_;
@@ -421,12 +437,27 @@ namespace display_follow {
   void shutdown();
 
   /**
-   * @brief The app was closed (or a launch failed) while no device streams: stop the virtual display.
+   * @brief The app was closed, ended by itself, or a launch failed, while no device streams: stop the virtual display.
    *
-   * A stream that ends stops it through last_session_ended(); this covers a launch that never got
-   * a stream and "Close app" with nobody connected. No-op without a virtual display.
+   * A stream that ends with no app running stops it through last_session_ended(); this covers a
+   * launch that never got a stream, "Close app" with nobody connected, and an app that exits (or
+   * is idle-quit) while its display is kept for it. No-op without a virtual display.
    */
   void app_closed();
+
+  /**
+   * @brief Whether the process-wide virtual display is kept for its app with no device connected.
+   *
+   * @return See controller_t::held().
+   */
+  bool held();
+
+  /**
+   * @brief Whether the process-wide controller is waiting out the linger.
+   *
+   * @return See controller_t::lingering().
+   */
+  bool lingering();
 
   /**
    * @brief The running virtual display of the process-wide controller.

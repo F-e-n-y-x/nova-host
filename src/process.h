@@ -13,6 +13,8 @@
 #endif
 
 // standard includes
+#include <atomic>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
@@ -90,6 +92,40 @@ namespace proc {
   /**
    * @brief Tracks launched child processes and terminates them during shutdown.
    */
+  /**
+   * @brief An atomic that proc_t can still be moved with (proc::parse() returns one by value).
+   *
+   * @tparam T Value type.
+   */
+  template<class T>
+  class movable_atomic_t {
+  public:
+    movable_atomic_t(T value = {}):
+        value_ {value} {
+    }
+
+    movable_atomic_t(movable_atomic_t &&other) noexcept:
+        value_ {other.value_.load()} {
+    }
+
+    movable_atomic_t &operator=(movable_atomic_t &&other) noexcept {
+      value_ = other.value_.load();
+      return *this;
+    }
+
+    movable_atomic_t &operator=(T value) {
+      value_ = value;
+      return *this;
+    }
+
+    operator T() const {
+      return value_.load();
+    }
+
+  private:
+    std::atomic<T> value_;
+  };
+
   class proc_t {
   public:
     KITTY_DEFAULT_CONSTR_MOVE_THROW(proc_t)
@@ -162,6 +198,30 @@ namespace proc {
      */
     void terminate();
 
+    /**
+     * @brief When the running app was started (Nova).
+     *
+     * @return Unix time in seconds, or 0 when nothing was launched.
+     */
+    std::int64_t started_at() const;
+
+    /**
+     * @brief Take a freshly parsed app list, keeping track of the app that runs now (Nova).
+     *
+     * Replacing the whole proc_t (as a plain move did) forgot the running app's process: a
+     * library scan or an edit in the web UI while a game ran made Nova think it had exited.
+     *
+     * @param parsed Result of parse().
+     */
+    void replace_apps(proc_t &&parsed);
+
+    /**
+     * @brief Whether execute() is starting an app right now (Nova: the idle watcher leaves it alone).
+     *
+     * @return True during execute().
+     */
+    bool executing() const;
+
   private:
     int _app_id;
     std::string _last_error;
@@ -171,6 +231,8 @@ namespace proc {
     std::vector<ctx_t> _apps;
     ctx_t _app;
     std::chrono::steady_clock::time_point _app_launch_time;
+    movable_atomic_t<std::int64_t> _app_started_at {0};  ///< Nova: Unix time the running app was started, 0 when none.
+    movable_atomic_t<bool> _executing {false};  ///< Nova: execute() is running.
 
     // If no command associated with _app_id, yet it's still running
     bool placebo {};
