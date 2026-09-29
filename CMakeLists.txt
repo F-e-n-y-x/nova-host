@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.24)
 # `third-party/libvirtualhid` requires 3.24
 # todo - set this conditionally
 
-project(Nova VERSION 0.1.0
+project(Nova VERSION 0.2.0
         DESCRIPTION "Linux-first Sunshine fork — self-hosted game stream host for Moonlight"
         HOMEPAGE_URL "https://github.com/F-e-n-y-x/nova-host")
 
