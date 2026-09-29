@@ -29,14 +29,16 @@ Android app.
 **Displays**
 - 🪞 **Mirror** — your desktop resizes to the device's exact screen size and refresh, then
   restores when you disconnect.
-- 🖥️ **Virtual display** — a separate display created just for the stream, at the device's size.
-  Your own desktop, windows and cursor stay untouched; the stream gets its own mouse, keyboard and
-  audio.
+- 🖥️ **Virtual display** — a separate desktop created just for the stream, at the device's size,
+  with your wallpaper, icons and a taskbar. Your own desktop, windows and cursor stay untouched; the
+  stream gets its own mouse, keyboard and audio. It survives quick reconnects and resolution changes.
+- 📱 **Portrait streaming** and **desktop scaling** (100–200 %) on the virtual display.
 
 **Streaming**
 - 🎮 **NVENC on older GeForce cards** — built with CUDA 12.9, so GTX 900/1000 (Maxwell/Pascal)
   keep hardware H.264/HEVC encoding. Zero-copy NvFBC capture on NVIDIA.
-- 🕹️ **Controllers that just work** — correct Xbox layout in browsers, Steam and SDL games.
+- 🕹️ **Controllers that just work** — correct layout in browsers, Steam, SDL and Proton games; one pad
+  per device, player 1 always the one you use, and DualSense motion for gyro-capable phones.
 - 🖱️ **Cursor always visible** in the stream, with or without a physical mouse on the PC.
 - 🎤 **Remote microphone** — the device's mic appears on the PC as "Nova Mic".
 - 📋 **Clipboard sync** — text and images, both ways.
@@ -51,23 +53,23 @@ Android app.
 - 🔐 **Per-device permissions** — decide what each paired device may do; rename or unpair anytime.
 - 🏷️ **Auto device names** — pairing fills in the name for you, e.g. *Nebula from Ayush's S25 Ultra*.
 - 📈 **Session history & health checks** — what streamed, how well, and what needs attention.
+- 🔑 **Sign-in page** with secure sessions, "keep me signed in" and a lockout after wrong passwords.
+- 😴 **Sleep and Wake-on-LAN** from the device, and **host commands** you define (per-device permission).
+- ⚡ **Streaming power mode** (max GPU clocks while streaming) and **update checks** from releases.
 
 ### In progress
 
 | Feature | Status |
 |---|---|
-| Virtual display desktop (wallpaper, icons, taskbar) and keep-alive across resolution changes | 🔨 Fixing |
-| Desktop scaling for virtual displays (100–200 %) | 🔨 Building |
-| Sleep PC / Wake-on-LAN from the device, host commands, security hardening | 🧪 Testing |
 | Native NVENC with loss recovery (no full-frame refresh on packet loss) | 🔨 Building |
 | Adaptive bitrate and a connection test | 🔨 Building |
 | Local cursor drawn on the device (instant pointer) | 🔨 Building |
-| Per-device display profiles and portrait streaming | 🔨 Building |
+| Per-device display profiles | ⏸ Paused |
 
 ### Planned
 
-Replay clips (save the last minute), streaming power mode, per-game performance profiles,
-auto keyboard when a text field is focused, auto-update from releases, and a browser client.
+Replay clips (save the last minute), per-game performance profiles, auto keyboard when a text
+field is focused, and a browser client.
 See [ROADMAP.md](ROADMAP.md).
 
 ## Install
