@@ -28,6 +28,7 @@ extern "C" {
 #include "clipboard.h"
 #include "cursor.h"
 #include "config.h"
+#include "text_context.h"
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
@@ -1085,6 +1086,11 @@ namespace rtsp_stream {
       if (cursor::available()) {
         caps |= cursor::kFeatureFlag;
         BOOST_LOG(info) << "cursor: advertising local cursor to the client"sv;
+      }
+      // Remote text context (0x550C): only when text field focus can be read on the captured display.
+      if (text_context::available()) {
+        caps |= text_context::kHostFeatureFlag;
+        BOOST_LOG(info) << "text_context: advertising remote text context to the client"sv;
       }
       ss << "a=x-ss-general.featureFlags:" << caps << std::endl;
     }

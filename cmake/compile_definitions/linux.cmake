@@ -328,6 +328,7 @@ list(APPEND PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/linux/nic.h"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/nic.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/clipboard_linux.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/linux/text_context_atspi.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/tcp_stats.h"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/tcp_stats.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/audio.cpp")

@@ -593,6 +593,9 @@ namespace display_follow {
               {"NOVA_VD_SCALE", std::to_string(scale)},
               {"NOVA_VD_APPS", config::stream.file_apps},
               {"NOVA_VD_WALLPAPER", (std::filesystem::path {SUNSHINE_ASSETS_DIR} / "virtual-display" / "wallpaper.png").string()},
+              // Remote text context reads text field focus through AT-SPI: the session then keeps
+              // accessibility on for its own apps (on its private bus only).
+              {"NOVA_VD_A11Y", config::input.remote_text_context ? "1"s : "0"s},
             };
           } else {
             BOOST_LOG(warning) << "Virtual display: "sv << NOVA_VD_SESSION << " is missing; starting a bare window manager instead of the desktop"sv;

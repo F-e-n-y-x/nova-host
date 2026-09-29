@@ -28,6 +28,7 @@ extern "C" {
 #include "clipboard.h"
 #include "cursor.h"
 #include "config.h"
+#include "text_context.h"
 #include "display_device.h"
 #include "display_follow.h"
 #include "power_mode.h"
@@ -63,6 +64,7 @@ constexpr int IDX_SET_ADAPTIVE_TRIGGERS = 15;  ///< Control-stream message index
 constexpr int IDX_SET_PLAYER_LEDS = 16;  ///< Control-stream message index for set player indicator LEDs.
 constexpr int IDX_CLIPBOARD = 20;  ///< Clipboard sync frames (Sunshine-Foundation ecosystem; indexes 17-19 reserved for parity).
 constexpr int IDX_CURSOR = 21;  ///< Local cursor mode (client) and shape/visibility updates (host); see src/cursor.h.
+constexpr int IDX_REMOTE_TEXT_CONTEXT = 24;  ///< Host text field focus for the client's keyboard (host to client); see src/text_context.h.
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -87,6 +89,9 @@ static const short packetTypes[] = {
   0x5507,  // Resolution change (reserved)
   0x5508,  // Clipboard sync (Sunshine-Foundation ecosystem; see src/clipboard.h)
   0x5509,  // Local cursor mode/update (Sunshine protocol extension; see src/cursor.h)
+  0x550A,  // DualSense haptics PCM (reserved; Nova does not send it)
+  0x550B,  // DualSense haptics IR (reserved; Nova does not send it)
+  0x550C,  // Remote text context (Sunshine protocol extension; see src/text_context.h)
 };
 
 namespace asio = boost::asio;
@@ -570,6 +575,11 @@ namespace stream {
       cursor::sender_t sender;  ///< Mode the client asked for and the shapes it already has.
       bool acquired = false;  ///< Holds a cursor::acquire() while in local mode.
     } local_cursor;  ///< Local cursor state (control message 21), owned by the control thread.
+
+    struct {
+      bool checked = false;  ///< Registration was attempted once the control peer connected.
+      bool registered = false;  ///< The session gets text field focus updates (control message 24).
+    } text_context;  ///< Remote text context state, owned by the control thread.
 
     std::uint32_t launch_session_id;  ///< RTSP launch-session ID associated with this stream.
     std::string client_cert;  ///< PEM certificate for the paired client owning the stream.
@@ -1256,6 +1266,46 @@ namespace stream {
   }
 
   /**
+   * @brief Send one remote text context packet (see src/text_context.h) over the control channel.
+   * @param session Active streaming session.
+   * @param wire The 76-byte payload from text_context::encode().
+   * @return 0 when queued; nonzero when the peer is missing or the send fails.
+   */
+  int send_text_context(session_t *session, const std::vector<std::uint8_t> &wire) {
+    if (!session->control.peer || wire.size() != text_context::kWireSize) {
+      return -1;
+    }
+
+    std::vector<std::uint8_t> plaintext(sizeof(control_header_v2) + wire.size());
+    auto hdr = (control_header_v2 *) plaintext.data();
+    hdr->type = packetTypes[IDX_REMOTE_TEXT_CONTEXT];
+    hdr->payloadLength = wire.size();
+    std::copy(wire.begin(), wire.end(), plaintext.begin() + sizeof(control_header_v2));
+
+    std::vector<std::uint8_t> encrypted;
+    auto payload = encode_control_dyn(session, std::string_view {(char *) plaintext.data(), plaintext.size()}, encrypted);
+    if (payload.empty()) {
+      return -1;
+    }
+    if (session->broadcast_ref->control_server.send(payload, session->control.peer)) {
+      BOOST_LOG(warning) << "text_context: couldn't send a text field update"sv;
+      return -1;
+    }
+    return 0;
+  }
+
+  /**
+   * @brief Show one permitted input packet to remote text context (clicks and taps that may focus a field).
+   * @param session Session the packet came from.
+   * @param plaintext Decrypted input packet.
+   */
+  void observe_text_input(session_t *session, const std::vector<uint8_t> &plaintext) {
+    if (session->text_context.registered) {
+      text_context::service().on_input(session->launch_session_id, plaintext);
+    }
+  }
+
+  /**
    * @brief Apply a local-cursor mode change for one session.
    * @param session Session whose client changed mode.
    * @param mode Mode the client asked for.
@@ -1417,6 +1467,7 @@ namespace stream {
       }
 
       if (input::is_packet_permitted(plaintext, session->permissions.load(std::memory_order_relaxed))) {
+        observe_text_input(session, plaintext);
         input::passthrough(session->input, std::move(plaintext));
       }
     });
@@ -1482,6 +1533,7 @@ namespace stream {
       if (type == packetTypes[IDX_INPUT_DATA]) {
         plaintext.erase(std::begin(plaintext), std::begin(plaintext) + 4);
         if (input::is_packet_permitted(plaintext, session->permissions.load(std::memory_order_relaxed))) {
+          observe_text_input(session, plaintext);
           input::passthrough(session->input, std::move(plaintext));
         }
       } else {
@@ -1514,6 +1566,9 @@ namespace stream {
       const auto cursor_now = cursor_local ? cursor::current() : cursor::snapshot_t {};
       const auto cursor_scale = cursor::video_scale();
 
+      // Text field focus changes, addressed to one session each.
+      auto text_frames = text_context::service().drain_outbound();
+
       {
         auto lg = server->_sessions.lock();
 
@@ -1542,6 +1597,11 @@ namespace stream {
             if (session->local_cursor.acquired) {
               cursor::release();
               session->local_cursor.acquired = false;
+            }
+
+            if (session->text_context.registered) {
+              text_context::service().session_stopped(session->launch_session_id);
+              session->text_context.registered = false;
             }
 
             if (session->control.peer) {
@@ -1592,6 +1652,24 @@ namespace stream {
                 send_cursor(session, packet);
               }
             }
+
+            if (!session->text_context.checked) {
+              session->text_context.checked = true;
+              const auto permissions = session->permissions.load(std::memory_order_relaxed);
+              const bool pointer_allowed = client_permissions::has(permissions, client_permissions::input_mouse) ||
+                                           client_permissions::has(permissions, client_permissions::input_touch_pen);
+              const bool enabled = config::input.remote_text_context && config::input.mouse && pointer_allowed;
+              session->text_context.registered =
+                text_context::service().session_started(session->launch_session_id, static_cast<std::uint32_t>(session->config.mlFeatureFlags), enabled);
+            }
+
+            if (session->text_context.registered) {
+              for (const auto &frame : text_frames) {
+                if (frame.session == session->launch_session_id) {
+                  send_text_context(session, frame.bytes);
+                }
+              }
+            }
           }
 
           ++pos;
@@ -1605,7 +1683,8 @@ namespace stream {
       }
 
       // Shape changes should reach a local-cursor client quickly; the loop otherwise idles.
-      server->iterate(cursor_local ? 20ms : 150ms);
+      // Text field focus should open the keyboard within a tap's feel (the bridge debounces ~60 ms).
+      server->iterate(cursor_local ? 20ms : (text_context::service().active() ? 40ms : 150ms));
     }
 
     clipboard::stop();

@@ -1058,6 +1058,9 @@ namespace nova_api {
     if (features.local_cursor) {
       list.push_back("local_cursor");
     }
+    if (features.text_context) {
+      list.push_back("text_context");
+    }
     nlohmann::json granted = nlohmann::json::array();
     for (const auto &[name, flag] : client_permissions::flag_names) {
       if (client_permissions::has(permissions, flag)) {

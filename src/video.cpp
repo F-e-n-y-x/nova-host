@@ -30,6 +30,7 @@ extern "C" {
 #include "config.h"
 #include "cursor.h"
 #include "display_device.h"
+#include "text_context.h"
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
@@ -2780,6 +2781,17 @@ namespace video {
   }
 
   /**
+   * @brief Tell remote text context which part of the X screen the stream shows.
+   *
+   * @param display Captured display (offset and size in root-window pixels).
+   */
+  static void set_text_context_geometry(const platf::display_t *display) {
+    if (display->width > 0 && display->height > 0) {
+      text_context::service().set_capture_geometry({display->offset_x, display->offset_y, static_cast<std::uint32_t>(display->width), static_cast<std::uint32_t>(display->height)});
+    }
+  }
+
+  /**
    * @brief Create a port object or message.
    *
    * @param display Display object or identifier associated with the operation.
@@ -2914,6 +2926,7 @@ namespace video {
     // absolute mouse coordinates require that the dimensions of the screen are known
     ctx.touch_port_events->raise(make_port(disp, ctx.config));
     cursor::set_video_scale(stream_scale(disp, ctx.config));
+    set_text_context_geometry(disp);
 
     // Update client with our current HDR display state
     hdr_info_t hdr_info = std::make_unique<hdr_info_raw_t>(false);
@@ -3219,6 +3232,7 @@ namespace video {
       // absolute mouse coordinates require that the dimensions of the screen are known
       touch_port_event->raise(make_port(display.get(), config));
       cursor::set_video_scale(stream_scale(display.get(), config));
+      set_text_context_geometry(display.get());
 
       // Update client with our current HDR display state
       hdr_info_t hdr_info = std::make_unique<hdr_info_raw_t>(false);

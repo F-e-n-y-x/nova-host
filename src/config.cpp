@@ -905,6 +905,7 @@ namespace config {
     .high_resolution_scrolling = true,
     .native_pen_touch = true,
     .clipboard_sync = true,
+    .remote_text_context = true,  // Nova
     .local_cursor = true,  // Nova
   };
 
@@ -1945,6 +1946,7 @@ namespace config {
     bool_f(vars, "native_pen_touch", input.native_pen_touch);
     bool_f(vars, "clipboard_sync", input.clipboard_sync);
     bool_f(vars, "local_cursor", input.local_cursor);
+    bool_f(vars, "remote_text_context", input.remote_text_context);
 
     string_f(vars, "steamgriddb_api_key", library.steamgriddb_api_key);
     string_f(vars, "windows_exe_launcher", library.windows_exe_launcher);

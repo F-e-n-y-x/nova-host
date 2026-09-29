@@ -36,6 +36,7 @@
 #include "clipboard.h"
 #include "cursor.h"
 #include "config.h"
+#include "text_context.h"
 #include "display_follow.h"
 #include "display_modeset.h"
 #include "display_device.h"
@@ -2401,6 +2402,7 @@ namespace nvhttp {
       .abr = config::video.abr_enabled,
       .network_probe = config::nvhttp.network_probe_enabled,
       .local_cursor = cursor::available(),
+      .text_context = text_context::available(),
     };
   }
 

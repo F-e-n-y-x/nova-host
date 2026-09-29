@@ -299,6 +299,7 @@ namespace nova_api {
     bool abr = false;  ///< Adaptive bitrate (`/api/abr`) enabled (`abr_enabled`).
     bool network_probe = false;  ///< Network probe (`/api/network/probe`) enabled (`network_probe_enabled`).
     bool local_cursor = false;  ///< Local cursor (control message 21): cursor shapes sent, cursor left out of the video.
+    bool text_context = false;  ///< Remote text context (control message 24): text field focus reported to the client.
   };
 
   /**

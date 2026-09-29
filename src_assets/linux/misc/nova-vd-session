@@ -256,7 +256,35 @@ def browser_command():
     return []
 
 
-APP_ENV_KEYS = ("DBUS_SESSION_BUS_ADDRESS", "DCONF_PROFILE", "GIO_USE_VFS", "GIO_USE_VOLUME_MONITOR", "GTK_USE_PORTAL", "NO_AT_BRIDGE")
+APP_ENV_KEYS = ("DBUS_SESSION_BUS_ADDRESS", "DCONF_PROFILE", "GIO_USE_VFS", "GIO_USE_VOLUME_MONITOR", "GTK_USE_PORTAL", "NO_AT_BRIDGE",
+                "GNOME_ACCESSIBILITY", "QT_LINUX_ACCESSIBILITY_ALWAYS_ON", "ACCESSIBILITY_ENABLED")
+
+# NOVA_VD_A11Y=1 (Nova's remote_text_context is on): the session's apps expose their text fields
+# over AT-SPI so Nova can tell the client when one takes focus. It all stays on the session's
+# private bus; the desktop's accessibility settings are never touched.
+A11Y_ENV = {
+    "GNOME_ACCESSIBILITY": "1",  # Firefox, older GNOME apps
+    "QT_LINUX_ACCESSIBILITY_ALWAYS_ON": "1",  # Qt 5/6
+    "ACCESSIBILITY_ENABLED": "1",  # Chromium, Electron
+}
+
+
+def a11y_wanted():
+    return os.environ.get("NOVA_VD_A11Y") == "1"
+
+
+def enable_private_a11y():
+    """Start the private bus's accessibility bus and mark it enabled, so toolkits that wait for
+    org.a11y.Status.IsEnabled (Chromium, Qt) expose their widgets. Private bus only."""
+    if (not a11y_wanted() or os.environ.get("NOVA_VD_PRIVATE_BUS") != "1" or not os.environ.get("DBUS_SESSION_BUS_ADDRESS")
+            or not shutil.which("gdbus")):
+        return
+    try:
+        subprocess.run(["gdbus", "call", "--session", "--dest", "org.a11y.Bus", "--object-path", "/org/a11y/bus",
+                        "--method", "org.freedesktop.DBus.Properties.Set", "org.a11y.Status", "IsEnabled", "<true>"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError) as e:
+        log("could not enable accessibility on the session bus:", e)
 
 
 def write_app_env(d):
@@ -560,6 +588,7 @@ class Session:
     def run(self):
         os.makedirs(self.d, mode=0o700, exist_ok=True)
         os.environ["DCONF_PROFILE"] = isolate_dconf(self.d)
+        enable_private_a11y()
         write_app_env(self.d)
         with open(os.path.join(self.d, "pid"), "w", encoding="utf-8") as f:
             f.write(str(os.getpid()))
@@ -631,6 +660,9 @@ def private_env():
         "NO_AT_BRIDGE": "1",
         "WAYLAND_DISPLAY": "",
     })
+    if a11y_wanted():
+        env.pop("NO_AT_BRIDGE", None)
+        env.update(A11Y_ENV)
     env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     env.pop("SESSION_MANAGER", None)
     env.pop("DESKTOP_STARTUP_ID", None)

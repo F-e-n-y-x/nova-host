@@ -137,7 +137,7 @@ namespace vd_app_launch {
 
   /**
    * @brief Variables the desktop session publishes for apps (the ones read from its file).
-   * @return DBUS_SESSION_BUS_ADDRESS, DCONF_PROFILE, GIO_USE_VFS, GIO_USE_VOLUME_MONITOR, GTK_USE_PORTAL, NO_AT_BRIDGE.
+   * @return DBUS_SESSION_BUS_ADDRESS, DCONF_PROFILE, GIO_USE_VFS, GIO_USE_VOLUME_MONITOR, GTK_USE_PORTAL, NO_AT_BRIDGE and the accessibility switches (GNOME_ACCESSIBILITY, QT_LINUX_ACCESSIBILITY_ALWAYS_ON, ACCESSIBILITY_ENABLED).
    */
   const std::vector<std::string> &session_env_keys();
 

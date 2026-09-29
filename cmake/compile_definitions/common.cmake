@@ -210,6 +210,8 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/clipboard.cpp"
         "${CMAKE_SOURCE_DIR}/src/cursor.h"
         "${CMAKE_SOURCE_DIR}/src/cursor.cpp"
+        "${CMAKE_SOURCE_DIR}/src/text_context.h"
+        "${CMAKE_SOURCE_DIR}/src/text_context.cpp"
         "${CMAKE_SOURCE_DIR}/src/config.cpp"
         "${CMAKE_SOURCE_DIR}/src/config_migration.cpp"
         "${CMAKE_SOURCE_DIR}/src/library/artwork.cpp"

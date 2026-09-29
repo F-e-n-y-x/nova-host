@@ -1462,6 +1462,39 @@ value from apps.json `env` for that game only.
     </tr>
 </table>
 
+### remote_text_context
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Tell clients that support it (Nebula, Moonlight V+; control message 24) when a text
+            field on the PC takes keyboard focus after the client tapped or clicked it, so the
+            client opens its keyboard, and again when the field loses focus so it closes.
+            Focus is read, never changed, through AT-SPI: the element's role, state and on-screen
+            position, and the caret position (not for password fields). Field contents are never
+            read. Focus changes made at the PC itself, or by an app on its own, are not sent.
+            Works on the desktop (Mirror) and on the Virtual display. With
+            `virtual_display_session = desktop`, the Virtual display's session keeps accessibility
+            on for its own apps (on its private D-Bus only); on the desktop, GTK apps report focus
+            by default and Qt, Firefox and Chrome only when accessibility is turned on there.
+            @note{Linux only. Requires the mouse to be enabled. Games rarely expose text fields.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            remote_text_context = disabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### keybindings
 
 <table>

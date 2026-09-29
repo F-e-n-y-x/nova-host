@@ -894,6 +894,10 @@ namespace virtual_display {
       "GIO_USE_VOLUME_MONITOR",
       "GTK_USE_PORTAL",
       "NO_AT_BRIDGE",
+      // accessibility for remote text context (nova-vd-session with NOVA_VD_A11Y=1)
+      "GNOME_ACCESSIBILITY",
+      "QT_LINUX_ACCESSIBILITY_ALWAYS_ON",
+      "ACCESSIBILITY_ENABLED",
     };
     return keys;
   }
