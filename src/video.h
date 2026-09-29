@@ -770,6 +770,7 @@ namespace video {
     std::vector<std::size_t> bytes;  ///< Encoded size per frame.
     std::vector<bool> idr;  ///< Whether each frame is an IDR.
     std::vector<bool> after_rfi;  ///< Whether each frame is marked as following reference frame invalidation.
+    std::vector<std::size_t> offsets;  ///< Byte offset of each frame in the returned bitstream (0 without one).
   };
 
   /**
@@ -789,6 +790,25 @@ namespace video {
    * @return Results, or empty when the session couldn't be created or encoding failed.
    */
   std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, int invalidate_at = -1, std::vector<std::uint8_t> *bitstream = nullptr);
+
+  /**
+   * @brief Offline encode with several simulated losses.
+   *
+   * Before each frame number in `recover_at`, the session gets the invalidation request a client
+   * sends when the `loss_span` frames before it never arrived (reference frame invalidation on the
+   * native encoder, an IDR on FFmpeg NVENC).
+   *
+   * @param disp Display that creates the encode devices (a CUDA display).
+   * @param native Use the native CUDA encoder instead of FFmpeg NVENC.
+   * @param config Stream configuration.
+   * @param images Captured images, used round-robin.
+   * @param frames Number of frames to encode.
+   * @param recover_at Frame numbers that follow a loss.
+   * @param loss_span Number of lost frames before each entry of `recover_at`.
+   * @param bitstream When not null, receives the encoded elementary stream.
+   * @return Results, or empty when the session couldn't be created or encoding failed.
+   */
+  std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, const std::vector<int> &recover_at, int loss_span, std::vector<std::uint8_t> *bitstream = nullptr);
 #endif
 
   /**

@@ -2564,6 +2564,14 @@ namespace video {
 
 #if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
   std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, int invalidate_at, std::vector<std::uint8_t> *bitstream) {
+    std::vector<int> losses;
+    if (invalidate_at >= 3) {
+      losses.push_back(invalidate_at);
+    }
+    return encode_offline_nvenc(disp, native, config, images, frames, losses, 2, bitstream);
+  }
+
+  std::optional<offline_encode_result_t> encode_offline_nvenc(platf::display_t &disp, bool native, const config_t &config, const std::vector<std::shared_ptr<platf::img_t>> &images, int frames, const std::vector<int> &recover_at, int loss_span, std::vector<std::uint8_t> *bitstream) {
     const encoder_t &encoder = native ? nvenc_native : nvenc;
     auto encode_device = make_encode_device(disp, encoder, config);
     if (!encode_device || images.empty()) {
@@ -2578,8 +2586,9 @@ namespace video {
     auto packets = mail::man->queue<packet_t>(mail::video_packets);
     session->request_idr_frame();
     for (int frame_nr = 1; frame_nr <= frames; ++frame_nr) {
-      if (frame_nr == invalidate_at && frame_nr >= 3) {
-        session->invalidate_ref_frames(frame_nr - 2, frame_nr - 1);
+      if (loss_span > 0 && frame_nr > loss_span && std::ranges::find(recover_at, frame_nr) != recover_at.end()) {
+        // What a client sends when frames [frame_nr - loss_span, frame_nr - 1] never arrived.
+        session->invalidate_ref_frames(frame_nr - loss_span, frame_nr - 1);
       }
       const auto start = std::chrono::steady_clock::now();
       if (session->convert(*images[(frame_nr - 1) % images.size()])) {
@@ -2592,6 +2601,7 @@ namespace video {
       }
       auto packet = packets->pop();
       result.frame_ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+      result.offsets.push_back(bitstream ? bitstream->size() : 0);
       result.bytes.push_back(packet->data_size());
       result.idr.push_back(packet->is_idr());
       result.after_rfi.push_back(packet->after_ref_frame_invalidation);

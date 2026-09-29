@@ -173,8 +173,8 @@ if(NVENC_IMPLEMENTATION_SOURCES)
                 NVENC_SDK_VERSION=${sdk_version}
         )
         target_compile_options(${target_name} PRIVATE ${SUNSHINE_COMPILE_OPTIONS})
-        # Boost's header-only CPM layout exposes per-library include paths only through its targets.
-        target_link_libraries(${target_name} PRIVATE ${Boost_LIBRARIES})
+        # Boost's CPM layout and nlohmann_json expose their include paths only through their targets.
+        target_link_libraries(${target_name} PRIVATE ${Boost_LIBRARIES} nlohmann_json::nlohmann_json)
     endfunction()
 
     add_nvenc_sdk_implementation(nvenc_sdk_1100 1100 "${NV_CODEC_HEADERS_11_INCLUDE_DIR}")

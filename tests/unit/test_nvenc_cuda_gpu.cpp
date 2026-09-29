@@ -354,4 +354,180 @@ TEST(NvencCudaGpuBench, PascalPresetMatrix) {
   config::video.nv = saved_nv;
 }
 
+/**
+ * @brief Pan-and-motion frames closer to a game than the static gradient: a detailed background
+ *        that scrolls 6 px per frame, a moving bright block and a noisy band. Keeps the pixels.
+ */
+static std::vector<std::shared_ptr<platf::img_t>> panning_frames(int width, int height, int count, std::vector<std::uint8_t> &reference) {
+  std::vector<std::shared_ptr<platf::img_t>> frames;
+  std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);
+  std::uint32_t seed = 777;
+  for (int f = 0; f < count; ++f) {
+    const int pan = f * 6;
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        auto *p = &pixels[(static_cast<std::size_t>(y) * width + x) * 4];
+        const int u = x + pan;
+        // Smooth hills plus fine texture, all integer so every run is identical.
+        const int hill = ((u * 3 / 7) ^ (y * 5 / 9)) & 0x7F;
+        const int fine = ((u * 131 + y * 71) ^ (u * y)) & 0x1F;
+        p[0] = static_cast<std::uint8_t>(40 + hill + fine);
+        p[1] = static_cast<std::uint8_t>(60 + ((y * 160) / height) + (fine >> 1));
+        p[2] = static_cast<std::uint8_t>(30 + ((u >> 3) & 0x7F) + fine);
+        p[3] = 0xFF;
+        const int bx = (x + f * 24) % width;
+        if (bx > width / 3 && bx < width / 3 + 200 && y > height / 3 && y < height / 3 + 200) {
+          p[0] = p[1] = p[2] = 0xF0;
+        }
+        if (y > height * 3 / 4 && y < height * 3 / 4 + 32) {
+          seed = seed * 1664525U + 1013904223U;
+          p[0] = p[1] = p[2] = static_cast<std::uint8_t>(seed >> 24);
+        }
+      }
+    }
+    auto img = cuda::make_img_from_ram(width, height, pixels.data());
+    if (!img) {
+      return {};
+    }
+    frames.push_back(std::move(img));
+    reference.insert(reference.end(), pixels.begin(), pixels.end());
+  }
+  return frames;
+}
+
+/**
+ * @brief Loss recovery A/B: the same content through native NVENC (RFI) and FFmpeg NVENC (IDR),
+ *        with simulated losses. Writes, per scenario, the stream a client receives (lost frames
+ *        removed) and a per-frame CSV, plus the reference frames, for decode/PSNR analysis.
+ *        Runs only with NOVA_NVENC_LOSS_DIR=<dir>.
+ */
+TEST(NvencCudaGpuBench, LossRecoveryNativeVsFfmpeg) {
+  const char *dir_env = std::getenv("NOVA_NVENC_LOSS_DIR");
+  if (!dir_env || !*dir_env) {
+    GTEST_SKIP() << "set NOVA_NVENC_LOSS_DIR=<dir> to run the loss recovery benchmark";
+  }
+  ASSERT_EQ(cuda::init(), 0);
+  const std::filesystem::path dir {dir_env};
+  std::filesystem::create_directories(dir);
+
+  const auto saved_nv = config::video.nv;
+  const auto saved_legacy = config::video.nv_legacy;
+  // atom's settings: preset P1, two-pass at quarter resolution, spatial AQ on.
+  config::video.nv = {};
+  config::video.nv.quality_preset = 1;
+  config::video.nv.two_pass = nvenc::nvenc_two_pass::quarter_resolution;
+  config::video.nv.adaptive_quantization = true;
+  config::video.nv_legacy.preset = "p1";
+  config::video.nv_legacy.multipass = 1;
+  config::video.nv_legacy.h264_coder = 1;
+  config::video.nv_legacy.spatial_aq = 1;
+  config::video.nv_legacy.vbv_percentage_increase = 0;
+
+  struct mode_t {
+    int width;
+    int height;
+    int fps;
+    int bitrate_kbps;
+  };
+  const mode_t modes[] = {
+    {1920, 1080, 120, 40000},
+    {2340, 1080, 120, 50000},
+  };
+  constexpr int unique_frames = 48;
+  constexpr int frames = 360;
+  constexpr int loss_span = 3;  // about 25 ms at 120 fps until the client reports the loss
+  const std::vector<int> recover_at {60, 150, 240};
+
+  std::ofstream summary {dir / "summary.csv"};
+  summary << "codec,width,height,fps,bitrate_kbps,scenario,frames_sent,idr_frames,median_p_bytes,recovery_bytes_mean,recovery_bytes_max,recovery_ratio,recovery_send_ms_at_bitrate,mean_encode_ms,p99_encode_ms,stream\n";
+
+  for (const auto &mode : modes) {
+    std::vector<std::uint8_t> reference;
+    auto images = panning_frames(mode.width, mode.height, unique_frames, reference);
+    ASSERT_EQ(images.size(), static_cast<std::size_t>(unique_frames));
+    {
+      std::ofstream ref {dir / std::format("ref_{}x{}.bgra", mode.width, mode.height), std::ios::binary};
+      ref.write(reinterpret_cast<const char *>(reference.data()), static_cast<std::streamsize>(reference.size()));
+    }
+    reference = {};
+
+    offline_cuda_display display {mode.width, mode.height};
+    for (int format : {0, 1}) {
+      struct scenario_t {
+        const char *name;
+        bool native;
+        bool losses;  // request recovery before each recover_at frame
+        bool drop;  // remove the lost frames from the received stream
+      };
+      const scenario_t scenarios[] = {
+        {"native_clean", true, false, false},
+        {"ffmpeg_clean", false, false, false},
+        {"native_rfi", true, true, true},
+        {"ffmpeg_idr", false, true, true},
+        {"native_norecovery", true, false, true},
+      };
+      for (const auto &sc : scenarios) {
+        auto config = stream_config(mode.width, mode.height, format, mode.bitrate_kbps);
+        config.framerate = mode.fps;
+        std::vector<std::uint8_t> bitstream;
+        auto result = video::encode_offline_nvenc(display, sc.native, config, images, frames, sc.losses ? recover_at : std::vector<int> {}, loss_span, &bitstream);
+        ASSERT_TRUE(result) << sc.name;
+        ASSERT_EQ(result->bytes.size(), static_cast<std::size_t>(frames));
+
+        const auto is_lost = [&](int frame_nr) {
+          return sc.drop && std::ranges::any_of(recover_at, [&](int r) {
+                   return frame_nr >= r - loss_span && frame_nr < r;
+                 });
+        };
+        const auto base = std::format("{}_{}x{}_{}", format ? "hevc" : "h264", mode.width, mode.height, sc.name);
+        const auto stream_name = base + (format ? ".hevc" : ".h264");
+        std::ofstream out {dir / stream_name, std::ios::binary};
+        std::ofstream per_frame {dir / (base + ".csv")};
+        per_frame << "frame,src,bytes,idr,after_rfi,kept,encode_ms\n";
+        int idr_count = 0;
+        int sent = 0;
+        std::vector<std::size_t> p_bytes;
+        std::vector<std::size_t> recovery_bytes;
+        for (int i = 0; i < frames; ++i) {
+          const int frame_nr = i + 1;
+          const bool kept = !is_lost(frame_nr);
+          if (kept) {
+            out.write(reinterpret_cast<const char *>(bitstream.data() + result->offsets[i]), static_cast<std::streamsize>(result->bytes[i]));
+            ++sent;
+          }
+          idr_count += result->idr[i] ? 1 : 0;
+          if (std::ranges::find(recover_at, frame_nr) != recover_at.end()) {
+            recovery_bytes.push_back(result->bytes[i]);
+          } else if (!result->idr[i] && i > 10) {
+            p_bytes.push_back(result->bytes[i]);
+          }
+          per_frame << std::format("{},{},{},{},{},{},{:.3f}\n", frame_nr, i % unique_frames, result->bytes[i], result->idr[i] ? 1 : 0, result->after_rfi[i] ? 1 : 0, kept ? 1 : 0, result->frame_ms[i]);
+        }
+        std::ranges::sort(p_bytes);
+        const double median_p = static_cast<double>(p_bytes[p_bytes.size() / 2]);
+        const double rec_mean = std::accumulate(recovery_bytes.begin(), recovery_bytes.end(), 0.0) / static_cast<double>(recovery_bytes.size());
+        const double rec_max = static_cast<double>(*std::ranges::max_element(recovery_bytes));
+        std::vector<double> ms(result->frame_ms.begin() + 10, result->frame_ms.end());
+        std::ranges::sort(ms);
+        const double mean_ms = std::accumulate(ms.begin(), ms.end(), 0.0) / static_cast<double>(ms.size());
+        summary << std::format("{},{},{},{},{},{},{},{},{:.0f},{:.0f},{:.0f},{:.2f},{:.2f},{:.3f},{:.3f},{}\n", format ? "HEVC" : "H.264", mode.width, mode.height, mode.fps, mode.bitrate_kbps, sc.name, sent, idr_count, median_p, rec_mean, rec_max, rec_mean / median_p, rec_mean * 8.0 / mode.bitrate_kbps, mean_ms, percentile(ms, 0.99), stream_name);
+        summary.flush();
+        std::cout << std::format("[loss] {} idr={} median_p={:.0f} B recovery={:.0f} B ({:.2f}x) encode {:.3f} ms", base, idr_count, median_p, rec_mean, rec_mean / median_p, mean_ms) << std::endl;
+
+        if (sc.native && sc.losses) {
+          EXPECT_EQ(idr_count, 1) << base << ": RFI must not fall back to an IDR";
+          for (int r : recover_at) {
+            EXPECT_TRUE(result->after_rfi[r - 1]) << base << " frame " << r;
+          }
+        }
+        if (!sc.native && sc.losses) {
+          EXPECT_EQ(idr_count, 1 + static_cast<int>(recover_at.size())) << base;
+        }
+      }
+    }
+  }
+  config::video.nv = saved_nv;
+  config::video.nv_legacy = saved_legacy;
+}
+
 #endif
