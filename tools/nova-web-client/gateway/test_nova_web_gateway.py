@@ -1,6 +1,8 @@
 """Tests for the Nova browser client gateway. Run: python3 -m unittest -v test_nova_web_gateway"""
 
 import asyncio
+import os
+import tempfile
 import unittest
 
 import nova_web_gateway as g
@@ -106,6 +108,33 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaises(g.HttpError):
             g.parse_request_head(b"GET / HTTP/1.1\r\nBad Header : x\r\n\r\n", "x")
 
+    def test_library_view_keeps_only_names_art_and_display(self):
+        tree = {"running_index": 1, "apps": [
+            {"name": "Desktop", "image-path": "desktop.png", "nova-display-mode": "mirror", "cmd": "secret-cmd",
+             "env": {"TOKEN": "x"}, "prep-cmd": [{"do": "rm -rf"}]},
+            {"name": "Clock", "nova-hero": "h.png", "nova-logo": "l.png", "nova-display-mode": "evil"},
+            {"cmd": "nameless"}, "garbage"]}
+        view = g.library_view(tree)
+        self.assertEqual(view, [
+            {"index": 0, "name": "Desktop", "poster": True, "hero": False, "logo": False, "display": "mirror", "running": False},
+            {"index": 1, "name": "Clock", "poster": False, "hero": True, "logo": True, "display": None, "running": True}])
+        self.assertNotIn("secret-cmd", repr(view))
+        self.assertEqual(g.library_view(None), [])
+        self.assertEqual(g.library_view({"apps": "x"}), [])
+
+    def test_describe_target(self):
+        self.assertEqual(g.describe_target("/nova/play?app=Clock&display=mirror"), ("Clock", "Mirror desktop"))
+        self.assertEqual(g.describe_target("/nova/play?app=Clock"), ("Clock", None))
+        self.assertEqual(g.describe_target("/"), (None, None))
+        self.assertEqual(g.describe_target("//evil/nova/play?app=x"), (None, None))
+
+    def test_signin_page_escapes_the_game_name(self):
+        page = g.signin_page("https://h:47990/login?next=%2Fbrowser", "h", "/nova/play?app=%3Cscript%3Ealert(1)%3C/script%3E")
+        self.assertNotIn(b"<script>", page)
+        self.assertIn(b"&lt;script&gt;", page)
+        self.assertIn(b'class="btn" href="https://h:47990/login?next=%2Fbrowser"', page)
+        self.assertIn(b"moonlight-web-stream", page)  # the credit stays visible
+
     def test_mw_config(self):
         defaults = {"data_storage": {"path": "x"}, "web_server": {"bind_address": "0.0.0.0:8080", "certificate": None,
                     "first_login_create_admin": True}, "webrtc": {"ice_servers": [{"urls": ["stun:x"]}]},
@@ -145,6 +174,14 @@ class FakeBackends:
     def mw_json(self, method, path, user, body=None):
         return {"apps": [{"app_id": 42, "title": "Desktop"}]}
 
+    def nova_library(self, token):
+        assert token == TOKEN
+        return [{"index": 0, "name": "Desktop", "poster": True, "hero": False, "logo": False, "display": None, "running": False}]
+
+    def nova_art(self, token, index, kind):
+        assert token == TOKEN
+        return ("image/png", b"\x89PNG-art") if (index, kind) == (0, "poster") else None
+
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -166,8 +203,14 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
         self.up = await asyncio.start_server(upstream, "127.0.0.1", 0)
         up_port = self.up.sockets[0].getsockname()[1]
+        self.static = tempfile.TemporaryDirectory()
+        os.makedirs(os.path.join(self.static.name, "nova-ui", "fonts"))
+        for name, data in (("nova-ui/star.svg", b"<svg/>"), ("nova-ui/fonts/geist-sans-400.woff2", b"wOF2"),
+                           ("nova-ui/picker.js", b"private"), ("secret.txt", b"secret")):
+            with open(os.path.join(self.static.name, name), "wb") as f:
+                f.write(data)
         self.cfg = dict(g.DEFAULTS, upstream_port=up_port, forwarded_header="X-Nova-Secret-1f2e", revalidate_seconds=0.2,
-                        auth_cache_seconds=0.1)
+                        auth_cache_seconds=0.1, static_dir=self.static.name, version="moonlight-web-stream v2.10.0 (abc)")
         self.backends = FakeBackends()
         self.gw = g.Gateway(self.cfg, self.backends)
         self.server = await asyncio.start_server(self.gw.handle, "127.0.0.1", 0)
@@ -176,6 +219,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         self.server.close()
         self.up.close()
+        self.static.cleanup()
 
     async def request(self, raw: bytes):
         r, w = await asyncio.open_connection("127.0.0.1", self.port)
@@ -273,6 +317,62 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         data = await asyncio.wait_for(r.read(100), 3)
         self.assertEqual(data, b"")
         w.close()
+
+    async def test_public_assets_are_an_exact_allowlist(self):
+        head, body = await self.get("/nova/assets/star.svg", cookie=None)
+        self.assertIn("200 OK", head)
+        self.assertIn("Content-Type: image/svg+xml", head)
+        self.assertEqual(body, b"<svg/>")
+        head, body = await self.get("/nova/assets/fonts/geist-sans-400.woff2", cookie=None)
+        self.assertIn("font/woff2", head)
+        self.assertEqual(body, b"wOF2")
+        for path in ("/nova/assets/picker.js", "/nova/assets/../secret.txt", "/nova/assets/%2e%2e/secret.txt",
+                     "/nova/assets/fonts/../../secret.txt", "/nova/assets/"):
+            head, _ = await self.get(path, cookie=None)
+            self.assertIn("404", head, path)
+        self.assertEqual(self.seen, [])
+        self.assertEqual(self.backends.session_checks, 0)
+
+    async def test_session_library_and_art_need_a_session(self):
+        for path in ("/nova/session", "/nova/library", "/nova/art?index=0&kind=poster"):
+            head, body = await self.get(path, cookie=None)
+            self.assertIn("200 OK", head)  # the sign-in page, not data
+            self.assertIn(b"Sign in with Nova", body)
+        head, body = await self.get("/nova/session")
+        info = __import__("json").loads(body)
+        self.assertEqual(info["user"], "admin")
+        self.assertEqual(info["signout_url"], "https://192.168.10.10:47990/logout")
+        self.assertEqual(info["upstream"]["source"], g.MWS_URL)
+        self.assertIn("v2.10.0", info["upstream"]["version"])
+        head, body = await self.get("/nova/library")
+        self.assertEqual(__import__("json").loads(body)["apps"][0]["name"], "Desktop")
+        self.assertEqual(self.seen, [])  # answered by the gateway, never proxied
+
+    async def test_art_is_validated_and_sandboxed(self):
+        head, body = await self.get("/nova/art?index=0&kind=poster")
+        self.assertIn("200 OK", head)
+        self.assertIn("Content-Type: image/png", head)
+        self.assertIn("sandbox", head)
+        self.assertEqual(body, b"\x89PNG-art")
+        head, _ = await self.get("/nova/art?index=0&kind=hero")
+        self.assertIn("404", head)
+        for bad in ("/nova/art?index=-1", "/nova/art?index=0&kind=../x", "/nova/art?index=abc", "/nova/art?index=1234567"):
+            head, _ = await self.get(bad)
+            self.assertIn("400", head, bad)
+
+    async def test_state_changing_nova_routes_refuse_other_methods(self):
+        head, _ = await self.request(f"POST /nova/session HTTP/1.1\r\nHost: h\r\nCookie: nova_session={TOKEN}\r\n"
+                                     "Content-Length: 0\r\n\r\n".encode())
+        self.assertIn("404", head)
+
+    async def test_upstream_down_gives_a_page_to_browsers(self):
+        self.cfg["upstream_port"] = 1  # nothing listens there
+        head, body = await self.get("/stream.html", extra="Accept: text/html\r\n")
+        self.assertIn("502", head)
+        self.assertIn(b"responding", body)
+        head, body = await self.get("/api/hosts")
+        self.assertIn("502", head)
+        self.assertNotIn(b"<html", body)
 
     async def test_refuses_peer_outside_policy(self):
         gw = g.Gateway(dict(g.DEFAULTS, allow="lan"), FakeBackends())

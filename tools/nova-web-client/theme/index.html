@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" class="notranslate">
+<head>
+  <meta charset="utf-8">
+  <meta name="google" content="notranslate">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0A0A0B">
+  <meta name="description" content="Play your Nova games in this browser">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Nova">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Play · Nova</title>
+  <link rel="icon" href="nova-ui/star.svg" type="image/svg+xml">
+  <link rel="manifest" href="nova-ui/manifest.json" crossorigin="use-credentials">
+  <link rel="preload" href="nova-ui/fonts/geist-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="nova-ui/fonts/geist-sans-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="nova-ui/nova.css">
+  <link rel="stylesheet" href="nova-ui/picker.css">
+  <script type="module" src="nova-ui/picker.js"></script>
+</head>
+<body>
+  <!-- Nova's game picker for the browser client (replaces moonlight-web-stream's host list). -->
+  <div id="app" class="nv-picker" aria-busy="true"></div>
+  <noscript><p style="padding:24px">The browser client needs JavaScript.</p></noscript>
+</body>
+</html>

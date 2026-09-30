@@ -1,8 +1,10 @@
 #!/bin/bash
 # Build the Nova browser client sidecar (patched moonlight-web-stream) from source.
 #
-# Usage: build.sh [BUILD_DIR]
+# Usage: build.sh [--theme-only] [BUILD_DIR]
 #   BUILD_DIR defaults to $NOVA_WEB_CLIENT_BUILD_DIR or ./build-nova-web-client.
+#   --theme-only re-stages BUILD_DIR/dist/static from the last frontend build and applies Nova's
+#   interface (theme/) again, without rebuilding anything (for work on the theme).
 #   Output: BUILD_DIR/dist/{web-server,streamer,static/,VERSION,LICENSE.moonlight-web-stream,THIRD-PARTY.txt}
 #   Package it with NOVA_WEB_CLIENT_DIST=BUILD_DIR/dist in the environment of the Nova build.
 #
@@ -17,6 +19,8 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=upstream.env
 . "$HERE/upstream.env"
 
+THEME_ONLY=0
+if [ "${1:-}" = "--theme-only" ]; then THEME_ONLY=1; shift; fi
 BUILD_DIR=${1:-${NOVA_WEB_CLIENT_BUILD_DIR:-$PWD/build-nova-web-client}}
 mkdir -p "$BUILD_DIR"
 BUILD_DIR=$(cd "$BUILD_DIR" && pwd)
@@ -29,6 +33,27 @@ export CARGO_TARGET_DIR=$BUILD_DIR/target
 export PATH=$CARGO_HOME/bin:$PATH
 
 log() { printf '[nova-web-client] %s\n' "$*"; }
+
+# -- Nova's interface on top of the built frontend: fonts (pinned npm tarball) + theme/.
+FONTS=$BUILD_DIR/fonts
+stage_static() {
+  if [ ! -f "$FONTS/package/files/geist-sans-latin-400-normal.woff2" ]; then
+    log "fetching @fontsource/geist-sans@$GEIST_SANS_VERSION"
+    rm -rf "$FONTS" && mkdir -p "$FONTS"
+    (cd "$FONTS" && npm pack --silent "@fontsource/geist-sans@$GEIST_SANS_VERSION" >/dev/null)
+    echo "$GEIST_SANS_SHA256  $FONTS/fontsource-geist-sans-$GEIST_SANS_VERSION.tgz" | sha256sum -c --quiet -
+    tar -xzf "$FONTS/fontsource-geist-sans-$GEIST_SANS_VERSION.tgz" -C "$FONTS" package/LICENSE package/files
+  fi
+  rm -rf "$DIST/static"
+  cp -r "$SRC/dist" "$DIST/static"
+  python3 "$HERE/theme/apply-theme.py" "$DIST/static" "$FONTS/package/files"
+}
+if [ "$THEME_ONLY" = 1 ]; then
+  [ -d "$SRC/dist" ] && [ -d "$DIST" ] || { echo "error: no earlier build in $BUILD_DIR" >&2; exit 1; }
+  stage_static
+  log "done: $DIST/static"
+  exit 0
+fi
 
 # -- Rust toolchain (local to the build dir)
 if ! command -v rustup >/dev/null 2>&1; then
@@ -74,12 +99,13 @@ for bin in web-server streamer; do
   strip --strip-unneeded -o "$DIST/$bin" "$CARGO_TARGET_DIR/release/$bin"
   chmod 0755 "$DIST/$bin"
 done
-cp -r "$SRC/dist" "$DIST/static"
+stage_static
 cp "$SRC/LICENSE" "$DIST/LICENSE.moonlight-web-stream"
 {
   echo "moonlight-web-stream $MWS_TAG ($MWS_COMMIT)"
   echo "source: $MWS_REPO"
   for p in "$HERE"/patches/*.patch; do echo "patch: $(basename "$p") sha256=$(sha256sum "$p" | cut -d' ' -f1)"; done
+  echo "theme: Nova interface sha256=$(cd "$HERE/theme" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
 } > "$DIST/VERSION"
 # Licences of every Rust crate linked into the two programs.
 cargo metadata --format-version 1 --locked --offline --filter-platform x86_64-unknown-linux-gnu | python3 -c '
