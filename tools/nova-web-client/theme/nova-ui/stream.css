@@ -120,6 +120,10 @@ canvas.video-stream { object-fit: contain; }
   transition: transform 280ms var(--nv-ease-out), opacity 200ms ease-out, visibility 0s linear 280ms;
 }
 .nv-bar.is-shown { transform: none; opacity: 1; visibility: visible; transition: transform 280ms var(--nv-ease-out), opacity 200ms ease-out, visibility 0s; }
+/* The bar is a full-width strip with a fade: only its own controls take the pointer, so clicks on
+   the gradient and the empty middle go straight to the game underneath. */
+.nv-stream-ui > .nv-bar { pointer-events: none; }
+.nv-bar.is-shown button, .nv-bar.is-shown a, .nv-bar.is-shown .nv-chip { pointer-events: auto; }
 .nv-bar__back { color: var(--nv-text); }
 .nv-bar__title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .nv-bar__title .nv-logo span { display: none; }
@@ -150,9 +154,14 @@ canvas.video-stream { object-fit: contain; }
   position: fixed; z-index: 1; left: calc(16px + var(--nv-safe-left)); bottom: calc(16px + var(--nv-safe-bottom));
   display: none; gap: 16px; align-items: flex-end; padding: 10px 14px; border-radius: var(--nv-radius-lg);
   background: rgba(10, 10, 11, 0.72); border: 1px solid rgba(255, 255, 255, 0.06); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  pointer-events: none !important; font-variant-numeric: tabular-nums;
+  pointer-events: none; font-variant-numeric: tabular-nums;
 }
 .nv-hud.is-shown { display: flex; animation: nv-fade 200ms ease-out; }
+.nv-hud__close {
+  pointer-events: auto; align-self: center; display: grid; place-items: center; width: 28px; height: 28px; margin-left: 4px;
+  padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.08); color: var(--nv-text-muted); font-size: 16px; line-height: 1; cursor: pointer;
+}
+.nv-hud__close:hover { background: rgba(255, 255, 255, 0.16); color: var(--nv-text); }
 .nv-hud__item { display: flex; flex-direction: column; gap: 1px; min-width: 44px; }
 .nv-hud__value { font-size: 15px; font-weight: 600; line-height: 18px; }
 .nv-hud__label { font-size: 11px; line-height: 14px; color: var(--nv-text-muted); }
@@ -254,7 +263,7 @@ canvas.video-stream { object-fit: contain; }
   .nv-bar .nv-icon-btn { width: 40px; height: 40px; }
   .nv-bar__menu { padding: 0 12px; }
   .nv-bar__menu span, .nv-bar__menu kbd { display: none; }
-  .nv-bar [data-nv-optional] { display: none; }
+  .nv-bar [data-nv-optional]:not([data-nv-keep]) { display: none; }
   .nv-hud { gap: 12px; padding: 8px 12px; }
   .nv-veil__art { width: 104px; margin-bottom: 18px; }
   .nv-veil__title { font-size: 19px; line-height: 24px; }
@@ -270,3 +279,21 @@ canvas.video-stream { object-fit: contain; }
   .nv-sheet.nv-smenu .nv-sheet__body { padding-left: 20px; padding-right: 20px; }
   .nv-qt { min-height: 80px; }
 }
+
+/* --------------------------------------------------------- one pointer only */
+/* While playing, the PC's own pointer is in the video, so the browser's is hidden over the stream.
+   It comes back over Nova's controls (top bar buttons, menu, dialogs) so they stay usable. */
+body.nv-playing, body.nv-playing * { cursor: none !important; }
+body.nv-playing .nv-stream-ui .nv-bar.is-shown button,
+body.nv-playing .nv-stream-ui .nv-bar.is-shown a,
+body.nv-playing .nv-stream-ui .nv-hud__close,
+body.nv-playing .nv-stream-ui .nv-handle,
+body.nv-playing .nv-stream-ui .nv-sheet,
+body.nv-playing .nv-stream-ui .nv-sheet *,
+body.nv-playing .nv-stream-ui .nv-veil:not(.is-gone),
+body.nv-playing .nv-stream-ui .nv-veil:not(.is-gone) *,
+body.nv-playing .nv-stream-ui [role="dialog"],
+body.nv-playing .nv-stream-ui [role="dialog"] * { cursor: auto !important; }
+body.nv-playing .nv-stream-ui .nv-sheet button,
+body.nv-playing .nv-stream-ui .nv-bar.is-shown button,
+body.nv-playing .nv-stream-ui [role="dialog"] button { cursor: pointer !important; }

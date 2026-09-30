@@ -120,7 +120,7 @@ const bar = (() => {
   const mode = display ? el('span', { class: 'nv-chip nv-chip--accent' }, DISPLAY_LABEL[display] || display) : null
   const fmt = el('span', { class: 'nv-chip nv-num' })
   const btn = (label, iconName, onclick, attrs = {}) => el('button', { type: 'button', class: 'nv-icon-btn', 'aria-label': label, title: label, onclick, ...attrs }, icon(iconName))
-  const statsBtn = btn('Stats overlay', 'stats', () => toggleHud(), { 'aria-pressed': 'false', 'data-nv-optional': true })
+  const statsBtn = btn('Stats overlay', 'stats', () => toggleHud(), { 'aria-pressed': 'false', 'data-nv-optional': true, 'data-nv-keep': true })
   const kbdBtn = btn('Keyboard', 'keyboard', () => showKeyboard(), { hidden: !isTouch })
   const fsBtn = btn('Full screen', 'fullscreen', () => toggleFullscreen())
   const menuBtn = el('button', { type: 'button', class: 'nv-bar__menu', 'data-nv-menu-button': true, 'aria-haspopup': 'dialog', onclick: () => menu.open() },
@@ -176,7 +176,8 @@ fmtUpdate()
 // Reveal the bar when the pointer comes near the top edge, then let it hide again.
 addEventListener('mousemove', (e) => {
   if (document.pointerLockElement || isTouchEvent(e)) return
-  if (e.clientY < 72) bar.reveal(2200)
+  // Only the very top edge: games keep the rest of the top of the screen for their own UI.
+  if (e.clientY <= 4) bar.reveal(2200)
 }, { capture: true, passive: true })
 function isTouchEvent(e) { return e.sourceCapabilities?.firesTouchEvents }
 
@@ -189,7 +190,8 @@ const hud = (() => {
   const [hostI, host] = item('Host ms')
   const [lossI, loss] = item('Loss')
   const [resI, res] = item('Video')
-  const node = el('div', { class: 'nv-hud', 'aria-hidden': 'true' }, fpsI, rttI, hostI, lossI, resI)
+  const close = el('button', { type: 'button', class: 'nv-hud__close', 'aria-label': 'Hide stats', title: 'Hide stats (Ctrl+Alt+Shift+S)', onclick: () => { toggleHud(false); refocusStream() } }, '×')
+  const node = el('div', { class: 'nv-hud' }, fpsI, rttI, hostI, lossI, resI, close)
   return { node, fps, rtt, host, loss, lossI, res }
 })()
 root.append(hud.node)
@@ -563,6 +565,8 @@ function setTitle(t) {
 function ready() {
   if (S.phase === 'playing') return
   S.phase = 'playing'
+  // The PC draws its own pointer in the video: hide the browser's over the stream (see stream.css).
+  document.body.classList.add('nv-playing')
   S.videoAt = performance.now()
   veil.hide()
   refocusStream()
@@ -580,6 +584,7 @@ function fail(line) {
   bar.hide()
   if (document.pointerLockElement) document.exitPointerLock()
   S.phase = 'error'
+  document.body.classList.remove('nv-playing')
   veil.error(ended ? 'The stream ended' : "Couldn't start the stream", friendly(S.error))
 }
 
