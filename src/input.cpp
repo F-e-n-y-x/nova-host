@@ -317,6 +317,13 @@ namespace input {
 
     std::vector<gamepad_t> gamepads;  ///< Virtual gamepad slots tracked for the stream.
     std::uint64_t connection_generation = 0;  ///< Nova: bumped on every resume; guards the stale-pad cleanup.
+    /**
+     * Nova: this connection has played a pad of its own (claimed a kept one or got a new one).
+     * Until it has, the pads kept from the previous connection stay: the game still holds them,
+     * and the client may only bring its controller back later (on-screen controls turned on
+     * mid-stream).
+     */
+    bool gamepad_used_this_connection = false;
     std::unique_ptr<platf::client_input_t> client_context;  ///< Client context.
 
     safe::mail_raw_t::event_t<input::touch_port_t> touch_port_event;  ///< Touch port event.
@@ -428,6 +435,7 @@ namespace input {
   constexpr auto stale_gamepad_grace = 15s;
 
   void release_stale_gamepads(input_t &input);
+  void schedule_stale_release(const std::shared_ptr<input_t> &input);
 
   /**
    * @brief Rebind retained input state to a resumed stream mailbox.
@@ -438,7 +446,8 @@ namespace input {
   void rebind_input(const std::shared_ptr<input_t> &input, const safe::mail_t &mail) {
     input->touch_port_event = mail->event<input::touch_port_t>(mail::touch_port);
     input->feedback_queue = mail->queue<platf::gamepad_feedback_msg_t>(mail::gamepad_feedback);
-    const auto generation = ++input->connection_generation;
+    ++input->connection_generation;
+    input->gamepad_used_this_connection = false;
 
     bool any_retained = false;
     for (int client_index = 0; client_index < input->gamepads.size(); ++client_index) {
@@ -459,13 +468,43 @@ namespace input {
     }
 
     if (any_retained) {
-      const std::weak_ptr<input_t> weak = input;
-      task_pool.pushDelayed([weak, generation]() {
-        if (const auto retained = weak.lock(); retained && retained->connection_generation == generation) {
-          release_stale_gamepads(*retained);
-        }
-      },
-                            stale_gamepad_grace);
+      schedule_stale_release(input);
+    }
+  }
+
+  /**
+   * @brief Remove this connection's leftover pads after the grace period, once it plays a pad.
+   *
+   * Guarded by the connection generation, so a later reconnect's leftovers are never touched.
+   *
+   * @param input Stream input state.
+   */
+  void schedule_stale_release(const std::shared_ptr<input_t> &input) {
+    const std::weak_ptr<input_t> weak = input;
+    const auto generation = input->connection_generation;
+    task_pool.pushDelayed([weak, generation]() {
+      if (const auto retained = weak.lock(); retained && retained->connection_generation == generation) {
+        release_stale_gamepads(*retained);
+      }
+    },
+                          stale_gamepad_grace);
+  }
+
+  /**
+   * @brief Note that this connection plays a pad; its unclaimed leftovers go after the grace period.
+   *
+   * @param input Stream input state.
+   */
+  void mark_gamepad_used(const std::shared_ptr<input_t> &input) {
+    if (input->gamepad_used_this_connection) {
+      return;
+    }
+    input->gamepad_used_this_connection = true;
+    const auto any_stale = std::ranges::any_of(input->gamepads, [](const gamepad_t &gamepad) {
+      return gamepad.stale && gamepad.id >= 0;
+    });
+    if (any_stale) {
+      schedule_stale_release(input);
     }
   }
 
@@ -1401,6 +1440,12 @@ namespace input {
    * @param input Stream input state.
    */
   void release_stale_gamepads(input_t &input) {
+    // Nothing played yet on this connection: the leftovers are still the game's controllers, and
+    // the client may bring its controller back at any time (on-screen controls turned on later).
+    // They go once this connection plays a pad (mark_gamepad_used re-arms the grace period).
+    if (!input.gamepad_used_this_connection) {
+      return;
+    }
     for (auto &gamepad : input.gamepads) {
       if (!gamepad.stale || gamepad.id < 0) {
         continue;
@@ -1438,6 +1483,7 @@ namespace input {
       if (gamepad.stale) {
         // The same controller number as on the previous connection: reuse its pad.
         gamepad.stale = false;
+        mark_gamepad_used(input);
         return gamepad.id;
       }
       BOOST_LOG(warning) << "ControllerNumber already allocated ["sv << client_index << ']';
@@ -1447,6 +1493,7 @@ namespace input {
     // Nova: take over a pad the previous connection of this device left behind, so the
     // controller keeps its player slot and no ghost pad stays in front of it.
     if (const auto claimed = claim_stale_gamepad(*input, client_index); claimed >= 0) {
+      mark_gamepad_used(input);
       return claimed;
     }
 
@@ -1461,6 +1508,7 @@ namespace input {
     }
 
     gamepad.id = id;
+    mark_gamepad_used(input);
     return id;
   }
 
@@ -1770,6 +1818,7 @@ namespace input {
     } else if ((packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.stale) {
       // The previous connection's pad at this number: it is in use again.
       gamepad.stale = false;
+      mark_gamepad_used(input);
     } else if (!(packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.id < 0) {
       gamepad.pending_arrival.reset();
       return;

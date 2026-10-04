@@ -370,6 +370,52 @@ TEST_F(InputGamepadSessionTest, LeftoverPadsTheReconnectedClientNeverUsesAreRemo
   EXPECT_EQ(runtime().active_device_count(), devices_before + 1) << "the unused leftover pad is gone";
 }
 
+TEST_F(InputGamepadSessionTest, ReconnectedClientThatPlaysNoPadYetKeepsTheGamesPad) {
+  // The game bound the pad on the first connection. The client comes back with its on-screen
+  // controls off, so nothing is played for longer than the grace period; the pad must still be
+  // there when the controls are turned on mid-stream, not replaced by a new one the running game
+  // has to pick up as a hot-plugged controller.
+  const std::string session_id = "controls-off-on-reconnect";
+  auto first = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  const auto devices_before = runtime().active_device_count();
+  input::testing::send_controller_arrival(first, 0, LI_CTYPE_XBOX, 0);
+  input::testing::send_controller_state(first, 0, 0x1, platf::A);
+  ASSERT_EQ(input::testing::gamepad_id(first, 0), 0);
+  first.reset();
+
+  auto second = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  input::testing::release_stale_gamepads(second);  // the grace period passes with nothing played
+  EXPECT_EQ(runtime().active_device_count(), devices_before + 1) << "the game's pad stays";
+
+  // The controls are turned on mid-stream: the first press lands on the pad the game knows.
+  input::testing::send_controller_arrival(second, 0, LI_CTYPE_XBOX, 0);
+  input::testing::send_controller_state(second, 0, 0x1, 0);
+  input::testing::send_controller_state(second, 0, 0x1, platf::A);
+  EXPECT_EQ(input::testing::gamepad_id(second, 0), 0);
+  EXPECT_EQ(runtime().active_device_count(), devices_before + 1) << "no second pad";
+}
+
+TEST_F(InputGamepadSessionTest, LeftoversGoOnceTheReconnectedClientPlaysAnotherPad) {
+  const std::string session_id = "late-player-certificate";
+  auto first = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  const auto devices_before = runtime().active_device_count();
+  input::testing::send_controller_state(first, 0, 0x3, platf::A);
+  input::testing::send_controller_state(first, 1, 0x3, platf::A);
+  ASSERT_EQ(runtime().active_device_count(), devices_before + 2);
+  first.reset();
+
+  auto second = input::alloc(std::make_shared<safe::mail_raw_t>(), session_id);
+  input::testing::release_stale_gamepads(second);  // nothing played yet: both stay
+  EXPECT_EQ(runtime().active_device_count(), devices_before + 2);
+
+  // Later only controller 0 is played: the other leftover goes after the grace period.
+  input::testing::send_controller_state(second, 0, 0x1, platf::B);
+  input::testing::release_stale_gamepads(second);
+  EXPECT_EQ(input::testing::gamepad_id(second, 0), 0);
+  EXPECT_EQ(input::testing::gamepad_id(second, 1), -1);
+  EXPECT_EQ(runtime().active_device_count(), devices_before + 1);
+}
+
 TEST_F(InputGamepadSessionTest, RefreshesSharedVirtualInputAfterLicenseStateChanges) {
   ASSERT_NE(context().keyboard, nullptr);
   ASSERT_NE(context().mouse, nullptr);
