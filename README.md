@@ -24,7 +24,16 @@ Android app.
 
 ## Features
 
-### Available now
+<table>
+  <tr>
+    <td><img src="docs/images/screens/browser-picker.png" alt="Play in browser: game picker"/></td>
+    <td><img src="docs/images/screens/browser-stream-menu.png" alt="Play in browser: stream menu"/></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screens/login.png" alt="Sign-in page"/></td>
+    <td><img src="docs/images/screens/browser-stream.png" alt="Play in browser: streaming"/></td>
+  </tr>
+</table>
 
 **Displays**
 - 🪞 **Mirror** — your desktop resizes to the device's exact screen size and refresh, then
@@ -35,17 +44,31 @@ Android app.
 - 📱 **Portrait streaming** and **desktop scaling** (100–200 %) on the virtual display.
 
 **Streaming**
-- 🎮 **NVENC on older GeForce cards** — built with CUDA 12.9, so GTX 900/1000 (Maxwell/Pascal)
-  keep hardware H.264/HEVC encoding. Zero-copy NvFBC capture on NVIDIA.
+- 🎮 **Native NVENC with loss recovery** — on a lost packet only the damaged frames are repaired
+  (reference-frame invalidation), so the picture stays sharp instead of going soft for half a
+  second. Works on older GeForce cards too (GTX 900/1000, CUDA 12.9), with zero-copy NvFBC capture.
+  Falls back to FFmpeg NVENC automatically (`nvenc_backend`).
+- 📶 **Adaptive bitrate** — lowers and raises the bitrate live with the network, never above your
+  setting or the game's limit; plus a **connection test** that suggests a bitrate.
+- 🖱️ **Local cursor** — the device draws the PC's pointer itself, so it moves instantly; the video
+  carries no second pointer.
+- ⌨️ **Auto keyboard** — tapping a text field on the PC opens the device's keyboard (or Nebula's PC
+  keyboard), and closes it when you leave. Field contents are never read.
 - 🕹️ **Controllers that just work** — correct layout in browsers, Steam, SDL and Proton games; one pad
-  per device, player 1 always the one you use, and DualSense motion for gyro-capable phones.
-- 🖱️ **Cursor always visible** in the stream, with or without a physical mouse on the PC.
-- 🎤 **Remote microphone** — the device's mic appears on the PC as "Nova Mic".
-- 📋 **Clipboard sync** — text and images, both ways.
+  per device, player 1 always the one you use, the game keeps its pad across reconnects, and
+  DualSense motion for gyro-capable phones.
+- 🎤 **Remote microphone** ("Nova Mic") and 📋 **clipboard sync**, both ways.
+
+**Play in a browser**
+- 🌐 Stream any game to a web browser on your home network or Tailscale — no app needed. Sign in
+  with your Nova login, pick a game, play with keyboard, mouse or a gamepad. Off by default.
+  Built on [moonlight-web-stream](https://github.com/MrCreativ3001/moonlight-web-stream).
 
 **Library**
 - 📚 **Game library** — add games from a folder, Lutris or Steam. Artwork, logos and details are
   fetched automatically (Steam, SteamGridDB, IGDB), with custom artwork by upload, URL or search.
+- 🎚️ **Per-game settings** — frame-rate limit, FSR, sharpening, MangoHud, a bitrate limit and power
+  mode per game, set in the web UI or from Nebula.
 - 🍷 **Windows games** — run through GE-Proton (umu) with a separate prefix per game; Lutris optional.
 
 **Web UI & devices**
@@ -55,22 +78,9 @@ Android app.
 - 📈 **Session history & health checks** — what streamed, how well, and what needs attention.
 - 🔑 **Sign-in page** with secure sessions, "keep me signed in" and a lockout after wrong passwords.
 - 😴 **Sleep and Wake-on-LAN** from the device, and **host commands** you define (per-device permission).
-- ⚡ **Streaming power mode** (max GPU clocks while streaming) and **update checks** from releases.
+- ⚡ **Streaming power mode** (max GPU clocks while streaming) and **one-click updates** from releases.
 
-### In progress
-
-| Feature | Status |
-|---|---|
-| Native NVENC with loss recovery (no full-frame refresh on packet loss) | 🔨 Building |
-| Adaptive bitrate and a connection test | 🔨 Building |
-| Local cursor drawn on the device (instant pointer) | 🔨 Building |
-| Per-device display profiles | ⏸ Paused |
-
-### Planned
-
-Replay clips (save the last minute), per-game performance profiles, auto keyboard when a text
-field is focused, and a browser client.
-See [ROADMAP.md](ROADMAP.md).
+See [ROADMAP.md](ROADMAP.md) for what's next.
 
 ## Install
 
